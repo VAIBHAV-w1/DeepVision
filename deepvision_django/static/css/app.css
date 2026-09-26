@@ -1,0 +1,1007 @@
+/* ==========================================================================
+   DEEPVISION — AI-BASED INTELLIGENT SURVEILLANCE
+   Core Design System & Global Stylesheet (app.css)
+   Spark / SparkDotDesign / Webflow Editorial SaaS Aesthetics
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Theme Variables & Design Tokens
+   -------------------------------------------------------------------------- */
+:root {
+  /* LIGHT MODE (Default: Soft warm off-white / subtle lavender canvas) */
+  --bg-canvas: #fbfbfe;
+  --bg-surface: #ffffff;
+  --bg-surface-raised: #f5f7fc;
+  --bg-surface-subtle: #f0f3fa;
+  --bg-surface-hover: #e8ecf8;
+  --bg-surface-glass: #ffffff;
+
+  /* Legacy aliases for existing template compatibility */
+  --bg-body: var(--bg-canvas);
+  --bg-sidebar: var(--bg-surface);
+  --bg-header: var(--bg-surface-glass);
+
+  /* Borders & Dividers (Crystal Clear High Contrast) */
+  --border-subtle: rgba(15, 23, 42, 0.08);
+  --border-color: rgba(15, 23, 42, 0.12);
+  --border-color-subtle: rgba(15, 23, 42, 0.06);
+  --border-focus: #2563eb;
+
+  /* Typography */
+  --text-main: #0a0e1a;
+  --text-secondary: #475569;
+  --text-muted: #8492a6;
+  --text-inverse: #ffffff;
+
+  /* Electric Royal Blue Accent (Signature Spark / Webflow Style) */
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-active: #1e40af;
+  --color-primary-subtle: rgba(37, 99, 235, 0.08);
+  --color-primary-border: rgba(37, 99, 235, 0.22);
+
+  /* Restrained State Colors */
+  --color-live: #10b981;
+  --color-live-subtle: rgba(16, 185, 129, 0.10);
+  --color-live-border: rgba(16, 185, 129, 0.25);
+
+  --color-offline: #ef4444;
+  --color-offline-subtle: rgba(239, 68, 68, 0.10);
+  --color-offline-border: rgba(239, 68, 68, 0.25);
+
+  --color-warn: #f59e0b;
+  --color-warn-subtle: rgba(245, 158, 11, 0.10);
+  --color-warn-border: rgba(245, 158, 11, 0.25);
+
+  --color-critical: #dc2626;
+  --color-critical-subtle: rgba(220, 38, 38, 0.12);
+
+  /* Elevation & Shadows (Soft, diffuse, premium human-designed) */
+  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 6px 20px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.03);
+  --shadow-lg: 0 16px 36px -6px rgba(15, 23, 42, 0.08), 0 4px 12px -2px rgba(15, 23, 42, 0.03);
+  --shadow-xl: 0 28px 64px -12px rgba(15, 23, 42, 0.12);
+  --shadow-glow: 0 0 28px -4px rgba(37, 99, 235, 0.22);
+
+  /* Font Families */
+  --font-display: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+
+  /* Layout Constants */
+  --header-height: 64px;
+  --content-max-width: 100%;
+  --sidebar-width: 0px;
+
+  /* Border Radii (Generous modern curvature: 16-24px) */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 26px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --transition-fast: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-normal: 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* --------------------------------------------------------------------------
+   2. Dark Theme (Deep Charcoal / Midnight Slate with Electric Blue Accent)
+   -------------------------------------------------------------------------- */
+[data-theme="dark"] {
+  --bg-canvas: #0b0f17;
+  --bg-surface: #121824;
+  --bg-surface-raised: #182232;
+  --bg-surface-subtle: #1e2a3c;
+  --bg-surface-hover: #243247;
+  --bg-surface-glass: #121824;
+
+  --bg-body: var(--bg-canvas);
+  --bg-sidebar: var(--bg-surface);
+  --bg-header: var(--bg-surface-glass);
+
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-color: rgba(255, 255, 255, 0.12);
+  --border-color-subtle: rgba(255, 255, 255, 0.06);
+  --border-focus: #3b82f6;
+
+  --text-main: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-inverse: #0b0f17;
+
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-primary-active: #1d4ed8;
+  --color-primary-subtle: rgba(59, 130, 246, 0.14);
+  --color-primary-border: rgba(59, 130, 246, 0.30);
+
+  --color-live: #10b981;
+  --color-live-subtle: rgba(16, 185, 129, 0.14);
+  --color-live-border: rgba(16, 185, 129, 0.30);
+
+  --color-offline: #f43f5e;
+  --color-offline-subtle: rgba(244, 63, 94, 0.14);
+  --color-offline-border: rgba(244, 63, 94, 0.30);
+
+  --color-warn: #f59e0b;
+  --color-warn-subtle: rgba(245, 158, 11, 0.14);
+  --color-warn-border: rgba(245, 158, 11, 0.30);
+
+  --color-critical: #ef4444;
+  --color-critical-subtle: rgba(239, 68, 68, 0.18);
+
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 6px 20px -2px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 18px 42px -6px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 28px 60px -10px rgba(0, 0, 0, 0.75);
+  --shadow-glow: 0 0 28px -4px rgba(59, 130, 246, 0.32);
+}
+
+/* --------------------------------------------------------------------------
+   3. Base HTML & Global Reset
+   -------------------------------------------------------------------------- */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-canvas);
+  color: var(--text-main);
+  line-height: 1.6;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  transition: background-color var(--transition-normal), color var(--transition-normal);
+  overflow-x: hidden;
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+a:hover {
+  color: var(--color-primary-hover);
+}
+
+img, video {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* --------------------------------------------------------------------------
+   4. Typography & Expressive Editorial Headings
+   -------------------------------------------------------------------------- */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  color: var(--text-main);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.hero-editorial-wrap {
+  margin-bottom: 2.25rem;
+}
+
+.editorial-hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.4rem, 4.8vw, 3.85rem);
+  font-weight: 800;
+  letter-spacing: -0.038em;
+  line-height: 1.05;
+  color: var(--text-main);
+  margin-bottom: 0.85rem;
+}
+
+.editorial-hero-subtitle {
+  font-size: clamp(1.05rem, 1.8vw, 1.25rem);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 640px;
+  font-weight: 400;
+  margin-bottom: 2rem;
+}
+
+.section-hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.75rem, 3vw, 2.4rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--text-main);
+  margin-bottom: 0.4rem;
+}
+
+.section-hero-subtitle {
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 600px;
+  margin-bottom: 1.75rem;
+}
+
+.editorial-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.35rem 0.85rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-primary-subtle);
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary-border);
+  margin-bottom: 1.25rem;
+}
+
+/* --------------------------------------------------------------------------
+   5. Global App Shell & Top Navigation Layout (NO DENSE SIDEBAR)
+   -------------------------------------------------------------------------- */
+.app-layout,
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+  position: relative;
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.app-content,
+.app-content-container {
+  flex: 1;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 1.5rem clamp(24px, 2.5vw, 36px) 4rem clamp(24px, 2.5vw, 36px);
+  box-sizing: border-box;
+}
+
+@media (max-width: 991px) {
+  .app-content,
+  .app-content-container {
+    padding: 1.25rem 20px 3rem 20px;
+  }
+}
+
+@media (max-width: 576px) {
+  .app-content,
+  .app-content-container {
+    padding: 1rem 16px 2.5rem 16px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   6. Modern Spark-Style Top Navigation Bar (.app-header)
+   -------------------------------------------------------------------------- */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  width: 100%;
+  height: var(--header-height);
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-color);
+  transition: background-color var(--transition-normal), border-color var(--transition-normal);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.app-header-inner {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0 clamp(24px, 2.5vw, 36px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  box-sizing: border-box;
+}
+
+@media (max-width: 991px) {
+  .app-header-inner {
+    padding: 0 20px;
+  }
+}
+
+@media (max-width: 576px) {
+  .app-header-inner {
+    padding: 0 12px;
+    gap: 0.5rem;
+  }
+  .brand-tagline {
+    display: none;
+  }
+  .user-profile-badge {
+    display: none;
+  }
+  .nav-controls-right {
+    gap: 0.35rem;
+  }
+}
+
+/* Brand Logo */
+.brand-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.brand-emblem {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, var(--color-primary) 0%, #1d4ed8 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
+}
+
+.brand-title-wrap {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.brand-title {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+}
+
+.brand-tagline {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--color-primary);
+  text-transform: uppercase;
+}
+
+/* Top Navigation Links (Desktop) */
+.nav-links-center {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  list-style: none;
+}
+
+@media (max-width: 991px) {
+  .nav-links-center {
+    display: none;
+  }
+}
+
+.nav-link-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.95rem;
+  border-radius: var(--radius-full);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+
+.nav-link-pill:hover {
+  color: var(--text-main);
+  background-color: var(--bg-surface-hover);
+}
+
+.nav-link-pill.active {
+  color: var(--text-main);
+  background-color: var(--bg-surface-subtle);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="dark"] .nav-link-pill.active {
+  background-color: var(--bg-surface-raised);
+  color: #ffffff;
+}
+
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-offline);
+  color: #ffffff;
+  font-size: 0.70rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Top Navigation Controls (Right) */
+.nav-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* Mobile Hamburger Toggle */
+.mobile-nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+@media (max-width: 991px) {
+  .mobile-nav-toggle {
+    display: flex;
+  }
+}
+
+/* Mobile Slide-Over Navigation Drawer */
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(11, 15, 23, 0.65);
+  z-index: 1040;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition-normal), visibility var(--transition-normal);
+}
+
+.sidebar-backdrop.active {
+  opacity: 1;
+  visibility: visible;
+}
+
+.app-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(320px, 85vw);
+  background-color: var(--bg-surface);
+  border-left: 1px solid var(--border-color);
+  z-index: 1050;
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform var(--transition-normal), visibility var(--transition-normal);
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+  box-shadow: var(--shadow-xl);
+}
+
+.app-sidebar.open {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+.mobile-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mobile-nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  list-style: none;
+}
+
+.mobile-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: all var(--transition-fast);
+}
+
+.mobile-nav-link:hover, .mobile-nav-link.active {
+  color: var(--text-main);
+  background-color: var(--bg-surface-subtle);
+}
+
+/* --------------------------------------------------------------------------
+   7. Buttons & Control Elements
+   -------------------------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.25rem;
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.25;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.btn-primary {
+  background-color: var(--color-primary);
+  color: #ffffff !important;
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.28);
+}
+
+.btn-primary:hover {
+  background-color: var(--color-primary-hover);
+  color: #ffffff !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+}
+
+.btn-secondary {
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  border-color: var(--border-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-secondary:hover {
+  background-color: var(--bg-surface-hover);
+  color: var(--text-main);
+  border-color: var(--border-subtle);
+}
+
+.btn-ghost {
+  background-color: transparent;
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover {
+  background-color: var(--bg-surface-hover);
+  color: var(--text-main);
+}
+
+.btn-danger {
+  background-color: var(--color-offline);
+  color: #ffffff !important;
+  border-color: var(--color-offline);
+}
+
+.btn-danger:hover {
+  background-color: #dc2626;
+  color: #ffffff !important;
+}
+
+.btn-sm {
+  padding: 0.42rem 0.85rem;
+  font-size: 0.80rem;
+  border-radius: var(--radius-xs);
+}
+
+.btn-lg {
+  padding: 0.85rem 1.6rem;
+  font-size: 0.98rem;
+  border-radius: var(--radius-md);
+}
+
+.btn-icon {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+}
+
+/* --------------------------------------------------------------------------
+   8. Status Indicators & Badges
+   -------------------------------------------------------------------------- */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.22rem 0.65rem;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background-color: currentColor;
+}
+
+.status-live {
+  background-color: var(--color-live-subtle);
+  color: var(--color-live);
+  border-color: var(--color-live-border);
+}
+
+.status-offline {
+  background-color: var(--color-offline-subtle);
+  color: var(--color-offline);
+  border-color: var(--color-offline-border);
+}
+
+.status-warn {
+  background-color: var(--color-warn-subtle);
+  color: var(--color-warn);
+  border-color: var(--color-warn-border);
+}
+
+/* --------------------------------------------------------------------------
+   9. Forms & Inputs
+   -------------------------------------------------------------------------- */
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+.form-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 0.45rem;
+}
+
+.form-control, .form-select {
+  width: 100%;
+  padding: 0.65rem 0.95rem;
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+  color: var(--text-main);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.form-control:focus, .form-select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--color-primary-subtle);
+}
+
+/* --------------------------------------------------------------------------
+   10. Dropdowns (Theme & Notifications)
+   -------------------------------------------------------------------------- */
+.theme-menu-wrap, .notif-menu-wrap {
+  position: relative;
+}
+
+.theme-dropdown, .notif-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+  padding: 0.5rem;
+  min-width: 180px;
+  z-index: 1100;
+  display: none;
+  animation: dropdownFadeIn 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.notif-dropdown {
+  width: 360px;
+  max-width: calc(100vw - 2rem);
+  padding: 0;
+}
+
+.theme-dropdown.show, .notif-dropdown.show {
+  display: block;
+}
+
+@keyframes dropdownFadeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  text-align: left;
+}
+
+.theme-option:hover {
+  background-color: var(--bg-surface-hover);
+}
+
+.notif-dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.notif-dropdown-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  text-decoration: none;
+  border-bottom: 1px solid var(--border-color-subtle);
+  transition: background-color var(--transition-fast);
+}
+
+.notif-dropdown-item:hover {
+  background-color: var(--bg-surface-hover);
+}
+
+/* --------------------------------------------------------------------------
+   11. Tables
+   -------------------------------------------------------------------------- */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background-color: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.cctv-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.88rem;
+}
+
+.cctv-table th {
+  padding: 0.9rem 1.25rem;
+  background-color: var(--bg-surface-subtle);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.cctv-table td {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-main);
+  vertical-align: middle;
+}
+
+.cctv-table tr:last-child td {
+  border-bottom: none;
+}
+
+.cctv-table tr:hover td {
+  background-color: var(--bg-surface-hover);
+}
+
+/* --------------------------------------------------------------------------
+   12. Empty States
+   -------------------------------------------------------------------------- */
+.empty-state {
+  text-align: center;
+  padding: 4.5rem 2rem;
+  background-color: var(--bg-surface);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-lg);
+  margin: 1.5rem 0;
+}
+
+.empty-state-icon {
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.empty-state-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 0.5rem;
+}
+
+.empty-state-text {
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+  max-width: 480px;
+  margin: 0 auto 1.5rem auto;
+}
+
+/* --------------------------------------------------------------------------
+   13. Toast Container & Alerts
+   -------------------------------------------------------------------------- */
+#deepvision-toast-container {
+  position: fixed;
+  top: 1.5rem;
+  right: 1.5rem;
+  z-index: 999999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 400px;
+  width: calc(100vw - 3rem);
+  pointer-events: none;
+}
+
+.deepvision-toast {
+  pointer-events: auto;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  animation: toastSlideIn 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+@keyframes toastSlideIn {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* --------------------------------------------------------------------------
+   Application Footer (.app-footer)
+   -------------------------------------------------------------------------- */
+.app-footer {
+  width: 100%;
+  background-color: var(--bg-surface);
+  border-top: 1px solid var(--border-color);
+  padding: 2rem 0;
+  margin-top: auto;
+  transition: background-color var(--transition-normal), border-color var(--transition-normal);
+  z-index: 10;
+}
+
+.app-footer-inner {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0 clamp(24px, 2.5vw, 36px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.app-footer-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.2rem;
+}
+
+.app-footer-brand {
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text-main);
+  line-height: 1.2;
+}
+
+.app-footer-tagline {
+  font-size: 0.80rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.app-footer-copyright {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+.app-footer-links {
+  margin-top: 0.75rem;
+}
+
+.app-footer-link {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.app-footer-link:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+@media (max-width: 991px) {
+  .app-footer-inner {
+    padding: 0 20px;
+  }
+}
+
+@media (max-width: 576px) {
+  .app-footer-inner {
+    padding: 0 16px;
+  }
+}
+
+/* Utilities */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}

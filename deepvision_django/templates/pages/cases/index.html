@@ -1,0 +1,160 @@
+{% extends 'layouts/base.html' %}
+{% load static %}
+
+{% block title %}Incident Cases — DeepVision Forensic Investigation{% endblock %}
+
+{% block content %}
+<!-- Editorial Header -->
+<div class="hero-editorial-wrap">
+  <div class="editorial-badge-pill">
+    <span>Case Registry</span>
+  </div>
+  <h1 class="editorial-hero-title" style="font-size: clamp(2.2rem, 4vw, 3.25rem); margin-bottom: 0.5rem;">
+    Forensic incident cases
+  </h1>
+  <p class="editorial-hero-subtitle" style="margin-bottom: 2rem;">
+    Track, investigate, and resolve security incident workflows, evidence chains, and SLA response timelines.
+  </p>
+</div>
+
+<!-- Controls & Filters Bar -->
+<div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem;">
+  <form method="GET" action="{% url 'cases' %}" style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin: 0;">
+    <!-- Status Filter -->
+    <select name="status" class="form-select" style="width: auto; height: 38px; font-size: 0.84rem; padding: 0.2rem 1.8rem 0.2rem 0.8rem;" onchange="this.form.submit();">
+      <option value="">All Statuses</option>
+      <option value="OPEN" {% if status_filter == 'OPEN' %}selected{% endif %}>Open</option>
+      <option value="INVESTIGATING" {% if status_filter == 'INVESTIGATING' %}selected{% endif %}>Investigating</option>
+      <option value="RESOLVED" {% if status_filter == 'RESOLVED' %}selected{% endif %}>Resolved</option>
+      <option value="CLOSED" {% if status_filter == 'CLOSED' %}selected{% endif %}>Closed</option>
+    </select>
+
+    <!-- Priority Filter -->
+    <select name="priority" class="form-select" style="width: auto; height: 38px; font-size: 0.84rem; padding: 0.2rem 1.8rem 0.2rem 0.8rem;" onchange="this.form.submit();">
+      <option value="">All Priorities</option>
+      <option value="CRITICAL" {% if priority_filter == 'CRITICAL' %}selected{% endif %}>Critical</option>
+      <option value="HIGH" {% if priority_filter == 'HIGH' %}selected{% endif %}>High</option>
+      <option value="MEDIUM" {% if priority_filter == 'MEDIUM' %}selected{% endif %}>Medium</option>
+      <option value="LOW" {% if priority_filter == 'LOW' %}selected{% endif %}>Low</option>
+    </select>
+
+    <!-- Search Input -->
+    <div style="position: relative; width: 240px;">
+      <input type="text" name="search" value="{{ search_query|default:'' }}" class="form-control" placeholder="Search case number or title..." style="height: 38px; font-size: 0.84rem; padding-left: 2.2rem;"/>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%); color: var(--text-muted);">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+    </div>
+
+    <button type="submit" class="btn btn-secondary btn-sm" style="height: 38px;">Filter</button>
+    {% if status_filter or priority_filter or search_query %}
+      <a href="{% url 'cases' %}" class="btn btn-ghost btn-sm" style="height: 38px;">Reset</a>
+    {% endif %}
+  </form>
+
+  <div style="font-size: 0.84rem; color: var(--text-secondary);">
+    Total Registered Cases: <strong style="color: var(--text-main);">{{ total_count }}</strong>
+  </div>
+</div>
+
+<!-- Cases Table -->
+{% if cases and cases|length > 0 %}
+  <div class="table-responsive" style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden;">
+    <table class="cctv-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+      <thead>
+        <tr style="border-bottom: 1px solid var(--border-color); background: var(--bg-surface-raised);">
+          <th style="padding: 0.75rem 1rem; text-align: left;">Case Number</th>
+          <th style="padding: 0.75rem 1rem; text-align: left;">Title &amp; Summary</th>
+          <th style="padding: 0.75rem 1rem; text-align: left;">Priority</th>
+          <th style="padding: 0.75rem 1rem; text-align: left;">Status</th>
+          <th style="padding: 0.75rem 1rem; text-align: left;">Investigator</th>
+          <th style="padding: 0.75rem 1rem; text-align: left;">Created Time</th>
+          <th style="padding: 0.75rem 1rem; text-align: right;">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in cases %}
+          <tr style="border-bottom: 1px solid var(--border-color);">
+            <td style="padding: 0.75rem 1rem; font-family: var(--font-mono); font-weight: 700;">
+              <a href="{% url 'case_detail' c.id %}" style="color: var(--color-primary, #38bdf8); text-decoration: none;">
+                {{ c.case_number }}
+              </a>
+            </td>
+            <td style="padding: 0.75rem 1rem; font-weight: 600;">
+              <a href="{% url 'case_detail' c.id %}" style="color: var(--text-main); text-decoration: none;">
+                {{ c.title }}
+              </a>
+              {% if c.description %}
+                <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-top: 2px;">
+                  {{ c.description|truncatechars:60 }}
+                </div>
+              {% endif %}
+            </td>
+            <td style="padding: 0.75rem 1rem;">
+              {% if c.priority == 'CRITICAL' %}
+                <span class="status-pill status-offline">CRITICAL</span>
+              {% elif c.priority == 'HIGH' %}
+                <span class="status-pill status-warn">HIGH</span>
+              {% elif c.priority == 'MEDIUM' %}
+                <span class="status-pill status-live">MEDIUM</span>
+              {% else %}
+                <span class="status-pill" style="background: var(--bg-surface-raised); color: var(--text-secondary);">LOW</span>
+              {% endif %}
+            </td>
+            <td style="padding: 0.75rem 1rem;">
+              <span class="status-pill {% if c.status == 'OPEN' %}status-offline{% elif c.status == 'INVESTIGATING' %}status-warn{% else %}status-live{% endif %}">
+                {{ c.status }}
+              </span>
+            </td>
+            <td style="padding: 0.75rem 1rem; color: var(--text-secondary);">
+              {{ c.assigned_to|default:'Unassigned' }}
+            </td>
+            <td style="padding: 0.75rem 1rem; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">
+              {{ c.created_at|date:'Y-m-d H:i' }}
+            </td>
+            <td style="padding: 0.75rem 1rem; text-align: right;">
+              <a href="{% url 'case_detail' c.id %}" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;">
+                Open Workspace
+              </a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination Controls -->
+  {% if page_obj.has_other_pages %}
+    <div style="display: flex; justify-content: center; align-items: center; gap: 0.5rem; margin-top: 2.5rem;">
+      {% if page_obj.has_previous %}
+        <a href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if priority_filter %}&priority={{ priority_filter }}{% endif %}{% if search_query %}&search={{ search_query }}{% endif %}" class="btn btn-secondary btn-sm">
+          &laquo; Previous
+        </a>
+      {% endif %}
+      <span style="font-size: 0.85rem; color: var(--text-secondary); padding: 0 0.5rem;">
+        Page <strong>{{ page_obj.number }}</strong> of {{ page_obj.paginator.num_pages }}
+      </span>
+      {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if priority_filter %}&priority={{ priority_filter }}{% endif %}{% if search_query %}&search={{ search_query }}{% endif %}" class="btn btn-secondary btn-sm">
+          Next &raquo;
+        </a>
+      {% endif %}
+    </div>
+  {% endif %}
+{% else %}
+  <div class="empty-state-card" style="text-align: center; padding: 4rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg);">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--text-muted); margin-bottom: 1rem;">
+      <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+      <path d="M 16 21 V 5 a 2 2 0 0 0 -2 -2 h -4 a 2 2 0 0 0 -2 2 v 16"></path>
+    </svg>
+    <h3 style="font-size: 1.15rem; color: var(--text-main); margin-bottom: 0.5rem;">No Incident Cases Found</h3>
+    <p style="color: var(--text-muted); font-size: 0.88rem; max-width: 400px; margin: 0 auto 1.5rem;">
+      No incident cases match your criteria. Cases can be opened from critical security alerts to track investigations.
+    </p>
+    {% if status_filter or priority_filter or search_query %}
+      <a href="{% url 'cases' %}" class="btn btn-secondary btn-sm">Reset Filters</a>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

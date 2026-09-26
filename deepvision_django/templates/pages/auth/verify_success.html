@@ -1,0 +1,24 @@
+{% extends 'layouts/auth.html' %}
+
+{% block title %}Email Verified — DeepVision Intelligent Surveillance{% endblock %}
+
+{% block auth_content %}
+<div class="auth-header" style="text-align: center;">
+  <div style="margin-bottom: 1.25rem;">
+    <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(16, 185, 129, 0.15); color: #10b981; display: inline-flex; align-items: center; justify-content: center;">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+      </svg>
+    </div>
+  </div>
+  <h2 class="auth-title">Verification Successful!</h2>
+  <p class="auth-subtitle">Your email address has been verified. You can now access your DeepVision account.</p>
+</div>
+
+<div style="margin-top: 1.5rem;">
+  <a href="{% url 'login' %}" class="btn btn-primary btn-lg" style="width: 100%; text-decoration: none; display: flex; align-items: center; justify-content: center;">
+    Continue to Sign In &rarr;
+  </a>
+</div>
+{% endblock %}

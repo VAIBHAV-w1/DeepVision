@@ -1,0 +1,134 @@
+{% extends 'layouts/base.html' %}
+{% load static %}
+
+{% block title %}Playback — {{ recording.filename }} | DeepVision{% endblock %}
+
+{% block content %}
+<div class="live-view-shell">
+  <!-- Header -->
+  <div class="live-view-header" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+    <div class="live-view-info" style="display: flex; align-items: center; gap: 1rem;">
+      <a href="{% url 'recordings' %}" class="btn btn-secondary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Back to Recordings</span>
+      </a>
+
+      <div>
+        <div style="font-weight: 700; font-size: 1.05rem; color: var(--text-main);">
+          {{ recording.filename }}
+        </div>
+        <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
+          <span>Camera: {% if recording.camera %}<a href="{% url 'camera_preview' recording.camera.id %}" style="color: var(--color-primary, #38bdf8); font-weight: 600; text-decoration: underline;">{{ recording.camera.name }}</a>{% else %}<strong>Channel 01</strong>{% endif %}</span> &bull;
+          <span>Duration: <strong>{{ recording.duration_seconds|floatformat:0 }}s</strong></span> &bull;
+          <span>Size: <strong>{{ formatted_size }}</strong></span> &bull;
+          <span>Recorded: <strong>{{ recording.started_at|date:'Y-m-d H:i:s' }}</strong></span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      {% if recording.camera %}
+        <a href="{% url 'camera_preview' recording.camera.id %}" class="btn btn-secondary btn-sm">
+          <span>Camera View</span>
+        </a>
+      {% endif %}
+      {% if file_exists %}
+        <a href="{% url 'recording_download' recording.id %}" class="btn btn-primary btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M 21 15 v 4 a 2 2 0 0 1 -2 2 H 5 a 2 2 0 0 1 -2 -2 v -4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>Download MP4</span>
+        </a>
+      {% else %}
+        <span class="status-pill status-offline">File Archived from Disk</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Video Playback Screen -->
+  <div class="live-monitor-card" style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 2rem;">
+    <div class="live-monitor-viewport" style="max-height: 70vh; background: #000; position: relative;">
+      {% if file_exists %}
+        <video controls autoplay playsinline style="width: 100%; height: 100%; min-height: 400px; max-height: 65vh; object-fit: contain; background: #000000;">
+          <source src="{% url 'recording_media' recording.id %}" type="video/mp4"/>
+          Your browser does not support HTML5 video playback.
+        </video>
+      {% else %}
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 380px; color: var(--text-muted); text-align: center; padding: 2rem;">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--color-warn); margin-bottom: 1rem;">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <h4 style="color: var(--text-main); font-size: 1.1rem; margin-bottom: 0.5rem;">Recording File Unavailable on Local Storage</h4>
+          <p style="font-size: 0.85rem; max-width: 440px;">
+            The physical video file for this archive (<code>{{ recording.file_path }}</code>) is no longer available on disk or was cleaned up by the storage retention cycle.
+          </p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Synchronized Incident Timeline (if any) -->
+  {% if timeline_events and timeline_events|length > 0 %}
+    <div class="section-header" style="margin-bottom: 1rem;">
+      <h3 class="section-title" style="font-size: 1.05rem; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="6" x2="12" y2="12"></line>
+          <line x1="12" y1="12" x2="16" y2="14"></line>
+        </svg>
+        Synchronized Security Events During Clip ({{ timeline_events|length }})
+      </h3>
+    </div>
+
+    <div class="table-responsive" style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden;">
+      <table class="cctv-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+        <thead>
+          <tr style="border-bottom: 1px solid var(--border-color); background: var(--bg-surface-raised);">
+            <th style="padding: 0.75rem 1rem; text-align: left;">Event Title</th>
+            <th style="padding: 0.75rem 1rem; text-align: left;">Type</th>
+            <th style="padding: 0.75rem 1rem; text-align: left;">Severity</th>
+            <th style="padding: 0.75rem 1rem; text-align: left;">Detected Time</th>
+            <th style="padding: 0.75rem 1rem; text-align: right;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for evt in timeline_events %}
+            <tr style="border-bottom: 1px solid var(--border-color);">
+              <td style="padding: 0.75rem 1rem; font-weight: 600;">
+                <a href="{% url 'alert_detail' evt.id %}" style="color: var(--text-main); text-decoration: none;">
+                  {{ evt.title|default:evt.event_type }}
+                </a>
+              </td>
+              <td style="padding: 0.75rem 1rem; color: var(--text-secondary);">{{ evt.event_type }}</td>
+              <td style="padding: 0.75rem 1rem;">
+                {% if evt.severity == 'high' or evt.severity == 'critical' %}
+                  <span class="status-pill status-offline">{{ evt.severity|upper }}</span>
+                {% elif evt.severity == 'medium' %}
+                  <span class="status-pill status-warn">MEDIUM</span>
+                {% else %}
+                  <span class="status-pill" style="background: var(--bg-surface-raised); color: var(--text-secondary);">INFO</span>
+                {% endif %}
+              </td>
+              <td style="padding: 0.75rem 1rem; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">
+                {{ evt.detected_at|date:'H:i:s' }}
+              </td>
+              <td style="padding: 0.75rem 1rem; text-align: right;">
+                <a href="{% url 'alert_detail' evt.id %}" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">
+                  View Alert
+                </a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

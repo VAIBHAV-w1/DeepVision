@@ -1,0 +1,22 @@
+/* Dashboard Page Styles */
+.dashboard-camera-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 1.25rem;
+}
+
+@media (max-width: 576px) {
+  .dashboard-camera-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.metric-card {
+  border-left: 4px solid var(--dv-primary);
+}
+
+.quick-start-banner {
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.08) 0%, rgba(15, 23, 42, 0.02) 100%);
+  border: 1px solid rgba(2, 132, 199, 0.25);
+  border-radius: 8px;
+}

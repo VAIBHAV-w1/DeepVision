@@ -1,0 +1,91 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %}Help & Support — DeepVision Intelligent Surveillance{% endblock %}
+
+{% block content %}
+<div style="max-width: 960px; margin: 0 auto; padding-bottom: 3rem;">
+  <!-- Editorial Header -->
+  <div class="hero-editorial-wrap" style="text-align: center; margin-bottom: 2.5rem;">
+    <div class="editorial-badge-pill" style="margin-bottom: 0.75rem;">
+      <span>Documentation & Guides</span>
+    </div>
+    <h1 class="editorial-hero-title" style="font-size: clamp(2.2rem, 4.5vw, 3.5rem); margin-bottom: 0.6rem;">
+      How can we help?
+    </h1>
+    <p class="editorial-hero-subtitle" style="margin: 0 auto; max-width: 540px; color: var(--text-secondary);">
+      Simple setup guides, camera connection instructions, and troubleshooting documentation for DeepVision operators.
+    </p>
+    <div style="display: flex; justify-content: center; gap: 12px; margin-top: 1.25rem;">
+      <button type="button" class="btn btn-primary btn-sm" onclick="openDvGuide('signup');">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+        Getting Started Guide
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="openDvGuide('device');">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Platform Tour
+      </button>
+    </div>
+  </div>
+
+  <!-- Editorial Topic Cards Grid -->
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.25rem; margin-bottom: 3rem;">
+    <!-- 1. Adding a camera -->
+    <div class="card" style="padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="width: 40px; height: 40px; border-radius: var(--radius-sm); background: var(--color-primary-subtle, rgba(37, 99, 235, 0.1)); color: var(--color-primary); display: flex; align-items: center; justify-content: center; margin-bottom: 1rem;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </div>
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.35rem;">Adding a Camera</h3>
+      <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.45; margin: 0;">
+        Connect phone cameras (IP Webcam), USB webcams, network IP streams, or RTSP feeds in 4 easy steps.
+      </p>
+    </div>
+
+    <!-- 2. Connecting a phone -->
+    <div class="card" style="padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="width: 40px; height: 40px; border-radius: var(--radius-sm); background: var(--color-primary-subtle, rgba(37, 99, 235, 0.1)); color: var(--color-primary); display: flex; align-items: center; justify-content: center; margin-bottom: 1rem;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+          <line x1="12" y1="18" x2="12.01" y2="18"></line>
+        </svg>
+      </div>
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.35rem;">Connecting a Phone</h3>
+      <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.45; margin: 0;">
+        Use the free Android IP Webcam app to stream high-definition video over Wi-Fi without cables.
+      </p>
+    </div>
+
+    <!-- 3. Using detection mode -->
+    <div class="card" style="padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="width: 40px; height: 40px; border-radius: var(--radius-sm); background: var(--color-primary-subtle, rgba(37, 99, 235, 0.1)); color: var(--color-primary); display: flex; align-items: center; justify-content: center; margin-bottom: 1rem;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M 3 7 V 5 a 2 2 0 0 1 2 -2 h 2"></path>
+          <path d="M 17 3 h 2 a 2 2 0 0 1 2 2 v 2"></path>
+          <path d="M 21 17 v 2 a 2 2 0 0 1 -2 2 h -2"></path>
+          <path d="M 7 21 H 5 a 2 2 0 0 1 -2 -2 v -2"></path>
+        </svg>
+      </div>
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.35rem;">Smart Detection &amp; Tracking</h3>
+      <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.45; margin: 0;">
+        DeepVision automatically runs YOLO11n object detection paired with ByteTrack trajectory tracking.
+      </p>
+    </div>
+  </div>
+
+  <!-- DeepVision Assistant Card -->
+  <div class="card" style="padding: 2rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); text-align: center;">
+    <h3 style="font-size: 1.2rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.5rem;">
+      Need Instant Answers?
+    </h3>
+    <p style="font-size: 0.9rem; color: var(--text-secondary); max-width: 480px; margin: 0 auto 1.25rem auto;">
+      Use the DeepVision Assistant launcher in the bottom-right corner to ask questions about camera setup, tracking, alerts, and system usage.
+    </p>
+    <button type="button" class="btn btn-primary" onclick="document.getElementById('btn-chatbot-launcher').click();">
+      Open DeepVision Assistant
+    </button>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,71 @@
+{% load static %}<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta http-equiv="X-UA-Compatible" content="ie=edge"/>
+  <title>{% block title %}Authentication — DeepVision Intelligent Surveillance{% endblock %}</title>
+  
+  <link rel="icon" type="image/svg+xml" href="{% static 'images/favicon.svg' %}">
+  
+  <!-- Google Fonts: Plus Jakarta Sans, Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script>
+    (function() {
+      try {
+        var urlParams = new URLSearchParams(window.location.search);
+        var urlTheme = urlParams.get('theme');
+        var pref = (urlTheme && (urlTheme === 'light' || urlTheme === 'dark' || urlTheme === 'system')) ? urlTheme : (localStorage.getItem('deepvision_theme') || 'dark');
+        var resolved = pref;
+        if (pref === 'system') {
+          resolved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', resolved);
+        document.documentElement.setAttribute('data-theme-pref', pref);
+      } catch (e) {}
+    })();
+  </script>
+
+  <link rel="stylesheet" href="{% static 'css/app.css' %}"/>
+  <link rel="stylesheet" href="{% static 'css/components.css' %}"/>
+  {% block extra_css %}{% endblock %}
+</head>
+<body>
+  <!-- Clean Centered Auth Page (Spark / Webflow Style) -->
+  <div class="auth-page-wrap">
+    <!-- Brand Emblem Header -->
+    <a href="{% url 'dashboard' %}" class="brand-link" style="margin-bottom: 2rem;">
+      <div class="brand-emblem" style="width: 44px; height: 44px; border-radius: 12px;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M 23 7 l -7 5 7 5 V 7 z"></path>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+        </svg>
+      </div>
+      <div class="brand-title-wrap">
+        <span class="brand-title" style="font-size: 1.35rem;">DEEPVISION</span>
+        <span class="brand-tagline">INTELLIGENT SURVEILLANCE</span>
+      </div>
+    </a>
+
+    <!-- Centered Card Container -->
+    <div class="auth-card-clean">
+      {% include 'components/flash_messages.html' %}
+      {% block auth_content %}
+        {% block content %}{% endblock %}
+      {% endblock %}
+    </div>
+
+    <!-- Minimal Clean Footer -->
+    <div style="margin-top: 2rem; font-size: 0.80rem; color: var(--text-muted); text-align: center;">
+      DeepVision &bull; Real-time Camera Ingestion & Security Monitoring
+    </div>
+  </div>
+
+  <script src="{% static 'js/theme.js' %}"></script>
+  <script src="{% static 'js/app.js' %}"></script>
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

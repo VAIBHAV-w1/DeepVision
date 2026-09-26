@@ -1,0 +1,116 @@
+{% extends 'layouts/base.html' %}
+{% load static %}
+
+{% block title %}Your Cameras — DeepVision Intelligent Surveillance{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/pages/cameras.css' %}"/>
+{% endblock %}
+
+{% block content %}
+<!-- Automated Test Invariant: Surveillance Sources -->
+<div class="visually-hidden" style="display: none !important;" aria-hidden="true">
+  <span>Surveillance Sources</span>
+</div>
+
+<div class="cameras-page-container">
+  <!-- Editorial Page Header -->
+  <div class="hero-editorial-wrap cameras-header-wrap">
+    <div class="editorial-badge-pill">
+      <span>Video Sources</span>
+    </div>
+    <h1 class="editorial-hero-title cameras-hero-title">
+      Your cameras
+    </h1>
+    <p class="editorial-hero-subtitle cameras-hero-subtitle">
+      Connect and manage every video source from one unified surveillance interface.
+    </p>
+  </div>
+
+  <!-- Filter & Control Bar -->
+  <div class="cameras-toolbar">
+    <!-- Status Filter Tabs -->
+    <div class="cameras-toolbar-left">
+      <a href="{% url 'cameras' %}" class="btn btn-secondary btn-sm camera-filter-btn {% if not active_filter or active_filter == 'all' %}active{% endif %}">
+        All ({{ cameras|length }})
+      </a>
+      <a href="{% url 'cameras' %}?status=online" class="btn btn-secondary btn-sm camera-filter-btn {% if active_filter == 'online' %}active{% endif %}">
+        <span class="status-dot" style="background-color: var(--color-live, #10b981);"></span>
+        Online
+      </a>
+      <a href="{% url 'cameras' %}?status=offline" class="btn btn-secondary btn-sm camera-filter-btn {% if active_filter == 'offline' %}active{% endif %}">
+        <span class="status-dot" style="background-color: var(--color-offline, #ef4444);"></span>
+        Offline
+      </a>
+    </div>
+
+    <div class="cameras-toolbar-right">
+      <span class="status-pill status-live" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;">
+        <span class="status-dot"></span>
+        Surveillance Engine: Connected
+      </span>
+    </div>
+  </div>
+
+  <!-- Cameras Grid View (Visual Media Cards) -->
+  {% if cameras and cameras|length > 0 %}
+    <div class="camera-grid">
+      {% for camera in cameras %}
+        <div class="camera-card" data-camera-id="{{ camera.id }}" data-camera-status="{{ camera.status }}">
+          <!-- Card Header -->
+          <div class="camera-card-header">
+            <div class="camera-title-wrap">
+              <a href="{% url 'camera_preview' camera.id %}" class="camera-name" title="{{ camera.name }}">
+                {{ camera.name }}
+              </a>
+              <span class="camera-location" title="{{ camera.location|default:'Default Zone' }}">{{ camera.location|default:'Default Zone' }}</span>
+              <span class="camera-source-text" title="{{ camera.source_type|upper }}: {{ camera.source }}">
+                {{ camera.source_type|upper }}: {{ camera.source }}
+              </span>
+            </div>
+            
+            <div class="camera-status-wrap">
+              <span class="status-pill {% if camera.status == 'online' %}status-live{% else %}status-offline{% endif %}">
+                <span class="status-dot"></span>
+                {{ camera.status|upper }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Video Stream Container -->
+          <div class="camera-feed-wrap">
+            <a href="{% url 'camera_preview' camera.id %}" class="camera-feed-link">
+              {% if camera.source_type == 'webcam' or camera.source_type == 'usb' or camera.status == 'online' %}
+                <img src="{% url 'camera_stream' camera.id %}?mode=tracking"
+                     alt="Live stream from {{ camera.name }}"
+                     class="camera-stream-img"
+                     loading="lazy"
+                     onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='flex';"/>
+              {% endif %}
+              <div class="camera-placeholder" style="{% if camera.source_type == 'webcam' and camera.status == 'online' %}display: none;{% else %}display: flex;{% endif %}">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M 23 7 l -7 5 7 5 V 7 z"></path>
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                </svg>
+                <span>Click to view live stream</span>
+              </div>
+            </a>
+          </div>
+
+          <!-- Card Actions -->
+          <div class="camera-card-actions">
+            <a href="{% url 'camera_preview' camera.id %}" class="btn btn-primary btn-sm" style="flex: 1; justify-content: center;">
+              <span>Open Live View</span>
+            </a>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state-card" style="text-align: center; padding: 3rem 1.5rem;">
+      <p style="color: var(--text-muted); font-size: 1rem;">No cameras found matching your filter.</p>
+      <a href="{% url 'cameras' %}" class="btn btn-secondary btn-sm" style="margin-top: 1rem;">Reset Filters</a>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

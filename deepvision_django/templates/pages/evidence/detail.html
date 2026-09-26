@@ -1,0 +1,176 @@
+{% extends 'layouts/base.html' %}
+{% load static %}
+
+{% block title %}Evidence #{{ evidence.id }} — DeepVision Forensic Investigation{% endblock %}
+
+{% block content %}
+<div class="live-view-shell">
+  <!-- Top Navigation & Header -->
+  <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+    <div style="display: flex; align-items: center; gap: 1rem;">
+      <a href="{% url 'evidence' %}" class="btn btn-secondary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Back to Evidence Vault</span>
+      </a>
+
+      <div>
+        <div style="font-weight: 700; font-size: 1.1rem; color: var(--text-main);">
+          Evidence Item #{{ evidence.id }}
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+          <span>{{ evidence.file_name }}</span> &bull;
+          <span>{{ formatted_size }}</span> &bull;
+          <span>Captured: {{ evidence.captured_at|date:'Y-m-d H:i:s' }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      {% if file_exists %}
+        <a href="{% url 'evidence_download' evidence.id %}" class="btn btn-primary btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M 21 15 v 4 a 2 2 0 0 1 -2 2 H 5 a 2 2 0 0 1 -2 -2 v -4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>Download Media Asset</span>
+        </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; align-items: start;">
+    <!-- Media Viewer Panel (Left) -->
+    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden; padding: 1rem;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
+        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin: 0;">Forensic Media Preview</h4>
+        <span class="status-pill {% if evidence.evidence_type == 'snapshot' %}status-live{% else %}status-warn{% endif %}">
+          {{ evidence.evidence_type|upper }}
+        </span>
+      </div>
+
+      <div style="background: #000; border-radius: var(--radius-md); overflow: hidden; min-height: 420px; display: flex; align-items: center; justify-content: center; position: relative;">
+        {% if file_exists %}
+          {% if evidence.evidence_type == 'snapshot' %}
+            <img src="{% url 'evidence_preview' evidence.id %}" alt="Evidence Snapshot" style="width: 100%; max-height: 580px; object-fit: contain;"/>
+          {% else %}
+            <video controls autoplay playsinline style="width: 100%; max-height: 580px; object-fit: contain;">
+              <source src="{% url 'evidence_preview' evidence.id %}" type="video/mp4"/>
+              Your browser does not support HTML5 video playback.
+            </video>
+          {% endif %}
+        {% else %}
+          <div style="text-align: center; color: var(--text-muted); padding: 2rem;">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--color-warn); margin-bottom: 0.75rem;">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <h4 style="color: var(--text-main); font-size: 1rem; margin-bottom: 0.25rem;">File Unavailable</h4>
+            <p style="font-size: 0.8rem; max-width: 320px; margin: 0 auto;">
+              The forensic media asset <code>{{ evidence.file_name }}</code> is archived or unavailable on local storage.
+            </p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Forensic Chain of Custody & Metadata (Right) -->
+    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+      <!-- Metadata Card -->
+      <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 1.25rem;">
+        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin: 0 0 1rem 0; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+          Asset Metadata
+        </h4>
+
+        <div class="preview-specs-table" style="font-size: 0.84rem;">
+          <div class="specs-row" style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border-color);">
+            <span class="specs-label" style="color: var(--text-secondary);">Asset ID</span>
+            <span class="specs-val" style="font-family: var(--font-mono); font-weight: 600;">#{{ evidence.id }}</span>
+          </div>
+          <div class="specs-row" style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border-color);">
+            <span class="specs-label" style="color: var(--text-secondary);">Type</span>
+            <span class="specs-val">{{ evidence.evidence_type|upper }}</span>
+          </div>
+          <div class="specs-row" style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border-color);">
+            <span class="specs-label" style="color: var(--text-secondary);">MIME Type</span>
+            <span class="specs-val" style="font-family: var(--font-mono);">{{ evidence.mime_type }}</span>
+          </div>
+          <div class="specs-row" style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border-color);">
+            <span class="specs-label" style="color: var(--text-secondary);">File Size</span>
+            <span class="specs-val" style="font-family: var(--font-mono);">{{ formatted_size }}</span>
+          </div>
+          <div class="specs-row" style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border-color);">
+            <span class="specs-label" style="color: var(--text-secondary);">Captured At</span>
+            <span class="specs-val" style="font-family: var(--font-mono);">{{ evidence.captured_at|date:'Y-m-d H:i:s' }}</span>
+          </div>
+          <div class="specs-row" style="display: flex; justify-content: space-between; padding: 0.5rem 0;">
+            <span class="specs-label" style="color: var(--text-secondary);">Asset Name</span>
+            <span class="specs-val" style="font-family: var(--font-mono); font-size: 0.75rem; word-break: break-all;">{{ evidence.file_name }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Associated Alert Card -->
+      {% if evidence.alert %}
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 1.25rem;">
+          <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin: 0 0 1rem 0; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+            Linked Security Alert
+          </h4>
+
+          <div style="font-weight: 600; font-size: 0.92rem; color: var(--text-main); margin-bottom: 0.25rem;">
+            {{ evidence.alert.title|default:evidence.alert.event_type }}
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+            Detected: {{ evidence.alert.detected_at|date:'Y-m-d H:i:s' }} &bull; Severity: <strong style="text-transform: uppercase;">{{ evidence.alert.severity }}</strong>
+          </div>
+
+          <a href="{% url 'alert_detail' evidence.alert.id %}" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;">
+            Inspect Alert #{{ evidence.alert.id }}
+          </a>
+        </div>
+
+        {% if evidence.alert.incident_cases.first %}
+          {% with case=evidence.alert.incident_cases.first %}
+            <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 1.25rem;">
+              <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin: 0 0 1rem 0; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+                Linked Incident Case
+              </h4>
+              <div style="font-weight: 600; font-size: 0.92rem; color: var(--text-main); margin-bottom: 0.25rem;">
+                Case {{ case.case_number }}: {{ case.title }}
+              </div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+                Status: {{ case.status }} &bull; Priority: {{ case.priority }}
+              </div>
+              <a href="{% url 'case_detail' case.id %}" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;">
+                Open Case Workspace
+              </a>
+            </div>
+          {% endwith %}
+        {% endif %}
+      {% endif %}
+
+      <!-- Associated Camera Card -->
+      {% if evidence.camera %}
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 1.25rem;">
+          <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin: 0 0 1rem 0; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+            Source Camera
+          </h4>
+          <div style="font-weight: 600; font-size: 0.92rem; color: var(--text-main); margin-bottom: 0.25rem;">
+            {{ evidence.camera.name }}
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+            {{ evidence.camera.location|default:'Default Zone' }} ({{ evidence.camera.source_type|upper }})
+          </div>
+          <a href="{% url 'camera_preview' evidence.camera.id %}" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;">
+            Open Live Camera View
+          </a>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

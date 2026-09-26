@@ -1,0 +1,197 @@
+{% extends 'layouts/base.html' %}
+{% load static %}
+
+{% block title %}Investigation #{{ alert.id }} — DeepVision Security{% endblock %}
+
+{% block content %}
+<div class="live-view-shell">
+  <!-- Top Navigation & Header -->
+  <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+    <div style="display: flex; align-items: center; gap: 1rem;">
+      <a href="{% url 'alerts' %}" class="btn btn-secondary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Back to Alerts</span>
+      </a>
+
+      <div>
+        <div style="font-weight: 700; font-size: 1.15rem; color: var(--text-main);">
+          Incident Investigation #{{ alert.id }}: {{ alert.title|default:alert.event_type }}
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
+          <span>Source: {% if camera %}<a href="{% url 'camera_preview' camera.id %}" style="color: var(--color-primary, #38bdf8); font-weight: 600; text-decoration: underline;">{{ camera.name }}</a>{% else %}<strong>{{ camera_name }}</strong>{% endif %}</span> &bull;
+          <span>Detected: <strong>{{ alert.detected_at|date:'Y-m-d H:i:s' }}</strong></span> &bull;
+          <span>Event Type: <strong style="text-transform: capitalize;">{{ alert.event_type }}</strong></span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      {% if camera %}
+        <a href="{% url 'camera_preview' camera.id %}" class="btn btn-secondary btn-sm">
+          <span>Camera Live Feed</span>
+        </a>
+      {% endif %}
+      {% if incident_case %}
+        <a href="{% url 'case_detail' incident_case.id %}" class="btn btn-primary btn-sm">
+          <span>View Incident Case {{ incident_case.case_number }}</span>
+        </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; align-items: start;">
+    <!-- Main Left Column -->
+    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+      <!-- Incident Overview Card -->
+      <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 1.5rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+          <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-main); margin: 0;">Incident Summary</h3>
+          <div style="display: flex; gap: 0.5rem;">
+            <span class="status-pill {% if alert.severity == 'critical' or alert.severity == 'high' %}status-offline{% elif alert.severity == 'medium' %}status-warn{% else %}status-live{% endif %}">
+              {{ alert.severity|upper }}
+            </span>
+            <span class="status-pill {% if alert.status == 'new' %}status-offline{% elif alert.status == 'acknowledged' %}status-warn{% else %}status-live{% endif %}">
+              {{ alert.status|upper }}
+            </span>
+          </div>
+        </div>
+
+        <p style="color: var(--text-secondary); font-size: 0.92rem; line-height: 1.6; margin-bottom: 1.25rem;">
+          {{ alert.message|default:'Security anomaly detected by automated AI surveillance pipeline.' }}
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; background: var(--bg-surface-raised); padding: 1rem; border-radius: var(--radius-md);">
+          <div>
+            <span style="font-size: 0.72rem; color: var(--text-muted); display: block;">CONFIDENCE</span>
+            <span style="font-weight: 600; color: var(--text-main); font-size: 0.95rem;">
+              {% if alert.confidence %}{{ alert.confidence|floatformat:2 }}{% else %}1.00{% endif %}
+            </span>
+          </div>
+          <div>
+            <span style="font-size: 0.72rem; color: var(--text-muted); display: block;">TRACK ID</span>
+            <span style="font-weight: 600; color: var(--text-main); font-size: 0.95rem; font-family: var(--font-mono);">
+              {% if alert.track_id %}#{{ alert.track_id }}{% else %}N/A{% endif %}
+            </span>
+          </div>
+          <div>
+            <span style="font-size: 0.72rem; color: var(--text-muted); display: block;">LOCATION / ZONE</span>
+            <span style="font-weight: 600; color: var(--text-main); font-size: 0.95rem;">
+              {{ alert.location|default:'Perimeter Zone' }}
+            </span>
+          </div>
+          <div>
+            <span style="font-size: 0.72rem; color: var(--text-muted); display: block;">RESPONSE STATE</span>
+            <span style="font-weight: 600; color: var(--text-main); font-size: 0.95rem;">
+              {{ alert.response_state|default:'NEW' }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Linked Forensic Evidence Assets -->
+      <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 1.5rem;">
+        <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-main); margin: 0 0 1rem 0; display: flex; align-items: center; justify-content: space-between;">
+          <span>Forensic Evidence Items</span>
+          <span style="font-size: 0.8rem; color: var(--text-muted);">{{ evidence_items|length }} Captured</span>
+        </h3>
+
+        {% if evidence_items and evidence_items|length > 0 %}
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem;">
+            {% for ev in evidence_items %}
+              <div style="background: var(--bg-surface-raised); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden;">
+                <div style="height: 120px; background: #000; position: relative;">
+                  {% if ev.evidence_type == 'snapshot' %}
+                    <img src="{% url 'evidence_preview' ev.id %}" alt="Snapshot" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;"/>
+                  {% else %}
+                    <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #0b0f17;">
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" style="color: white; opacity: 0.8;">
+                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                      </svg>
+                    </div>
+                  {% endif %}
+                  <span class="status-pill {% if ev.evidence_type == 'snapshot' %}status-live{% else %}status-warn{% endif %}" style="position: absolute; top: 0.5rem; left: 0.5rem; font-size: 0.65rem;">
+                    {{ ev.evidence_type|upper }}
+                  </span>
+                </div>
+                <div style="padding: 0.75rem;">
+                  <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    {{ ev.file_name }}
+                  </div>
+                  <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                    <a href="{% url 'evidence_detail' ev.id %}" class="btn btn-secondary btn-sm" style="flex: 1; font-size: 0.75rem; padding: 0.2rem 0.4rem;">Inspect</a>
+                    <a href="{% url 'evidence_download' ev.id %}" class="btn btn-ghost btn-sm" style="padding: 0.2rem 0.4rem;">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M 21 15 v 4 a 2 2 0 0 1 -2 2 H 5 a 2 2 0 0 1 -2 -2 v -4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                      </svg>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0;">No automated evidence clips or snapshots attached to this alert.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Right Sidebar Column -->
+    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+      <!-- Incident Case Information -->
+      <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 1.25rem;">
+        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin: 0 0 1rem 0; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+          Incident Case Workflow
+        </h4>
+        {% if incident_case %}
+          <div style="margin-bottom: 0.75rem;">
+            <span style="font-size: 0.75rem; color: var(--text-muted); display: block;">CASE NUMBER</span>
+            <span style="font-weight: 700; color: var(--text-main); font-family: var(--font-mono);">{{ incident_case.case_number }}</span>
+          </div>
+          <div style="margin-bottom: 0.75rem;">
+            <span style="font-size: 0.75rem; color: var(--text-muted); display: block;">STATUS</span>
+            <span class="status-pill status-live">{{ incident_case.status }}</span>
+          </div>
+          <div style="margin-bottom: 1rem;">
+            <span style="font-size: 0.75rem; color: var(--text-muted); display: block;">PRIORITY</span>
+            <span class="status-pill status-warn">{{ incident_case.priority }}</span>
+          </div>
+          <a href="{% url 'case_detail' incident_case.id %}" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;">
+            Open Case Workspace
+          </a>
+        {% else %}
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+            No formal incident case is currently open for this detection.
+          </p>
+        {% endif %}
+      </div>
+
+      <!-- Investigation Notes -->
+      <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 1.25rem;">
+        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin: 0 0 1rem 0; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+          Investigation Notes ({{ notes|length }})
+        </h4>
+
+        {% if notes and notes|length > 0 %}
+          <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+            {% for note in notes %}
+              <div style="background: var(--bg-surface-raised); padding: 0.75rem; border-radius: var(--radius-sm); border-left: 3px solid var(--color-primary, #38bdf8);">
+                <p style="color: var(--text-main); font-size: 0.85rem; margin: 0 0 0.25rem 0; white-space: pre-wrap;">{{ note.body }}</p>
+                <span style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">
+                  {{ note.created_at|date:'Y-m-d H:i:s' }}
+                </span>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p style="color: var(--text-muted); font-size: 0.82rem; margin: 0;">No notes added to this alert record.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,72 @@
+<!-- DeepVision Floating Website-Only Assistant -->
+<div id="deepvision-chatbot-wrapper" class="chatbot-wrapper">
+  <!-- Floating Launcher Button -->
+  <button type="button" id="btn-chatbot-launcher" class="chatbot-launcher-btn" aria-label="Open DeepVision Assistant" title="Ask DeepVision Assistant">
+    <div class="chatbot-launcher-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M 21 15 a 2 2 0 0 1 -2 2 H 7 l -4 4 V 5 a 2 2 0 0 1 2 -2 h 14 a 2 2 0 0 1 2 2 z"></path>
+      </svg>
+    </div>
+    <span class="chatbot-launcher-text">DeepVision Assistant</span>
+    <span class="chatbot-launcher-dot"></span>
+  </button>
+
+  <!-- Compact Assistant Modal Panel -->
+  <div id="chatbot-panel" class="chatbot-panel" style="display: none;" role="dialog" aria-modal="true" aria-label="DeepVision Assistant Chat">
+    <!-- Panel Header -->
+    <div class="chatbot-header">
+      <div class="chatbot-header-info">
+        <div class="chatbot-avatar-emblem">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M 23 7 l -7 5 7 5 V 7 z"></path>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+          </svg>
+        </div>
+        <div>
+          <div class="chatbot-title">DeepVision Assistant</div>
+          <div class="chatbot-subtitle">Website & AI Guide &bull; Active</div>
+        </div>
+      </div>
+      <button type="button" id="btn-chatbot-close" class="btn-chatbot-close" aria-label="Close Assistant">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Chat Messages Stream -->
+    <div id="chatbot-messages" class="chatbot-messages">
+      <!-- Welcome Message from Assistant -->
+      <div class="chat-bubble-row bot">
+        <div class="chat-bubble bot">
+          <p style="margin-bottom: 0.5rem;">
+            Hello! I am your <strong>DeepVision Assistant</strong>. I can guide you on setting up cameras, using RAW, Detection, or Tracking modes, configuring alerts, and reviewing video evidence.
+          </p>
+          <span style="font-size: 0.78rem; opacity: 0.85;">What would you like help with?</span>
+        </div>
+      </div>
+
+      <!-- Suggested Quick Prompt Chips -->
+      <div class="chatbot-chips-wrap" id="chatbot-chips">
+        <span class="chatbot-chip-label">Quick topics:</span>
+        <button type="button" class="chatbot-chip" data-query="How do I add a camera?">How do I add a camera?</button>
+        <button type="button" class="chatbot-chip" data-query="What is Tracking mode?">What is Tracking mode?</button>
+        <button type="button" class="chatbot-chip" data-query="How does Smart Tracking work?">How does Smart Tracking work?</button>
+        <button type="button" class="chatbot-chip" data-query="How do alerts work?">How do alerts work?</button>
+        <button type="button" class="chatbot-chip" data-query="Why is my camera offline?">Why is my camera offline?</button>
+      </div>
+    </div>
+
+    <!-- Chatbot Input Footer -->
+    <form id="chatbot-form" class="chatbot-input-bar">
+      <input type="text" id="chatbot-input" class="chatbot-input" placeholder="Ask about cameras, detection, tracking..." autocomplete="off" aria-label="Chat message input"/>
+      <button type="submit" id="btn-chatbot-send" class="btn-chatbot-send" aria-label="Send message">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="22" y1="2" x2="11" y2="13"></line>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+        </svg>
+      </button>
+    </form>
+  </div>
+</div>

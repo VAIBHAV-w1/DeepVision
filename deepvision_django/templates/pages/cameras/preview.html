@@ -1,0 +1,375 @@
+{% extends 'layouts/base.html' %}
+{% load static %}
+
+{% block title %}{{ camera.name }} — Live Surveillance View | DeepVision{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/pages/preview.css' %}"/>
+{% endblock %}
+
+{% block content %}
+<div class="camera-preview-container">
+  <!-- 1. Top Navigation & Channel Header -->
+  <div class="preview-topbar">
+    <a href="{% url 'cameras' %}" class="preview-back-link">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+      <span>Back to Cameras</span>
+    </a>
+
+    <div class="preview-channel-badge">
+      <span class="status-pill {% if camera.status == 'online' %}status-live{% else %}status-offline{% endif %}">
+        <span class="status-dot"></span>
+        <span>CHANNEL 0{{ camera.id }}</span>
+      </span>
+    </div>
+  </div>
+
+  <!-- 2. Responsive 3-Column Surveillance Grid -->
+  <div class="camera-preview-grid">
+
+    <!-- =====================================================================
+         COLUMN 1: COMPACT CAMERA INFORMATION PANEL
+         ===================================================================== -->
+    <div class="preview-panel preview-panel-left">
+      <!-- Camera Identity Header -->
+      <div class="preview-card-header">
+        <div class="preview-camera-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M 23 7 l -7 5 7 5 V 7 z"></path>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+          </svg>
+        </div>
+        <div class="preview-card-title-wrap">
+          <h2 class="preview-camera-name" title="{{ camera.name }}">{{ camera.name }}</h2>
+          <span class="preview-camera-sub">{{ camera.location|default:'Default Location' }}</span>
+        </div>
+      </div>
+
+      <!-- Live Status Indicators -->
+      <div class="preview-status-row">
+        <div class="status-indicator-live">
+          <span class="status-dot status-dot-live"></span>
+          <span>Camera LIVE</span>
+        </div>
+        <div class="badge-ai-status" id="aiRunningBadge">
+          <span class="status-dot status-dot-live"></span>
+          <span>AI RUNNING</span>
+        </div>
+      </div>
+
+      <!-- Specs & Telemetry Table -->
+      <div class="preview-specs-table">
+        <div class="specs-row">
+          <span class="specs-label">Source</span>
+          <span class="specs-val">{{ camera.source_type|upper }}</span>
+        </div>
+        <div class="specs-row">
+          <span class="specs-label">Resolution</span>
+          <span class="specs-val" id="telemetryResolution">1280 &times; 720</span>
+        </div>
+        <div class="specs-row">
+          <span class="specs-label">Mode</span>
+          <span class="specs-val mode-highlight" id="telemetryMode">
+            {% if active_mode == 'raw' %}Original{% else %}Tracking + Detection{% endif %}
+          </span>
+        </div>
+        <div class="specs-row">
+          <span class="specs-label">Uptime</span>
+          <span class="specs-val" id="telemetryUptime">Active</span>
+        </div>
+      </div>
+
+      <!-- Panel Actions & Cross-Links -->
+      <div class="preview-panel-actions" style="display: flex; flex-direction: column; gap: 0.5rem;">
+        <a href="{% url 'recordings' %}?camera={{ camera.id }}" class="btn btn-secondary btn-sm preview-btn" style="width: 100%; justify-content: space-between;">
+          <span style="display: flex; align-items: center; gap: 0.4rem;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+            <span>Recordings</span>
+          </span>
+          <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px;">{{ recordings_count }}</span>
+        </a>
+
+        <a href="{% url 'alerts' %}?camera={{ camera.id }}" class="btn btn-secondary btn-sm preview-btn" style="width: 100%; justify-content: space-between;">
+          <span style="display: flex; align-items: center; gap: 0.4rem;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M 10.29 3.86 L 1.82 18 a 2 2 0 0 0 1.71 3 h 16.94 a 2 2 0 0 0 1.71 -3 L 13.71 3.86 a 2 2 0 0 0 -3.42 0 z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <span>Alerts</span>
+          </span>
+          <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px;">{{ alerts_count }}</span>
+        </a>
+
+        <a href="{% url 'evidence' %}?camera={{ camera.id }}" class="btn btn-secondary btn-sm preview-btn" style="width: 100%; justify-content: flex-start; gap: 0.4rem;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
+          </svg>
+          <span>Evidence Vault</span>
+        </a>
+
+        <a href="{% url 'cameras' %}" class="btn btn-ghost btn-sm preview-btn" style="width: 100%; justify-content: flex-start; gap: 0.4rem; margin-top: 0.25rem;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+          </svg>
+          <span>Back to All Cameras</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         COLUMN 2: CENTER RESPONSIVE 16:9 LIVE MONITOR
+         ===================================================================== -->
+    <div class="preview-center-col">
+      <div class="live-monitor" id="videoViewerContainer">
+        <!-- Live Real MJPEG Stream -->
+        {% if preview_available %}
+        <img id="camera-live-stream"
+             src="{% url 'camera_stream' camera.id %}{% if active_mode == 'raw' %}?mode=raw{% else %}?mode=tracking{% endif %}"
+             data-camera-id="{{ camera.id }}"
+             data-active-mode="{{ active_mode|default:'tracking' }}"
+             alt="{{ camera.name }} Live Surveillance Stream"
+             class="liveview-stream-img"
+             onerror="this.onerror=null; this.src='{% url 'camera_snapshot' camera.id %}';"/>
+        {% else %}
+        <div id="stream-unavailable-placeholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; min-height: 420px; background: #0b1120; color: #94a3b8; text-align: center; padding: 2rem;">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--color-warn, #f59e0b); margin-bottom: 1rem;">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <h3 style="color: var(--text-main, #f8fafc); font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">
+            Surveillance Stream Unavailable
+          </h3>
+          <p style="font-size: 0.85rem; max-width: 420px; margin: 0 auto 1.25rem auto; color: #94a3b8; line-height: 1.5;">
+            The canonical surveillance engine or camera feed is currently offline. DeepVision will automatically resume streaming once the service reconnects.
+          </p>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.location.reload();">
+            <span>Check Feed Connection</span>
+          </button>
+        </div>
+        {% endif %}
+
+        <!-- Floating In-Stream Top Badges -->
+        <div class="live-monitor-badges-top">
+          <div class="monitor-badge-group">
+            <span class="monitor-pill-live">
+              <span class="status-dot-white"></span>
+              LIVE
+            </span>
+            <span class="monitor-pill-camname">
+              {{ camera.name }} &mdash; {{ camera.location|default:'Monitored Area' }}
+            </span>
+          </div>
+
+          <span class="monitor-pill-clock" id="liveMonitorClock">
+            2026-09-25 00:00:00
+          </span>
+        </div>
+
+        <!-- In-Stream Bottom HUD Overlay Bar -->
+        <div class="live-monitor-hud-bottom">
+          <div class="hud-telemetry-left">
+            <span>FPS: <span class="hud-highlight" id="hudFps">24</span></span>
+            <span class="hud-sep">|</span>
+            <span>Objects: <span class="hud-highlight" id="hudObjects">0</span></span>
+            <span class="hud-sep">|</span>
+            <span>Mode: <span class="hud-highlight" id="hudTracking">{% if active_mode == 'raw' %}Original{% else %}Tracking + Detection{% endif %}</span></span>
+          </div>
+
+          <div class="hud-telemetry-right" id="hudRes">
+            1280 &times; 720
+          </div>
+        </div>
+
+        <!-- Mode Switching Overlay -->
+        <div class="mode-switch-overlay" id="modeSwitchOverlay" style="display:none;">
+          <div class="mode-switch-overlay-inner">
+            <svg class="mode-switch-spinner" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+              <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83"/>
+            </svg>
+            <span class="mode-switch-label" id="modeSwitchLabel">Switching view…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         COLUMN 3: CONTROLS & AI INFORMATION PANEL
+         ===================================================================== -->
+    <div class="preview-panel preview-panel-right">
+      <!-- Section: View Mode — Exactly Two User-Facing Modes -->
+      <div class="panel-section">
+        <div class="panel-section-title">View Mode</div>
+        <div class="viewmode-segmented-control">
+          <button type="button" class="viewmode-btn {% if active_mode == 'raw' %}active{% endif %}" data-mode="raw" onclick="switchMode('raw');" title="Clean raw CCTV feed without AI annotations" id="btn-mode-original">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+            </svg>
+            <span>Original</span>
+          </button>
+
+          <button type="button" class="viewmode-btn {% if active_mode != 'raw' %}active{% endif %}" data-mode="tracking" onclick="switchMode('tracking');" title="YOLO11n detection + ByteTrack multi-object tracking" id="btn-mode-tracking">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M 3 12 h 3 m 12 0 h 3 m -9 -9 v 3 m 0 12 v 3"></path>
+            </svg>
+            <span>Tracking + Detection</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Section: Quick Actions (Snapshot / Fullscreen) -->
+      <div class="panel-section">
+        <div class="quick-actions-grid">
+          <button type="button" class="btn-quick-action" onclick="captureSnapshot();" title="Capture Snapshot">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M 23 19 a 2 2 0 0 1 -2 2 H 3 a 2 2 0 0 1 -2 -2 V 8 a 2 2 0 0 1 2 -2 h 4 l 2 -3 h 6 l 2 3 h 4 a 2 2 0 0 1 2 2 z"></path>
+              <circle cx="12" cy="13" r="4"></circle>
+            </svg>
+            <span>Snapshot</span>
+          </button>
+
+          <button type="button" class="btn-quick-action" onclick="toggleFullscreen();" title="Toggle Fullscreen">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M 8 3 H 5 a 2 2 0 0 0 -2 2 v 3 m 18 0 V 5 a 2 2 0 0 0 -2 -2 h -3 m 0 18 h 3 a 2 2 0 0 0 2 -2 v -3 M 3 16 v 3 a 2 2 0 0 0 2 2 h 3"></path>
+            </svg>
+            <span>Fullscreen</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Section: AI Information -->
+      <div class="panel-section">
+        <div class="panel-section-title">AI Pipeline</div>
+        <div class="preview-specs-table">
+          <div class="specs-row">
+            <span class="specs-label">Detector</span>
+            <span class="specs-val mode-highlight">YOLO11n</span>
+          </div>
+          <div class="specs-row">
+            <span class="specs-label">Tracker</span>
+            <span class="specs-val">ByteTrack</span>
+          </div>
+
+          <div class="specs-row">
+            <span class="specs-label">Track IDs</span>
+            <span class="specs-val" id="aiActiveTracks" style="color: var(--color-live, #10b981);">0 active</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let currentMode = '{{ active_mode|default:"tracking" }}';
+const cameraId = {{ camera.id }};
+const streamBaseUrl = "{% url 'camera_stream' camera.id %}";
+const streamImg = document.getElementById('camera-live-stream');
+
+// Update Live Clock
+function updateClock() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  const formatted = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  const el = document.getElementById('liveMonitorClock');
+  if (el) el.textContent = formatted;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// Safe Mode Switcher — smooth transition, no reload of model, exactly two modes: 'raw' and 'tracking'
+function switchMode(newMode) {
+  if (newMode === 'detection') newMode = 'tracking';
+  if (currentMode === newMode && streamImg.src) return;
+  
+  // 1. Show switching overlay
+  const overlay = document.getElementById('modeSwitchOverlay');
+  const overlayLabel = document.getElementById('modeSwitchLabel');
+  const modeLabels = { raw: 'Switching to Original Feed…', tracking: 'Switching to Tracking + Detection…' };
+  if (overlay) { overlay.style.display = 'flex'; }
+  if (overlayLabel) { overlayLabel.textContent = modeLabels[newMode] || 'Switching view…'; }
+  
+  // 2. Update button states immediately
+  document.querySelectorAll('.viewmode-btn').forEach(btn => {
+    const btnMode = btn.dataset.mode;
+    if (btnMode === 'raw') {
+      btn.classList.toggle('active', newMode === 'raw');
+    } else {
+      btn.classList.toggle('active', newMode !== 'raw');
+    }
+  });
+  
+  currentMode = newMode;
+  
+  // 3. Update HUD text
+  const hudTracking = document.getElementById('hudTracking');
+  const telemetryMode = document.getElementById('telemetryMode');
+  if (newMode === 'raw') {
+    if (hudTracking) hudTracking.textContent = 'Original';
+    if (telemetryMode) telemetryMode.textContent = 'Original';
+  } else {
+    if (hudTracking) hudTracking.textContent = 'Tracking + Detection';
+    if (telemetryMode) telemetryMode.textContent = 'Tracking + Detection';
+  }
+  
+  // 4. Update stream src with mode parameter and cache buster
+  const cacheBuster = Date.now();
+  let newSrc = `${streamBaseUrl}?mode=${newMode}&t=${cacheBuster}`;
+  
+  // 5. Hide overlay once new stream delivers first frame
+  streamImg.onload = function() {
+    if (overlay) overlay.style.display = 'none';
+    streamImg.onload = null;
+  };
+  setTimeout(() => { if (overlay) overlay.style.display = 'none'; }, 6000);
+  
+  streamImg.src = newSrc;
+}
+
+// Fullscreen API Implementation
+function toggleFullscreen() {
+  const container = document.getElementById('videoViewerContainer');
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    if (container.requestFullscreen) {
+      container.requestFullscreen();
+    } else if (container.webkitRequestFullscreen) {
+      container.webkitRequestFullscreen();
+    }
+  } else {
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    } else if (document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
+  }
+}
+
+// Snapshot Capture
+function captureSnapshot() {
+  const link = document.createElement('a');
+  link.href = "{% url 'camera_snapshot' camera.id %}";
+  link.download = `snapshot_cam_${cameraId}_${Date.now()}.jpg`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+</script>
+{% endblock %}

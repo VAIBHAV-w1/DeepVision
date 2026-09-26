@@ -1,0 +1,222 @@
+{% extends 'layouts/base.html' %}
+{% load static %}
+
+{% block title %}Recent Alerts — DeepVision Incident Inbox{% endblock %}
+
+{% block content %}
+<!-- Editorial Header -->
+<div class="hero-editorial-wrap">
+  <div class="editorial-badge-pill">
+    <span>Incident Inbox</span>
+  </div>
+  <h1 class="editorial-hero-title" style="font-size: clamp(2.2rem, 4vw, 3.25rem); margin-bottom: 0.5rem;">
+    Recent alerts
+  </h1>
+  <p class="editorial-hero-subtitle" style="margin-bottom: 2rem;">
+    Review real-time anomaly detections, perimeter violations, and security events.
+  </p>
+</div>
+
+<!-- Compact Metric Badges -->
+<div class="summary-grid" style="margin-bottom: 2rem;">
+  <div class="summary-card">
+    <div class="summary-data">
+      <span class="summary-value">{{ total_count }}</span>
+      <span class="summary-label">Total Logged</span>
+    </div>
+    <div class="summary-icon-wrap">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M 18 8 A 6 6 0 0 0 6 8 c 0 7 -3 9 -3 9 h 18 s -3 -2 -3 -9"></path>
+        <path d="M 13.73 21 a 2 2 0 0 1 -3.46 0"></path>
+      </svg>
+    </div>
+  </div>
+
+  <div class="summary-card kpi-offline">
+    <div class="summary-data">
+      <span class="summary-value" style="color: var(--color-offline, #ef4444);">{{ new_count }}</span>
+      <span class="summary-label">New / Unread</span>
+    </div>
+    <div class="summary-icon-wrap">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+    </div>
+  </div>
+
+  <div class="summary-card kpi-recordings">
+    <div class="summary-data">
+      <span class="summary-value" style="color: var(--color-warn, #f59e0b);">{{ active_high_count }}</span>
+      <span class="summary-label">High / Critical</span>
+    </div>
+    <div class="summary-icon-wrap">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="12 2 2 22 22 22 12 2"></polygon>
+        <line x1="12" y1="9" x2="12" y2="13"></line>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+      </svg>
+    </div>
+  </div>
+
+  <div class="summary-card kpi-online">
+    <div class="summary-data">
+      <span class="summary-value" style="color: var(--color-live, #10b981);">{{ resolved_count }}</span>
+      <span class="summary-label">Resolved</span>
+    </div>
+    <div class="summary-icon-wrap">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M 22 11.08 V 12 a 10 10 0 1 1 -5.93 -9.14"></path>
+        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- Controls & Filters Bar -->
+<div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem;">
+  <form method="GET" action="{% url 'alerts' %}" style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin: 0;">
+    <!-- Status Filter -->
+    <select name="status" class="form-select" style="width: auto; height: 38px; font-size: 0.84rem; padding: 0.2rem 1.8rem 0.2rem 0.8rem;" onchange="this.form.submit();">
+      <option value="">All Statuses</option>
+      <option value="new" {% if current_status == 'new' %}selected{% endif %}>New</option>
+      <option value="acknowledged" {% if current_status == 'acknowledged' %}selected{% endif %}>Acknowledged</option>
+      <option value="resolved" {% if current_status == 'resolved' %}selected{% endif %}>Resolved</option>
+    </select>
+
+    <!-- Severity Filter -->
+    <select name="severity" class="form-select" style="width: auto; height: 38px; font-size: 0.84rem; padding: 0.2rem 1.8rem 0.2rem 0.8rem;" onchange="this.form.submit();">
+      <option value="">All Severities</option>
+      <option value="critical" {% if current_severity == 'critical' %}selected{% endif %}>Critical</option>
+      <option value="high" {% if current_severity == 'high' %}selected{% endif %}>High</option>
+      <option value="medium" {% if current_severity == 'medium' %}selected{% endif %}>Medium</option>
+      <option value="low" {% if current_severity == 'low' %}selected{% endif %}>Low</option>
+    </select>
+
+    <!-- Camera Selector -->
+    {% if cameras %}
+      <select name="camera_id" class="form-select" style="width: auto; height: 38px; font-size: 0.84rem; padding: 0.2rem 1.8rem 0.2rem 0.8rem;" onchange="this.form.submit();">
+        <option value="">All Cameras</option>
+        {% for cam in cameras %}
+          <option value="{{ cam.id }}" {% if current_camera_id == cam.id|stringformat:"s" %}selected{% endif %}>{{ cam.name }}</option>
+        {% endfor %}
+      </select>
+    {% endif %}
+
+    <!-- Search Input -->
+    <div style="position: relative; width: 220px;">
+      <input type="text" name="search" value="{{ current_search|default:'' }}" class="form-control" placeholder="Search alerts..." style="height: 38px; font-size: 0.84rem; padding-left: 2.2rem;"/>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%); color: var(--text-muted);">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+    </div>
+
+    <button type="submit" class="btn btn-secondary btn-sm" style="height: 38px;">Filter</button>
+    {% if current_status or current_severity or current_camera_id or current_search %}
+      <a href="{% url 'alerts' %}" class="btn btn-ghost btn-sm" style="height: 38px;">Reset</a>
+    {% endif %}
+  </form>
+</div>
+
+<!-- Alerts Table -->
+{% if alerts and alerts|length > 0 %}
+  <div class="table-responsive" style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden;">
+    <table class="cctv-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+      <thead>
+        <tr style="border-bottom: 1px solid var(--border-color); background: var(--bg-surface-raised);">
+          <th style="padding: 0.75rem 1rem; text-align: left;">Incident / Alert</th>
+          <th style="padding: 0.75rem 1rem; text-align: left;">Event Type</th>
+          <th style="padding: 0.75rem 1rem; text-align: left;">Camera Source</th>
+          <th style="padding: 0.75rem 1rem; text-align: left;">Severity</th>
+          <th style="padding: 0.75rem 1rem; text-align: left;">Status</th>
+          <th style="padding: 0.75rem 1rem; text-align: left;">Detected Time</th>
+          <th style="padding: 0.75rem 1rem; text-align: right;">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for alert in alerts %}
+          <tr style="border-bottom: 1px solid var(--border-color);">
+            <td style="padding: 0.75rem 1rem; font-weight: 600;">
+              <a href="{% url 'alert_detail' alert.id %}" style="color: var(--text-main); text-decoration: none;">
+                #{{ alert.id }} — {{ alert.title|default:alert.event_type }}
+              </a>
+              {% if alert.message %}
+                <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-top: 2px;">
+                  {{ alert.message|truncatechars:65 }}
+                </div>
+              {% endif %}
+            </td>
+            <td style="padding: 0.75rem 1rem; color: var(--text-secondary); text-transform: capitalize;">
+              {{ alert.event_type|default:'Anomaly' }}
+            </td>
+            <td style="padding: 0.75rem 1rem; color: var(--color-primary, #38bdf8); font-weight: 500;">
+              {{ alert.camera.name|default:'Channel 01' }}
+            </td>
+            <td style="padding: 0.75rem 1rem;">
+              {% if alert.severity == 'critical' or alert.severity == 'high' %}
+                <span class="status-pill status-offline">{{ alert.severity|upper }}</span>
+              {% elif alert.severity == 'medium' %}
+                <span class="status-pill status-warn">MEDIUM</span>
+              {% else %}
+                <span class="status-pill" style="background: var(--bg-surface-raised); color: var(--text-secondary);">LOW</span>
+              {% endif %}
+            </td>
+            <td style="padding: 0.75rem 1rem;">
+              {% if alert.status == 'new' %}
+                <span class="status-pill status-offline" style="font-size: 0.7rem;">NEW</span>
+              {% elif alert.status == 'acknowledged' %}
+                <span class="status-pill status-warn" style="font-size: 0.7rem;">ACK</span>
+              {% else %}
+                <span class="status-pill status-live" style="font-size: 0.7rem;">RESOLVED</span>
+              {% endif %}
+            </td>
+            <td style="padding: 0.75rem 1rem; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">
+              {{ alert.detected_at|date:'Y-m-d H:i:s' }}
+            </td>
+            <td style="padding: 0.75rem 1rem; text-align: right;">
+              <a href="{% url 'alert_detail' alert.id %}" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;">
+                Investigate
+              </a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination Controls -->
+  {% if page_obj.has_other_pages %}
+    <div style="display: flex; justify-content: center; align-items: center; gap: 0.5rem; margin-top: 2.5rem;">
+      {% if page_obj.has_previous %}
+        <a href="?page={{ page_obj.previous_page_number }}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_severity %}&severity={{ current_severity }}{% endif %}{% if current_camera_id %}&camera_id={{ current_camera_id }}{% endif %}{% if current_search %}&search={{ current_search }}{% endif %}" class="btn btn-secondary btn-sm">
+          &laquo; Previous
+        </a>
+      {% endif %}
+      <span style="font-size: 0.85rem; color: var(--text-secondary); padding: 0 0.5rem;">
+        Page <strong>{{ page_obj.number }}</strong> of {{ page_obj.paginator.num_pages }}
+      </span>
+      {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_severity %}&severity={{ current_severity }}{% endif %}{% if current_camera_id %}&camera_id={{ current_camera_id }}{% endif %}{% if current_search %}&search={{ current_search }}{% endif %}" class="btn btn-secondary btn-sm">
+          Next &raquo;
+        </a>
+      {% endif %}
+    </div>
+  {% endif %}
+{% else %}
+  <div class="empty-state-card" style="text-align: center; padding: 4rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg);">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--text-muted); margin-bottom: 1rem;">
+      <path d="M 18 8 A 6 6 0 0 0 6 8 c 0 7 -3 9 -3 9 h 18 s -3 -2 -3 -9"></path>
+      <path d="M 13.73 21 a 2 2 0 0 1 -3.46 0"></path>
+    </svg>
+    <h3 style="font-size: 1.15rem; color: var(--text-main); margin-bottom: 0.5rem;">No Alerts Found</h3>
+    <p style="color: var(--text-muted); font-size: 0.88rem; max-width: 400px; margin: 0 auto 1.5rem;">
+      No security alerts match the selected criteria. Real-time detections will appear here automatically.
+    </p>
+    {% if current_status or current_severity or current_camera_id or current_search %}
+      <a href="{% url 'alerts' %}" class="btn btn-secondary btn-sm">Reset Filters</a>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

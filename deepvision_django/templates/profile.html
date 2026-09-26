@@ -1,0 +1,62 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %}User Profile — DeepVision Intelligent Surveillance{% endblock %}
+
+{% block content %}
+<div style="max-width: 680px; margin: 0 auto; padding-bottom: 3rem;">
+  <div class="card" style="padding: 2rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+    <div style="display: flex; align-items: center; gap: 1.25rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1.5rem;">
+      <div style="width: 64px; height: 64px; border-radius: 50%; background: var(--color-primary); color: #fff; font-size: 1.75rem; font-weight: 700; display: flex; align-items: center; justify-content: center;">
+        {{ current_user.full_name|slice:":1"|default:"U"|upper }}
+      </div>
+      <div>
+        <h2 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin: 0 0 0.25rem 0;">
+          {{ current_user.full_name }}
+        </h2>
+        <span style="font-size: 0.85rem; color: var(--text-secondary);">
+          {{ current_user.email }} &bull; Role: <strong style="color: var(--color-primary);">{{ current_user.role|title }}</strong>
+        </span>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
+      <div>
+        <label style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Account Status</label>
+        <div style="font-size: 0.95rem; font-weight: 600; color: {% if current_user.is_active %}#10b981{% else %}#ef4444{% endif %}; margin-top: 0.25rem;">
+          {{ current_user.is_active|yesno:"Active,Inactive" }}
+        </div>
+      </div>
+      <div>
+        <label style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Email Verified</label>
+        <div style="font-size: 0.95rem; font-weight: 600; color: {% if current_user.is_email_verified %}#10b981{% else %}#f59e0b{% endif %}; margin-top: 0.25rem;">
+          {{ current_user.is_email_verified|yesno:"Verified,Unverified" }}
+        </div>
+      </div>
+      <div>
+        <label style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Member Since</label>
+        <div style="font-size: 0.95rem; color: var(--text-main); margin-top: 0.25rem;">
+          {{ current_user.created_at|date:"M d, Y" }}
+        </div>
+      </div>
+      <div>
+        <label style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Django Architecture</label>
+        <div style="font-size: 0.95rem; color: var(--text-main); margin-top: 0.25rem;">
+          Django 5.2.17 Control Plane
+        </div>
+      </div>
+    </div>
+
+    <div style="border-top: 1px solid var(--border-color); padding-top: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
+      <a href="{% url 'dashboard' %}" class="btn btn-secondary btn-sm">
+        &larr; Back to Dashboard
+      </a>
+      <form action="{% url 'logout' %}" method="POST" style="margin: 0;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger btn-sm">
+          Sign Out
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

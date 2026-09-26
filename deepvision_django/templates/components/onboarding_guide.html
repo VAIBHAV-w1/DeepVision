@@ -1,0 +1,373 @@
+<!-- DeepVision Guided Onboarding & First-Time Device Walkthrough Modals -->
+<div id="dvGuideBackdrop" class="dv-guide-backdrop" style="display:none;">
+  <div class="dv-guide-modal" id="dvGuideModal" role="dialog" aria-modal="true">
+    
+    <!-- Modal Header -->
+    <div class="dv-guide-header">
+      <div class="dv-guide-badge" id="dvGuideBadge">GETTING STARTED</div>
+      <button type="button" class="dv-guide-close" onclick="closeDvGuide();" aria-label="Close guide">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Step Progress Dots -->
+    <div class="dv-guide-progress" id="dvGuideProgress">
+      <!-- Injected by JS -->
+    </div>
+
+    <!-- Step Content -->
+    <div class="dv-guide-body">
+      <div class="dv-guide-icon-wrap" id="dvGuideIcon">
+        <!-- Injected by JS -->
+      </div>
+      <h3 class="dv-guide-title" id="dvGuideTitle">Welcome</h3>
+      <p class="dv-guide-desc" id="dvGuideDesc">Description text goes here.</p>
+      <div class="dv-guide-tip" id="dvGuideTip" style="display:none;"></div>
+    </div>
+
+    <!-- Actions Footer -->
+    <div class="dv-guide-footer">
+      <button type="button" class="btn btn-secondary btn-sm" id="dvGuideSkipBtn" onclick="skipDvGuide();">Skip Guide</button>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn btn-secondary btn-sm" id="dvGuideBackBtn" onclick="prevDvGuideStep();" style="display:none;">Back</button>
+        <button type="button" class="btn btn-primary btn-sm" id="dvGuideNextBtn" onclick="nextDvGuideStep();">Next &rarr;</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+.dv-guide-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  animation: dvGuideFadeIn 0.2s ease-out;
+}
+
+@keyframes dvGuideFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.dv-guide-modal {
+  background: var(--bg-surface, #1e293b);
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border-radius: 14px;
+  width: 100%;
+  max-width: 480px;
+  padding: 1.5rem;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.45);
+  color: var(--text-main, #f8fafc);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.dv-guide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dv-guide-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(37, 99, 235, 0.15);
+  color: var(--color-primary, #3b82f6);
+}
+
+.dv-guide-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+}
+
+.dv-guide-close:hover {
+  color: var(--text-main, #f8fafc);
+}
+
+.dv-guide-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dv-guide-dot {
+  height: 4px;
+  flex: 1;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.15);
+  transition: background 0.2s, transform 0.2s;
+}
+
+[data-theme="light"] .dv-guide-dot {
+  background: rgba(15, 23, 42, 0.12);
+}
+
+.dv-guide-dot.active {
+  background: var(--color-primary, #3b82f6);
+}
+
+.dv-guide-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 0.5rem 0;
+}
+
+.dv-guide-icon-wrap {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--color-primary, #3b82f6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.dv-guide-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+  color: var(--text-main, #f8fafc);
+}
+
+.dv-guide-desc {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text-secondary, #94a3b8);
+  margin: 0;
+}
+
+.dv-guide-tip {
+  margin-top: 1rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #10b981;
+  font-size: 0.8rem;
+  text-align: left;
+  width: 100%;
+}
+
+.dv-guide-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color, rgba(255,255,255,0.08));
+}
+</style>
+
+<script>
+(function() {
+  // Step definitions
+  const SIGNUP_STEPS = [
+    {
+      badge: "STEP 1 OF 6 &bull; ONBOARDING",
+      icon: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+      title: "Welcome to DeepVision",
+      desc: "DeepVision transforms any standard webcam, USB camera, or network camera into an intelligent, AI-powered security monitoring system.",
+      tip: "All camera processing, object detection, and video recording run locally with low latency."
+    },
+    {
+      badge: "STEP 2 OF 6 &bull; ONBOARDING",
+      icon: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>',
+      title: "Add Your Camera",
+      desc: "Head over to Cameras and click Add Camera. Connect your built-in laptop webcam (index 0), a USB camera, or your mobile phone via Wi-Fi.",
+      tip: "For mobile phones, install the free IP Webcam app and enter the displayed streaming address."
+    },
+    {
+      badge: "STEP 3 OF 6 &bull; ONBOARDING",
+      icon: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+      title: "Test Connection",
+      desc: "Use the built-in Connection Test to verify network reachability, stream resolution, and frame rates before saving your camera.",
+      tip: "DeepVision automatically detects resolution and tunes streaming frame buffers for stability."
+    },
+    {
+      badge: "STEP 4 OF 6 &bull; ONBOARDING",
+      icon: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
+      title: "Start Live Monitoring",
+      desc: "Open Live Surveillance View to monitor smooth real-time feeds with zero latency and full manual recording capability.",
+      tip: "Use the Snapshot button to capture high-definition JPEG stills anytime."
+    },
+    {
+      badge: "STEP 5 OF 6 &bull; ONBOARDING",
+      icon: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M3 12h3m12 0h3m-9-9v3m0 12v3"/></svg>',
+      title: "Enable Smart Detection & Tracking",
+      desc: "Switch to Smart Detection to identify people and items, or Smart Tracking to monitor paths and trigger perimeter alerts.",
+      tip: "DeepVision AI operates smoothly in background threads without loading latency."
+    },
+    {
+      badge: "STEP 6 OF 6 &bull; ONBOARDING",
+      icon: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>',
+      title: "You're All Set!",
+      desc: "Your intelligent surveillance workspace is ready. You can review archived clips, configure alert rules, and monitor your feeds anytime.",
+      tip: "Need assistance? Click the DeepVision Assistant icon at the bottom-right corner anytime."
+    }
+  ];
+
+  const DEVICE_STEPS = [
+    {
+      badge: "DEVICE GUIDE &bull; STEP 1 OF 5",
+      icon: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
+      title: "Command Center Dashboard",
+      desc: "Welcome to DeepVision on this browser. Your dashboard provides a real-time overview of online cameras, active streams, and incident counts.",
+      tip: "Quickly view active channels and system health directly from the top status strip."
+    },
+    {
+      badge: "DEVICE GUIDE &bull; STEP 2 OF 5",
+      icon: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>',
+      title: "Camera Management",
+      desc: "Access the Cameras page to add, configure, test, or organize camera feeds into groups with surveillance presets.",
+      tip: "Green badges indicate cameras streaming actively in real time."
+    },
+    {
+      badge: "DEVICE GUIDE &bull; STEP 3 OF 5",
+      icon: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
+      title: "Surveillance Live View",
+      desc: "Click on any camera to open full 16:9 Live View with Original, Smart Detection, and Smart Tracking modes.",
+      tip: "Toggle fullscreen, trigger recordings, or snapshot evidence with a single click."
+    },
+    {
+      badge: "DEVICE GUIDE &bull; STEP 4 OF 5",
+      icon: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+      title: "Incidents & Evidence Center",
+      desc: "Review automated security alerts, inspect video clips, and examine forensic snapshots captured during security events.",
+      tip: "Videos support instant browser playback and offline MP4 download."
+    },
+    {
+      badge: "DEVICE GUIDE &bull; STEP 5 OF 5",
+      icon: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+      title: "All Set on This Device!",
+      desc: "You can reopen this tour anytime from the Help & Support page. Enjoy reliable, smart surveillance with DeepVision.",
+      tip: "Theme switcher (Dark / Light / System) is always available in the top bar."
+    }
+  ];
+
+  let activeGuide = null;
+  let currentStepIdx = 0;
+
+  function renderStep() {
+    if (!activeGuide) return;
+    const step = activeGuide.steps[currentStepIdx];
+    const total = activeGuide.steps.length;
+
+    document.getElementById('dvGuideBadge').innerHTML = step.badge;
+    document.getElementById('dvGuideIcon').innerHTML = step.icon;
+    document.getElementById('dvGuideTitle').textContent = step.title;
+    document.getElementById('dvGuideDesc').textContent = step.desc;
+
+    const tipEl = document.getElementById('dvGuideTip');
+    if (step.tip) {
+      tipEl.textContent = step.tip;
+      tipEl.style.display = 'block';
+    } else {
+      tipEl.style.display = 'none';
+    }
+
+    // Progress dots
+    const progEl = document.getElementById('dvGuideProgress');
+    progEl.innerHTML = '';
+    for (let i = 0; i < total; i++) {
+      const dot = document.createElement('div');
+      dot.className = 'dv-guide-dot' + (i === currentStepIdx ? ' active' : '');
+      progEl.appendChild(dot);
+    }
+
+    // Buttons
+    document.getElementById('dvGuideBackBtn').style.display = currentStepIdx > 0 ? 'inline-block' : 'none';
+    const nextBtn = document.getElementById('dvGuideNextBtn');
+    if (currentStepIdx === total - 1) {
+      nextBtn.textContent = 'Get Started &check;';
+    } else {
+      nextBtn.innerHTML = 'Next &rarr;';
+    }
+  }
+
+  window.openDvGuide = function(type) {
+    if (type === 'signup') {
+      activeGuide = { type: 'signup', steps: SIGNUP_STEPS, storageKey: 'dv_signup_guide_done' };
+    } else {
+      activeGuide = { type: 'device', steps: DEVICE_STEPS, storageKey: 'dv_device_tour_done' };
+    }
+    currentStepIdx = 0;
+    renderStep();
+    const bd = document.getElementById('dvGuideBackdrop');
+    if (bd) bd.style.display = 'flex';
+  };
+
+  window.closeDvGuide = function() {
+    const bd = document.getElementById('dvGuideBackdrop');
+    if (bd) bd.style.display = 'none';
+    if (activeGuide) {
+      localStorage.setItem(activeGuide.storageKey, 'true');
+    }
+  };
+
+  window.skipDvGuide = function() {
+    closeDvGuide();
+  };
+
+  window.nextDvGuideStep = function() {
+    if (!activeGuide) return;
+    if (currentStepIdx < activeGuide.steps.length - 1) {
+      currentStepIdx++;
+      renderStep();
+    } else {
+      closeDvGuide();
+      if (activeGuide.type === 'signup') {
+        localStorage.setItem('dv_device_tour_done', 'true');
+      }
+    }
+  };
+
+  window.prevDvGuideStep = function() {
+    if (currentStepIdx > 0) {
+      currentStepIdx--;
+      renderStep();
+    }
+  };
+
+  // Auto-launch check on page load (dashboard or authenticated pages)
+  document.addEventListener('DOMContentLoaded', function() {
+    try {
+      const justSignedUp = sessionStorage.getItem('dv_just_signed_up');
+      const signupDone = localStorage.getItem('dv_signup_guide_done');
+      const deviceTourDone = localStorage.getItem('dv_device_tour_done');
+
+      if (justSignedUp && !signupDone) {
+        sessionStorage.removeItem('dv_just_signed_up');
+        setTimeout(() => { openDvGuide('signup'); }, 400);
+      } else if (!deviceTourDone && window.location.pathname.indexOf('/dashboard') !== -1) {
+        setTimeout(() => { openDvGuide('device'); }, 600);
+      }
+    } catch(e) {}
+  });
+})();
+</script>

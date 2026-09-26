@@ -1,0 +1,78 @@
+{% extends 'layouts/auth.html' %}
+
+{% block title %}Sign In — DeepVision Intelligent Surveillance{% endblock %}
+
+{% block auth_content %}
+<div class="auth-header">
+  <h2 class="auth-title">Sign In to DeepVision</h2>
+  <p class="auth-subtitle">Access your surveillance control panel.</p>
+</div>
+
+<form action="{% url 'login' %}" method="POST" id="login-form" novalidate>
+  {% csrf_token %}
+  {% if request.GET.next %}
+    <input type="hidden" name="next" value="{{ request.GET.next }}"/>
+  {% endif %}
+
+  <!-- Email Input -->
+  <div class="form-group">
+    <label class="form-label" for="email">Email Address</label>
+    <input type="email" id="email" name="email" class="form-control" placeholder="operator@deepvision.local" value="{{ email|default:'' }}" required autofocus autocomplete="email"/>
+  </div>
+
+  <!-- Password Input with Eye Toggle -->
+  <div class="form-group">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+      <label class="form-label" for="password" style="margin-bottom: 0;">Password</label>
+      <a href="{% url 'forgot_password' %}" style="font-size: 0.8rem; color: var(--color-primary);">Forgot password?</a>
+    </div>
+    <div style="position: relative;">
+      <input type="password" id="password" name="password" class="form-control" placeholder="••••••••" required autocomplete="current-password" style="padding-right: 2.75rem;"/>
+      <button type="button" id="toggle-password" onclick="togglePassword('password', 'eye-password')"
+        style="position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-secondary); padding: 0; display: flex; align-items: center;"
+        title="Show/hide password" aria-label="Toggle password visibility">
+        <svg id="eye-password" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Remember Me -->
+  <div class="form-group">
+    <label class="form-check">
+      <input type="checkbox" name="remember" value="y"/>
+      <span style="font-size: 0.85rem; color: var(--text-secondary);">Remember this workstation for 30 days</span>
+    </label>
+  </div>
+
+  <!-- Submit Button -->
+  <button type="submit" class="btn btn-primary btn-lg" style="width: 100%; margin-top: 0.5rem;">
+    Sign In
+  </button>
+
+  <div class="auth-footer-text">
+    No account yet?
+    <a href="{% url 'signup' %}" style="font-weight: 600;">Create account</a>
+  </div>
+</form>
+
+<script>
+function togglePassword(inputId, eyeId) {
+  const input = document.getElementById(inputId);
+  const eye = document.getElementById(eyeId);
+  const isHidden = input.type === 'password';
+  input.type = isHidden ? 'text' : 'password';
+  if (isHidden) {
+    eye.innerHTML = `
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+      <line x1="1" y1="1" x2="23" y2="23"></line>`;
+  } else {
+    eye.innerHTML = `
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+      <circle cx="12" cy="12" r="3"></circle>`;
+  }
+}
+</script>
+{% endblock %}
