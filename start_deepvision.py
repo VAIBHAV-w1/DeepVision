@@ -32,6 +32,12 @@ ROOT_DIR = Path(__file__).resolve().parent
 load_dotenv(ROOT_DIR / ".env")
 DJANGO_DIR = ROOT_DIR / "deepvision_django"
 PYTHON_EXE = sys.executable
+venv_py_win = ROOT_DIR / "venv" / "Scripts" / "python.exe"
+venv_py_posix = ROOT_DIR / "venv" / "bin" / "python"
+if venv_py_win.exists() and sys.prefix == sys.base_prefix:
+    PYTHON_EXE = str(venv_py_win)
+elif venv_py_posix.exists() and sys.prefix == sys.base_prefix:
+    PYTHON_EXE = str(venv_py_posix)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,22 +95,26 @@ def main():
     logger.info("  Architecture: Unified Native Django (:8000) Surveillance System")
     logger.info("=================================================================")
 
-    # Start Django Application on port 8000 (if not already running)
-    if is_port_open("127.0.0.1", 8000):
-        logger.info("Django application is already running on port 8000.")
+    # Start Django Application (configurable via DEEPVISION_HOST and DEEPVISION_PORT)
+    host = os.getenv("DEEPVISION_HOST", "127.0.0.1")
+    port = int(os.getenv("DEEPVISION_PORT", "8000"))
+    bind_addr = f"{host}:{port}"
+
+    if is_port_open(host, port):
+        logger.info("Django application is already running on %s.", bind_addr)
     else:
-        logger.info("Starting unified Django surveillance application on port 8000...")
+        logger.info("Starting unified Django surveillance application on %s...", bind_addr)
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         django_proc = subprocess.Popen(
-            [PYTHON_EXE, str(DJANGO_DIR / "manage.py"), "runserver", "127.0.0.1:8000", "--noreload"],
+            [PYTHON_EXE, str(DJANGO_DIR / "manage.py"), "runserver", bind_addr, "--noreload", "--insecure"],
             cwd=str(ROOT_DIR),
             env=env,
         )
         logger.info("Django server launched (PID %s).", django_proc.pid)
 
     logger.info("DeepVision native Django architecture is active.")
-    logger.info("Access the application at: http://127.0.0.1:8000/")
+    logger.info("Access the application at: http://%s/", bind_addr)
     logger.info("Press Ctrl+C to stop services.")
 
     # Monitor process

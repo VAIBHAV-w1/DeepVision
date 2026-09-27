@@ -154,7 +154,7 @@ def run_tests():
         sstore = SessionStore()
         sstore["user_id"] = user2.id
         sstore.save()
-        session.cookies.set("deepvision_django_session", sstore.session_key)
+        session.cookies["deepvision_django_session"] = sstore.session_key
 
         r_me = session.get(f"{BASE_URL}/api/auth/me/")
         me_data = r_me.json()

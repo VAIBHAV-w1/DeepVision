@@ -187,6 +187,11 @@ verification/temp_chrome_profile*/
 verification/temp_chrome_profile/
 verification/temp_chrome_profile_forensics/
 
+# Docker temporary files and overrides
+.docker/
+docker-compose.override.yml
+*.tar
+
 # OS specific files
 .DS_Store
 Thumbs.db

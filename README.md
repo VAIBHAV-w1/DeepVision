@@ -116,12 +116,64 @@ D:\DeepVision
 
 ---
 
-## Quick Start & Running the Project
+## Deployment Options: Native Windows vs. Docker
+
+| Capability | Native Windows (Reference Environment) | Linux Docker Container (`deepvision:1.1.0`) |
+| :--- | :--- | :--- |
+| **Django Application & APIs** | ✅ Full support (`:8000`) | ✅ Full support (`:8000`) |
+| **React SPA Production UI** | ✅ Pre-compiled Vite bundle | ✅ Built in multi-stage image |
+| **Session & OTP Authentication** | ✅ Supported (PBKDF2) | ✅ Supported (PBKDF2) |
+| **Forensic Operations Center** | ✅ Supported | ✅ Supported |
+| **HTTP 206 Partial Playback** | ✅ Supported | ✅ Supported |
+| **Persistent Storage & DB** | ✅ Host filesystem | ✅ Volume mounts (`./instance`, `./recordings`, etc.) |
+| **PyTorch & Ultralytics AI** | ✅ Supported (CPU) | ✅ Supported (CPU) |
+| **DirectShow Physical Webcam** | ✅ Supported (`dshow://0`) | ⚠️ **Host-only Limitation** (Linux containers cannot directly access Windows DirectShow drivers) |
+
+> [!NOTE]
+> **Hardware Boundary**: DirectShow (`dshow://0`) is a proprietary Windows multimedia framework. Standard Linux containers cannot bind directly to physical DirectShow webcams without host-level virtualization drivers. Native Windows remains the reference operational deployment for live USB/DirectShow camera capture. The Docker deployment serves as the portable application, API, forensic operations, and data management runtime.
+
+---
+
+## Docker Quick Start
+
+### 1. Prerequisites
+- Docker Engine 20.10+ / Docker Desktop (WSL 2 on Windows)
+- Docker Compose v2+
+
+### 2. Build the Production Image
+```powershell
+docker build -t deepvision:1.1.0 .
+```
+
+### 3. Start with Docker Compose
+```powershell
+docker compose up -d
+```
+
+### 4. Verify Container Health & Status
+```powershell
+docker compose ps
+curl http://127.0.0.1:8000/api/health/
+```
+
+### 5. Run the Automated Docker Verification Suite
+```powershell
+python verification/test_docker_container.py
+```
+
+### 6. Stop Container
+```powershell
+docker compose down
+```
+
+---
+
+## Native Windows Quick Start
 
 ### Prerequisites
-- Python 3.10+ (Running on Python 3.14.7 AMD64)
+- Python 3.10+ (Running on Python 3.14.7 / 3.11 AMD64)
 - Node.js 18+ and npm (for frontend building)
-- Local webcam or DirectShow-compatible capture device
+- Local webcam or DirectShow-compatible capture device (`dshow://0`)
 
 ### 1. Backend Setup
 Activate the virtual environment and ensure dependencies are installed:
@@ -160,9 +212,22 @@ The application is accessible locally at:
 
 ## Running Verification Tests
 
+### Native Windows Full-Stack & Camera Regression Suite
 To execute the 29-point automated test suite covering all APIs, authentication, streams, singletons, and database invariants:
 ```powershell
 python verification/verify_final_restructure.py
+```
+
+### Incident Scoping & Data Isolation Suite
+To verify zero cross-incident data bleed:
+```powershell
+python verification/test_incident_scoping.py
+```
+
+### Containerized Runtime Verification Suite
+To verify the Docker deployment:
+```powershell
+python verification/test_docker_container.py
 ```
 
 ---

@@ -1,0 +1,64 @@
+# Version control
+.git
+.gitignore
+
+# Environment & local secrets
+.env
+.env.*
+!.env.example
+
+# Local databases and journals
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.sqlite3-journal
+instance/*.db
+instance/*.sqlite*
+
+# Media and evidence (mounted via volumes)
+recordings/*
+!recordings/.gitkeep
+evidence/*
+!evidence/.gitkeep
+
+# Machine learning model weights (mounted via volume or downloaded)
+models/*
+!models/.gitkeep
+*.pt
+*.onnx
+*.weights
+
+# Local backups and scratch scripts
+backups/
+scratch/
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node & frontend build files (built in Docker stage 1)
+frontend/node_modules/
+deepvision_django/static/dist/
+.vite/
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Test browser artifacts
+verification/temp_chrome_profile*/
+verification/screenshots*/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
