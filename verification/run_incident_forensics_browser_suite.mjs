@@ -238,22 +238,7 @@ async function main() {
            `Nav Items: [${navStructure.labels.join(', ')}]; Excluded: Evidence=${!navStructure.hasEvidence}, Recordings=${!navStructure.hasRecordings}, Cases=${!navStructure.hasCases}`);
 
     // Step 4: Navigate to Live Camera 3
-    await client.eval("document.getElementById('nav-cameras')?.click() || document.querySelector('a[href=\"#cameras\"]')?.click()");
-    await client.wait(2500);
-
-    // Open Camera 3
-    await client.eval(`
-      const btn3 = document.getElementById('btn-cam-view-3');
-      if (btn3) {
-        btn3.click();
-      } else {
-        const card = Array.from(document.querySelectorAll('.camera-card')).find(c => c.innerText.includes('Camera 3') || c.innerText.includes('lp'));
-        if (card) {
-          const link = card.querySelector('button') || card.querySelector('a');
-          if (link) link.click();
-        }
-      }
-    `);
+    await client.eval("window.location.hash = '#camera-preview?id=3'");
     await client.wait(3000);
 
     const isCamView = await client.eval("!!document.getElementById('camera-live-stream') || !!document.getElementById('videoViewerContainer') || !!document.querySelector('.live-monitor')");
@@ -282,8 +267,14 @@ async function main() {
     await client.screenshot('03_camera3_tracking.png');
 
     // Step 6: Navigate to Unified Incident Operations Workspace (/alerts)
-    await client.eval("document.querySelector('a[href=\"#alerts\"]')?.click()");
-    await client.wait(2000);
+    await client.eval("window.location.hash = '#alerts'");
+    await client.wait(1500);
+
+    for (let i = 0; i < 25; i++) {
+      const rowCount = await client.eval("document.querySelectorAll('tbody tr').length");
+      if (rowCount > 0) break;
+      await client.wait(400);
+    }
 
     const isAlertsPage = await client.eval("!!document.querySelector('.alerts-page-container') || document.body.innerText.includes('Unified Incident Forensics')");
     report(7, 'Navigate to Unified Incident Operations Workspace (/alerts)', isAlertsPage, 'Alerts page rendered');
@@ -310,7 +301,11 @@ async function main() {
         if (firstRow) firstRow.click();
       }
     `);
-    await client.wait(2500);
+    for (let i = 0; i < 25; i++) {
+      const isReady = await client.eval("!!document.querySelector('.incident-header-card')");
+      if (isReady) break;
+      await client.wait(400);
+    }
 
     const isDetailView = await client.eval("!!document.querySelector('.incident-header-card') || !!document.querySelector('.incident-media-panel')");
     report(9, 'Open Incident Detail Workspace', isDetailView, 'Detail workspace mounted');
@@ -405,7 +400,12 @@ async function main() {
       const backBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Back to Incident Inbox'));
       if (backBtn) backBtn.click();
     `);
-    await client.wait(2000);
+    await client.wait(500);
+    for (let i = 0; i < 20; i++) {
+      const rowCount = await client.eval("document.querySelectorAll('tbody tr').length");
+      if (rowCount > 0) break;
+      await client.wait(300);
+    }
 
     // 1. Open Incident A (row 0)
     await client.eval(`
@@ -415,7 +415,11 @@ async function main() {
         if (btn) btn.click();
       }
     `);
-    await client.wait(3000);
+    for (let i = 0; i < 25; i++) {
+      const isReady = await client.eval("!!document.querySelector('.incident-header-card')");
+      if (isReady) break;
+      await client.wait(400);
+    }
     const incidentAInfo = await client.eval(`
       ({
         title: document.querySelector('.incident-header-card h2')?.innerText || '',
@@ -428,7 +432,12 @@ async function main() {
       const backBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Back to Incident Inbox'));
       if (backBtn) backBtn.click();
     `);
-    await client.wait(2000);
+    await client.wait(500);
+    for (let i = 0; i < 20; i++) {
+      const rowCount = await client.eval("document.querySelectorAll('tbody tr').length");
+      if (rowCount > 0) break;
+      await client.wait(300);
+    }
 
     // 2. Open Incident B (row 1)
     await client.eval(`
@@ -438,7 +447,11 @@ async function main() {
         if (btn) btn.click();
       }
     `);
-    await client.wait(3000);
+    for (let i = 0; i < 25; i++) {
+      const isReady = await client.eval("!!document.querySelector('.incident-header-card')");
+      if (isReady) break;
+      await client.wait(400);
+    }
     const incidentBInfo = await client.eval(`
       ({
         title: document.querySelector('.incident-header-card h2')?.innerText || '',
@@ -455,7 +468,12 @@ async function main() {
       const backBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Back to Incident Inbox'));
       if (backBtn) backBtn.click();
     `);
-    await client.wait(2000);
+    await client.wait(500);
+    for (let i = 0; i < 20; i++) {
+      const rowCount = await client.eval("document.querySelectorAll('tbody tr').length");
+      if (rowCount > 0) break;
+      await client.wait(300);
+    }
     await client.eval(`
       const rows = document.querySelectorAll('tbody tr');
       if (rows[0]) {
@@ -463,7 +481,11 @@ async function main() {
         if (btn) btn.click();
       }
     `);
-    await client.wait(3000);
+    for (let i = 0; i < 25; i++) {
+      const isReady = await client.eval("!!document.querySelector('.incident-header-card')");
+      if (isReady) break;
+      await client.wait(400);
+    }
     const incidentARestored = await client.eval(`
       ({
         title: document.querySelector('.incident-header-card h2')?.innerText || '',

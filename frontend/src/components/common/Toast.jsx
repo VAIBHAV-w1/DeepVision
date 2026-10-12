@@ -21,8 +21,10 @@ export function ToastProvider({ children }) {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
+  const contextValue = React.useMemo(() => ({ addToast, removeToast }), [addToast, removeToast]);
+
   return (
-    <ToastContext.Provider value={{ addToast, removeToast }}>
+    <ToastContext.Provider value={contextValue}>
       {children}
       <div className="toast-container" style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999, display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {toasts.map(toast => (

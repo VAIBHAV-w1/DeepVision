@@ -79,7 +79,26 @@ export const api = {
     verifyOtp: (email, otp) => request('/api/auth/verify-otp/', { method: 'POST', body: { email, otp } }),
     resendOtp: (email) => request('/api/auth/resend-otp/', { method: 'POST', body: { email } }),
     forgotPassword: (email) => request('/api/auth/forgot-password/', { method: 'POST', body: { email } }),
-    resetPassword: (data) => request('/api/auth/reset-password/', { method: 'POST', body: data }),
+    verifyResetOtp: (email, otp) => request('/api/auth/verify-reset-otp/', { method: 'POST', body: { email, otp } }),
+    resetPassword: (emailOrData, otp, newPassword, confirmPassword) => {
+      let payload;
+      if (typeof emailOrData === 'object' && emailOrData !== null) {
+        payload = {
+          email: emailOrData.email,
+          otp: emailOrData.otp || emailOrData.reset_code || emailOrData.code,
+          new_password: emailOrData.new_password || emailOrData.newPassword,
+          confirm_password: emailOrData.confirm_password || emailOrData.confirmPassword,
+        };
+      } else {
+        payload = {
+          email: emailOrData,
+          otp: otp,
+          new_password: newPassword,
+          confirm_password: confirmPassword,
+        };
+      }
+      return request('/api/auth/reset-password/', { method: 'POST', body: payload });
+    },
     logout: () => request('/api/auth/logout/', { method: 'POST' }),
   },
 

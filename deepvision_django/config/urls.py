@@ -9,6 +9,7 @@ Provides:
 """
 
 from django.urls import path
+from django.views.generic.base import RedirectView
 from apps.core import views as core_views
 from apps.core import api as api_views
 from apps.accounts import views as auth_views
@@ -19,6 +20,9 @@ from apps.alerts import views as alert_views
 from apps.notifications import views as notification_views
 
 urlpatterns = [
+    # Favicon
+    path('favicon.ico', RedirectView.as_view(url='/static/dist/favicon.svg', permanent=False), name='favicon'),
+
     # React SPA Entrypoints (Root & Page Routes)
     path('', core_views.react_app_view, name='root'),
     path('dashboard/', core_views.react_app_view, name='dashboard'),
@@ -45,10 +49,13 @@ urlpatterns = [
     path('api/auth/csrf/', api_views.api_csrf, name='api_csrf'),
     path('api/auth/me/', api_views.api_me, name='api_me'),
     path('api/auth/login/', api_views.api_login, name='api_login'),
+    path('api/auth/verify-login-otp/', api_views.api_verify_login_otp, name='api_verify_login_otp'),
+    path('api/auth/resend-login-otp/', api_views.api_resend_login_otp, name='api_resend_login_otp'),
     path('api/auth/signup/', api_views.api_signup, name='api_signup'),
     path('api/auth/verify-otp/', api_views.api_verify_otp, name='api_verify_otp'),
     path('api/auth/resend-otp/', api_views.api_resend_otp, name='api_resend_otp'),
     path('api/auth/forgot-password/', api_views.api_forgot_password, name='api_forgot_password'),
+    path('api/auth/verify-reset-otp/', api_views.api_verify_reset_otp, name='api_verify_reset_otp'),
     path('api/auth/reset-password/', api_views.api_reset_password, name='api_reset_password'),
     path('api/auth/logout/', api_views.api_logout, name='api_logout'),
 

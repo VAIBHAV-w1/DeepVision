@@ -25,7 +25,7 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
       if (data) {
         const list = data.cases || [];
         setCases(list);
-        setTotalCount(data.total_count ?? list.length);
+        setTotalCount(data.total_count ?? data.total ?? list.length);
 
         if (selectedId) {
           const found = list.find(c => Number(c.id) === Number(selectedId));
@@ -50,16 +50,16 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
 
   return (
     <div className="cases-page-container">
-      {/* Editorial Header */}
-      <div className="hero-editorial-wrap">
-        <div className="editorial-badge-pill">
-          <span>Case Registry</span>
+      {/* Operational Header */}
+      <div className="hero-editorial-wrap" style={{ marginBottom: '1.25rem' }}>
+        <div className="editorial-badge-pill" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#10b981', padding: '4px 12px', borderRadius: '9999px', fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', marginBottom: '8px' }}>
+          <span>INCIDENT WORKFLOWS</span>
         </div>
-        <h1 className="editorial-hero-title" style={{ fontSize: 'clamp(2.2rem, 4vw, 3.25rem)', marginBottom: '0.5rem' }}>
-          Forensic incident cases
+        <h1 className="editorial-hero-title" style={{ fontSize: '1.6rem', fontWeight: 700, margin: '2px 0 6px 0', letterSpacing: '-0.02em', color: 'var(--text-main)' }}>
+          Incident Case Management
         </h1>
-        <p className="editorial-hero-subtitle" style={{ marginBottom: '2rem' }}>
-          Track, investigate, and resolve security incident workflows, evidence chains, and SLA response timelines.
+        <p className="editorial-hero-subtitle" style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: 0 }}>
+          Organize security incidents, track investigation notes, and review linked evidence.
         </p>
       </div>
 

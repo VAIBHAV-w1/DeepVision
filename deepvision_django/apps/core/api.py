@@ -27,7 +27,7 @@ from django.utils import timezone
 
 from apps.accounts.decorators import login_required
 from apps.accounts.models import User
-from apps.accounts.email_service import send_verification_email, send_password_reset_email
+from apps.accounts.email_service import send_verification_email, send_password_reset_email, send_login_otp_email
 from apps.accounts.views import validate_signup_inputs, validate_password_strength, EMAIL_REGEX
 from apps.cameras.models import Camera
 from apps.recordings.models import Recording
@@ -47,6 +47,7 @@ from apps.ai.engine import (
     start_camera_recording,
     stop_camera_recording,
 )
+from apps.cameras.views import get_accessible_cameras_qs, get_user_camera_or_404
 from apps.core.media_service import safe_resolve_recording, safe_resolve_evidence
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,8 @@ def _parse_body(request):
     if not request.body:
         return {}
     try:
-        return json.loads(request.body.decode('utf-8'))
+        parsed = json.loads(request.body.decode('utf-8'))
+        return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
 
@@ -105,7 +107,11 @@ def api_me(request):
 
 @require_POST
 def api_login(request):
-    """Session login supporting JSON payload."""
+    """
+    Step 1 of Login: Validates username/email and password.
+    Every login MUST require a fresh, single-use Login OTP sent to registered email.
+    Does NOT establish authenticated session until Login OTP is verified.
+    """
     data = _parse_body(request)
     email = data.get("email", "").strip().lower() or request.POST.get("email", "").strip().lower()
     password = data.get("password", "") or request.POST.get("password", "")
@@ -127,13 +133,67 @@ def api_login(request):
         }, status=403)
 
     if not user.is_active:
-        return JsonResponse({"success": False, "error": "Your account is currently inactive."}, status=403)
+        return JsonResponse({"success": False, "error": "Your account is currently inactive. Please contact an administrator."}, status=403)
 
+    # Flush session fixation state
+    request.session.flush()
+
+    # Generate fresh single-use Login OTP (purpose="login")
+    otp = user.generate_otp(purpose="login")
+    user.save(update_fields=["email_otp_hash", "email_otp_expires_at", "email_otp_sent_at", "email_otp_attempts"])
+
+    try:
+        sent = send_login_otp_email(user.email, otp, user.full_name)
+        if not sent:
+            logger.warning(f"[AUTH] Sign-in verification email was not dispatched for {user.email}")
+    except Exception as e:
+        logger.error(f"[AUTH] Failed to send sign-in verification email to {user.email}: {e}")
+
+    # Set pending login state in signed session (USER IS NOT AUTHENTICATED YET)
+    request.session["pending_login_user_id"] = user.id
+    request.session["pending_login_email"] = user.email
+
+    return JsonResponse({
+        "success": True,
+        "requires_otp": True,
+        "email": user.email,
+        "message": "A 6-digit verification code has been sent to your email."
+    })
+
+
+@require_POST
+def api_verify_login_otp(request):
+    """
+    Step 2 of Login: Validates the 6-digit Login OTP.
+    Only upon successful OTP validation is the authenticated Django session established.
+    """
+    data = _parse_body(request)
+    email = data.get("email", "").strip().lower() or request.session.get("pending_login_email", "")
+    otp = data.get("otp", "").strip() or request.POST.get("otp", "").strip()
+
+    if not email or not otp:
+        return JsonResponse({"success": False, "error": "Email and verification code are required."}, status=400)
+
+    user = User.objects.filter(email=email).first()
+    pending_uid = request.session.get("pending_login_user_id")
+
+    if not user or (pending_uid and pending_uid != user.id):
+        return JsonResponse({"success": False, "error": "Invalid or expired login session. Please sign in again."}, status=401)
+
+    success, err_msg = user.verify_otp(otp, purpose="login")
+    if not success:
+        user.save(update_fields=["email_otp_attempts"])
+        return JsonResponse({"success": False, "error": err_msg}, status=400)
+
+    user.save(update_fields=["email_otp_hash", "email_otp_expires_at", "email_otp_attempts"])
+
+    # OTP verified! Establish the authenticated Django session now
     request.session.flush()
     request.session["user_id"] = user.id
 
     return JsonResponse({
         "success": True,
+        "message": "Authentication successful.",
         "user": {
             "id": user.id,
             "email": user.email,
@@ -144,8 +204,35 @@ def api_login(request):
 
 
 @require_POST
+def api_resend_login_otp(request):
+    """Resends single-use 6-digit Login OTP for pending login session."""
+    data = _parse_body(request)
+    email = data.get("email", "").strip().lower() or request.session.get("pending_login_email", "")
+
+    if not email:
+        return JsonResponse({"success": False, "error": "Email is required."}, status=400)
+
+    user = User.objects.filter(email=email).first()
+    pending_uid = request.session.get("pending_login_user_id")
+    if not user or (pending_uid and pending_uid != user.id):
+        return JsonResponse({"success": False, "error": "Invalid or expired login session. Please sign in again."}, status=401)
+
+    otp = user.generate_otp(purpose="login")
+    user.save(update_fields=["email_otp_hash", "email_otp_expires_at", "email_otp_sent_at", "email_otp_attempts"])
+
+    try:
+        sent = send_login_otp_email(user.email, otp, user.full_name)
+        if not sent:
+            logger.warning(f"[AUTH] Resend sign-in verification email was not dispatched for {user.email}")
+    except Exception as e:
+        logger.error(f"[AUTH] Failed to resend sign-in verification email to {user.email}: {e}")
+
+    return JsonResponse({"success": True, "message": "A new sign-in verification code has been sent."})
+
+
+@require_POST
 def api_signup(request):
-    """Creates user using PBKDF2 hashing and sends 6-digit OTP."""
+    """Creates user in pending/unverified state and sends 6-digit Signup OTP."""
     data = _parse_body(request)
     full_name = data.get("full_name", "").strip() or request.POST.get("full_name", "").strip()
     email = data.get("email", "").strip().lower() or request.POST.get("email", "").strip().lower()
@@ -168,7 +255,7 @@ def api_signup(request):
             is_active=True,
         )
         new_user.set_password(password)  # Uses Django PBKDF2
-        otp = new_user.generate_otp()
+        otp = new_user.generate_otp(purpose="signup")
         new_user.save()
 
         try:
@@ -181,7 +268,7 @@ def api_signup(request):
         request.session["signup_email"] = email
         return JsonResponse({
             "success": True,
-            "message": "Account created successfully. A verification code has been sent to your email.",
+            "message": "Account created. A verification code has been sent to your email.",
             "email": email
         })
     except Exception as e:
@@ -191,8 +278,16 @@ def api_signup(request):
 
 @require_POST
 def api_verify_otp(request):
-    """Validates 6-digit email verification OTP."""
+    """
+    Validates 6-digit email verification OTP for newly registered accounts.
+    Marks account as verified. Does NOT automatically log the user in; redirects to Login.
+    If requested with purpose='login', delegates to login OTP validation.
+    """
     data = _parse_body(request)
+    purpose = data.get("purpose", "").strip().lower()
+    if purpose == "login" or (not request.session.get("signup_email") and request.session.get("pending_login_email")):
+        return api_verify_login_otp(request)
+
     email = data.get("email", "").strip().lower() or request.session.get("signup_email", "")
     otp = data.get("otp", "").strip() or request.POST.get("otp", "").strip()
 
@@ -203,31 +298,32 @@ def api_verify_otp(request):
     if not user:
         return JsonResponse({"success": False, "error": "Account not found."}, status=404)
 
-    success, err_msg = user.verify_otp(otp)
+    success, err_msg = user.verify_otp(otp, purpose="signup")
     if not success:
         user.save(update_fields=["email_otp_attempts"])
         return JsonResponse({"success": False, "error": err_msg}, status=400)
 
     user.save(update_fields=["is_email_verified", "email_otp_hash", "email_otp_expires_at", "email_otp_attempts"])
+    
+    # Flush session. DO NOT log in automatically!
     request.session.flush()
-    request.session["user_id"] = user.id
 
     return JsonResponse({
         "success": True,
-        "message": "Email verified successfully.",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "full_name": user.full_name,
-            "role": user.role,
-        }
+        "verified": True,
+        "message": "Email verified successfully. Please sign in with your credentials.",
+        "email": user.email
     })
 
 
 @require_POST
 def api_resend_otp(request):
-    """Resends email verification OTP."""
+    """Resends email verification OTP for signup."""
     data = _parse_body(request)
+    purpose = data.get("purpose", "").strip().lower()
+    if purpose == "login" or (not request.session.get("signup_email") and request.session.get("pending_login_email")):
+        return api_resend_login_otp(request)
+
     email = data.get("email", "").strip().lower() or request.session.get("signup_email", "")
 
     if not email:
@@ -240,7 +336,7 @@ def api_resend_otp(request):
     if user.is_email_verified:
         return JsonResponse({"success": False, "error": "Email is already verified."}, status=400)
 
-    otp = user.generate_otp()
+    otp = user.generate_otp(purpose="signup")
     user.save(update_fields=["email_otp_hash", "email_otp_expires_at", "email_otp_sent_at", "email_otp_attempts"])
 
     try:
@@ -279,16 +375,44 @@ def api_forgot_password(request):
 
 
 @require_POST
-def api_reset_password(request):
-    """Verifies OTP and resets password using PBKDF2."""
+def api_verify_reset_otp(request):
+    """
+    Verifies password reset OTP without altering password yet.
+    Allows frontend to confirm code validity before user sets new password.
+    """
     data = _parse_body(request)
-    email = data.get("email", "").strip().lower() or request.POST.get("email", "").strip().lower()
-    otp = data.get("otp", "").strip() or request.POST.get("otp", "").strip()
-    new_password = data.get("new_password", "") or request.POST.get("new_password", "")
-    confirm_password = data.get("confirm_password", "") or request.POST.get("confirm_password", "")
+    email = (data.get("email", "") or request.POST.get("email", "")).strip().lower()
+    otp = (data.get("otp", "") or data.get("reset_code", "") or data.get("code", "") or request.POST.get("otp", "") or request.POST.get("reset_code", "")).strip()
 
     if not email or not otp:
         return JsonResponse({"success": False, "error": "Email and reset code are required."}, status=400)
+
+    user = User.objects.filter(email=email).first()
+    if not user:
+        return JsonResponse({"success": False, "error": "Invalid reset code or email."}, status=400)
+
+    success, err_msg = user.verify_reset_otp(otp)
+    if not success:
+        user.save(update_fields=["password_reset_otp_attempts"])
+        return JsonResponse({"success": False, "error": err_msg}, status=400)
+
+    return JsonResponse({"success": True, "message": "Verification code confirmed."})
+
+
+@require_POST
+def api_reset_password(request):
+    """Verifies OTP and resets password using PBKDF2."""
+    data = _parse_body(request)
+    email = (data.get("email", "") or request.POST.get("email", "")).strip().lower()
+    otp = (data.get("otp", "") or data.get("reset_code", "") or data.get("code", "") or request.POST.get("otp", "") or request.POST.get("reset_code", "")).strip()
+    new_password = data.get("new_password", "") or data.get("newPassword", "") or request.POST.get("new_password", "") or request.POST.get("password", "")
+    confirm_password = data.get("confirm_password", "") or data.get("confirmPassword", "") or request.POST.get("confirm_password", "")
+
+    if not email or not otp:
+        return JsonResponse({"success": False, "error": "Email and reset code are required."}, status=400)
+
+    if not new_password or not confirm_password:
+        return JsonResponse({"success": False, "error": "New password and confirmation are required."}, status=400)
 
     user = User.objects.filter(email=email).first()
     if not user:
@@ -329,7 +453,7 @@ def api_logout(request):
 def api_dashboard_stats(request):
     """Returns SOC dashboard real metrics and recent activities."""
     user_id = request.user.id
-    user_cameras = list(Camera.objects.filter(user_id=user_id).order_by('id'))
+    user_cameras = list(get_accessible_cameras_qs(request.user))
     total_cameras = len(user_cameras)
     online_cameras = sum(1 for c in user_cameras if c.status == 'online')
     active_cameras = sum(1 for c in user_cameras if c.is_active)
@@ -379,7 +503,7 @@ def api_dashboard_stats(request):
             "source_type": c.source_type,
             "status": c.status,
             "is_active": c.is_active,
-            "is_recording": is_camera_recording(c.id, user_id),
+            "is_recording": is_camera_recording(c.id, c.user_id),
         })
 
     engine_reachable = is_engine_reachable(timeout=0.5)
@@ -409,8 +533,7 @@ def api_dashboard_stats(request):
 @login_required
 def api_cameras_list(request):
     """Returns cameras list for authenticated user with operational status."""
-    user_id = request.user.id
-    cameras_qs = Camera.objects.filter(user_id=user_id).order_by('id')
+    cameras_qs = get_accessible_cameras_qs(request.user)
     status_filter = request.GET.get('status', 'all').strip().lower()
     if status_filter in ('online', 'offline'):
         cameras_qs = cameras_qs.filter(status=status_filter)
@@ -425,7 +548,7 @@ def api_cameras_list(request):
             "location": c.location or "Default Zone",
             "status": c.status,
             "is_active": c.is_active,
-            "is_recording": is_camera_recording(c.id, user_id),
+            "is_recording": is_camera_recording(c.id, c.user_id),
             "created_at": c.created_at.isoformat() if c.created_at else "",
         })
 
@@ -444,14 +567,14 @@ def api_cameras_list(request):
 @login_required
 def api_camera_detail(request, camera_id):
     """Returns single camera metadata and runtime state."""
-    camera = get_object_or_404(Camera, id=camera_id, user_id=request.user.id)
+    camera = get_user_camera_or_404(request.user, camera_id)
     engine_reachable = is_engine_reachable(timeout=0.5)
-    is_recording = is_camera_recording(camera.id, request.user.id)
-    recordings_count = camera.recordings.filter(user_id=request.user.id).count()
-    alerts_count = camera.alerts.filter(user_id=request.user.id).count()
+    is_recording = is_camera_recording(camera.id, camera.user_id)
+    recordings_count = camera.recordings.filter(user_id=camera.user_id).count()
+    alerts_count = camera.alerts.filter(user_id=camera.user_id).count()
 
     recent_recordings = []
-    for r in camera.recordings.filter(user_id=request.user.id).order_by('-started_at', '-id')[:5]:
+    for r in camera.recordings.filter(user_id=camera.user_id).order_by('-started_at', '-id')[:5]:
         recent_recordings.append({
             "id": r.id,
             "filename": r.filename,
@@ -463,7 +586,7 @@ def api_camera_detail(request, camera_id):
         })
 
     recent_alerts = []
-    for a in camera.alerts.filter(user_id=request.user.id).order_by('-detected_at', '-id')[:5]:
+    for a in camera.alerts.filter(user_id=camera.user_id).order_by('-detected_at', '-id')[:5]:
         recent_alerts.append({
             "id": a.id,
             "title": a.title or a.event_type or "Security Alert",
@@ -888,7 +1011,9 @@ def api_alert_scoped_recordings(request, alert_id):
 @never_cache
 @login_required
 def api_alert_scoped_case(request, alert_id):
-    """Returns ONLY the forensic case strictly belonging to this incident."""
+    """Returns ONLY the forensic case strictly belonging to this incident, or creates one if POST."""
+    if request.method == "POST":
+        return api_alert_create_case(request, alert_id)
     context = get_incident_context(alert_id, user_id=request.user.id)
     return JsonResponse({
         "alert_id": alert_id,
@@ -1033,8 +1158,12 @@ def api_cases_list(request):
             Q(description__icontains=search_query)
         )
 
+    total_count = cases_qs.count()
+    limit = int(request.GET.get('limit', '50'))
+    cases_page = cases_qs[:limit]
+
     items = []
-    for c in cases_qs:
+    for c in cases_page:
         items.append({
             "id": c.id,
             "case_number": c.case_number,
@@ -1049,7 +1178,7 @@ def api_cases_list(request):
             "closed_at": c.closed_at.isoformat() if c.closed_at else "",
         })
 
-    return JsonResponse({"cases": items, "total": len(items)})
+    return JsonResponse({"cases": items, "total": total_count, "total_count": total_count})
 
 
 @never_cache

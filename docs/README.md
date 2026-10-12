@@ -9,24 +9,39 @@ This directory centralizes all architectural specifications, technical matrices,
 ```text
 docs/
 ├── architecture/          # Architecture blueprints, data flows, and legacy references
-│   └── legacy-project-structure.md
+│   ├── legacy-project-structure.md
+│   └── legacy-phase10-architecture.md
 │
 ├── technical/             # Technology matrices, dependency audits, and contracts
 │   ├── TECH_STACK_AUDIT_REPORT.md
 │   └── TECH_STACK_DEPENDENCY_MATRIX.md
 │
 ├── reports/               # Historical engineering, health, and audit reports
+│   ├── DOCKER_REPOSITORY_CLEANUP_REPORT.md
+│   ├── FINAL_AUTH_CAMERA_FIX_REPORT.md
+│   ├── REPOSITORY_STRUCTURE_CLEANUP_REPORT.md
+│   ├── audits/            # Architecture audits, cleanup manifests, restructure records
+│   │   ├── CLEANUP_MANIFEST.md
+│   │   └── PHASE_FINAL_RESTRUCTURE_REPORT.md
+│   ├── auth/              # Authentication & email subsystem diagnostics
+│   │   └── EMAIL_HEALTH_REPORT.md
+│   ├── forensic/          # Incident forensics audits & UI consolidation reports
+│   │   ├── FINAL_FORENSIC_UI_CONSOLIDATION_REPORT.md
+│   │   ├── FINAL_INCIDENT_FORENSICS_AUDIT_REPORT.md
+│   │   └── MAJOR_INCIDENT_FORENSICS_PERFORMANCE_REPORT.md
 │   ├── phase14/           # Phase 14 Django-native completion & dependency reports
 │   │   ├── PHASE14_COMPLETION_REPORT.md
 │   │   └── PHASE14_DEPENDENCY_INVENTORY.md
 │   ├── phase15/           # Phase 15 health & performance stabilization reports
 │   │   └── PHASE15_HEALTH_REPORT.md
-│   ├── audits/            # Architecture audits, cleanup manifests, restructure records
-│   │   ├── CLEANUP_MANIFEST.md
-│   │   └── PHASE_FINAL_RESTRUCTURE_REPORT.md
-│   └── forensic/          # Incident forensics audits & UI consolidation reports
-│       ├── FINAL_FORENSIC_UI_CONSOLIDATION_REPORT.md
-│       └── FINAL_INCIDENT_FORENSICS_AUDIT_REPORT.md
+│   ├── stabilization/     # Camera frame reliability & full-stack stabilization
+│   │   └── FULL_STACK_STABILIZATION_REPORT.md
+│   ├── ui/                # UI inventory & restoration reports
+│   │   ├── ORIGINAL_UI_INVENTORY.md
+│   │   └── ORIGINAL_UI_RESTORATION_REPORT.md
+│   └── verification/      # Comprehensive system verification & health reports
+│       ├── FINAL_HEALTH_REPORT.md
+│       └── FINAL_SYSTEM_VERIFICATION_REPORT.md
 │
 ├── releases/              # Release notes and version control reports
 │   ├── RELEASE_NOTES_v1.0.0.md

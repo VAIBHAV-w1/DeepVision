@@ -54,6 +54,7 @@ COPY manage.py sitecustomize.py start_deepvision.py .env.example ./
 COPY deepvision_django/ ./deepvision_django/
 COPY scripts/ ./scripts/
 COPY docs/ ./docs/
+COPY models/yolo11n.pt ./models/yolo11n.pt
 
 # Copy compiled production React frontend assets from Stage 1
 COPY --from=frontend-builder /app/deepvision_django/static/dist/ ./deepvision_django/static/dist/

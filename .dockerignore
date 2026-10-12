@@ -23,10 +23,10 @@ recordings/*
 evidence/*
 !evidence/.gitkeep
 
-# Machine learning model weights (mounted via volume or downloaded)
+# Machine learning model weights (yolo11n.pt bundled in portable image)
 models/*
 !models/.gitkeep
-*.pt
+!models/yolo11n.pt
 *.onnx
 *.weights
 

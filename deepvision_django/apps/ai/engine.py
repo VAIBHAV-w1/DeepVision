@@ -15,6 +15,10 @@ Zero Flask runtime dependency.
 Zero legacy HTTP communication.
 """
 
+import os
+import json
+import urllib.request
+import urllib.error
 import cv2
 import logging
 import datetime
@@ -62,8 +66,8 @@ def get_engine_status() -> Dict[str, Any]:
     """
     cam_reg = get_camera_registry()
     inf_reg = get_inference_registry()
-    active_cameras = len(cam_reg.workers)
-    active_inference = len(inf_reg.workers)
+    unique_cam_workers = len(set(cam_reg.workers.values())) if cam_reg.workers else 0
+    active_inference = len(set(inf_reg.workers.values())) if inf_reg.workers else 0
 
     return {
         "engine_url": "in-process (native Django)",
@@ -71,9 +75,9 @@ def get_engine_status() -> Dict[str, Any]:
         "mode": "native_django_surveillance",
         "yolo_model": "models/yolo11n.pt (native singleton)",
         "tracker": "ByteTrack (native singleton)",
-        "camera_registry": f"native (active_cameras={active_cameras}, active_inference={active_inference})",
+        "camera_registry": f"native (active_cameras={len(cam_reg.workers)}, hardware_handles={unique_cam_workers}, active_inference={active_inference})",
         "django_yolo_loads": 1 if active_inference > 0 else 0,
-        "django_camera_handles": active_cameras,
+        "django_camera_handles": unique_cam_workers,
     }
 
 
@@ -84,8 +88,8 @@ def get_engine_health(user_id: Optional[int] = None) -> Dict[str, Any]:
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     cam_reg = get_camera_registry()
     inf_reg = get_inference_registry()
-    active_cams = len(cam_reg.workers)
-    active_inf = len(inf_reg.workers)
+    unique_cam_workers = len(set(cam_reg.workers.values())) if cam_reg.workers else 0
+    active_inf = len(set(inf_reg.workers.values())) if inf_reg.workers else 0
 
     return {
         "status": "healthy",
@@ -94,7 +98,8 @@ def get_engine_health(user_id: Optional[int] = None) -> Dict[str, Any]:
         "camera_subsystem": "ready",
         "inference_subsystem": "ready",
         "camera_ownership": "Django Native Surveillance Services",
-        "django_camera_handles": active_cams,
+        "django_camera_handles": unique_cam_workers,
+        "logical_cameras_active": len(cam_reg.workers),
         "django_yolo_loads": 1 if active_inf > 0 else 0,
         "yolo_readiness": "ready",
         "active_mode": "native_django_surveillance",
@@ -117,22 +122,78 @@ def normalize_mode(mode: Optional[str]) -> str:
     return VALID_MODES.get(m, "tracking")
 
 
+def get_host_bridge_url() -> Optional[str]:
+    """
+    Checks if an external host camera bridge is reachable.
+    Used when running inside Linux Docker to access the physical Windows DirectShow webcam.
+    """
+    if os.environ.get("USE_HOST_CAMERA_BRIDGE", "").lower() == "false":
+        return None
+    url = os.getenv("HOST_CAMERA_BRIDGE_URL", "http://host.docker.internal:8554").rstrip("/")
+    # In native Windows, by default we run in-process unless explicitly overridden
+    if os.name == "nt" and os.getenv("USE_HOST_CAMERA_BRIDGE", "False").lower() not in ("true", "1"):
+        return None
+    try:
+        req = urllib.request.Request(f"{url}/health", headers={"User-Agent": "DeepVision-Django"})
+        with urllib.request.urlopen(req, timeout=0.8) as resp:
+            if resp.status == 200:
+                return url
+    except Exception:
+        pass
+    return None
+
+
 def stream_camera_frames(camera_id: int, user_id: int, mode: str = "tracking") -> Generator[bytes, None, None]:
     """
-    Streams live MJPEG frames directly from native Django surveillance services.
-    Yields multipart/x-mixed-replace JPEG chunks for Django's StreamingHttpResponse.
+    Streams live MJPEG frames directly from native Django surveillance services,
+    or from the Windows DirectShow host bridge when running containerized.
     """
     canonical_mode = normalize_mode(mode)
+    bridge_url = get_host_bridge_url()
+    if bridge_url:
+        try:
+            req = urllib.request.Request(f"{bridge_url}/cameras/{camera_id}/stream/?mode={canonical_mode}")
+            resp = urllib.request.urlopen(req, timeout=10.0)
+            if resp.status == 200:
+                try:
+                    while True:
+                        chunk = resp.read(8192)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    resp.close()
+                return
+        except urllib.error.HTTPError as he:
+            if he.code != 404:
+                logger.warning(f"[BRIDGE_STREAM_HTTP_ERROR] cam={camera_id}: {he}")
+        except Exception as e:
+            logger.warning(f"[BRIDGE_STREAM_ERROR] cam={camera_id}: {e}")
+
     if canonical_mode == "raw":
-        return generate_raw_stream(camera_id, user_id)
+        yield from generate_raw_stream(camera_id, user_id)
     else:
-        return generate_tracking_stream(camera_id, user_id)
+        yield from generate_tracking_stream(camera_id, user_id)
 
 
 def get_camera_snapshot(camera_id: int, user_id: int) -> Optional[bytes]:
     """
-    Captures a single snapshot JPEG frame directly from native camera worker or hardware.
+    Captures a single snapshot JPEG frame directly from native camera worker or hardware,
+    or via the host camera bridge if running containerized.
     """
+    bridge_url = get_host_bridge_url()
+    if bridge_url:
+        try:
+            req = urllib.request.Request(f"{bridge_url}/cameras/{camera_id}/snapshot/")
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                if resp.status == 200:
+                    return resp.read()
+        except urllib.error.HTTPError as he:
+            if he.code != 404:
+                logger.warning(f"[BRIDGE_SNAPSHOT_HTTP_ERROR] cam={camera_id}: {he}")
+        except Exception as e:
+            logger.warning(f"[BRIDGE_SNAPSHOT_ERROR] cam={camera_id}: {e}")
+
     cam_reg = get_camera_registry()
     worker = cam_reg.get_active_worker(camera_id)
 
@@ -172,8 +233,18 @@ def get_camera_snapshot(camera_id: int, user_id: int) -> Optional[bytes]:
 
 def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
     """
-    Retrieves live stream telemetry from native surveillance services.
+    Retrieves live stream telemetry from native surveillance services or host bridge.
     """
+    bridge_url = get_host_bridge_url()
+    if bridge_url:
+        try:
+            req = urllib.request.Request(f"{bridge_url}/cameras/{camera_id}/stats/")
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                if resp.status == 200:
+                    return json.loads(resp.read().decode())
+        except Exception:
+            pass
+
     telemetry = get_camera_telemetry(camera_id)
     health = get_camera_health(camera_id)
     is_rec = False
@@ -212,8 +283,19 @@ def warm_camera(camera_id: int, user_id: int) -> bool:
 
 def start_camera_recording(camera_id: int, user_id: int) -> Dict[str, Any]:
     """
-    Initiates physical recording on the native Django surveillance engine.
+    Initiates physical recording on the native Django surveillance engine
+    or delegates to host camera bridge if containerized.
     """
+    bridge_url = get_host_bridge_url()
+    if bridge_url:
+        try:
+            req = urllib.request.Request(f"{bridge_url}/cameras/{camera_id}/record/start", data=b"", method="POST")
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                if resp.status == 200:
+                    return json.loads(resp.read().decode())
+        except Exception as e:
+            logger.warning(f"[BRIDGE_START_RECORD_ERROR] cam={camera_id}: {e}")
+
     try:
         active = recording_service.get_active_recording(camera_id, user_id)
         if active:
@@ -235,8 +317,19 @@ def start_camera_recording(camera_id: int, user_id: int) -> Dict[str, Any]:
 
 def stop_camera_recording(camera_id: int, user_id: int) -> Dict[str, Any]:
     """
-    Stops physical recording on the native Django surveillance engine.
+    Stops physical recording on the native Django surveillance engine
+    or delegates to host camera bridge if containerized.
     """
+    bridge_url = get_host_bridge_url()
+    if bridge_url:
+        try:
+            req = urllib.request.Request(f"{bridge_url}/cameras/{camera_id}/record/stop", data=b"", method="POST")
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                if resp.status == 200:
+                    return json.loads(resp.read().decode())
+        except Exception as e:
+            logger.warning(f"[BRIDGE_STOP_RECORD_ERROR] cam={camera_id}: {e}")
+
     try:
         active = recording_service.get_active_recording(camera_id, user_id)
         if not active:
@@ -306,8 +399,20 @@ def test_existing_camera(camera_id: int, user_id: int) -> Dict[str, Any]:
     if not camera:
         return {"success": False, "message": "Camera not found."}
 
+    bridge_url = get_host_bridge_url()
+    if bridge_url and camera.source_type in ("webcam", "usb", "local"):
+        try:
+            req = urllib.request.Request(f"{bridge_url}/cameras/{camera_id}/test/")
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                if resp.status == 200:
+                    return json.loads(resp.read().decode())
+        except Exception as e:
+            logger.warning(f"[BRIDGE_TEST_CAM_ERROR] cam={camera_id}: {e}")
+
+    from apps.surveillance.camera.sources import get_physical_source_key
+    physical_key = get_physical_source_key(camera.source_type, camera.source)
     cam_reg = get_camera_registry()
-    active_worker = cam_reg.get_active_worker(camera_id)
+    active_worker = cam_reg.get_active_worker(camera_id) or cam_reg.get_physical_worker(physical_key)
     if active_worker and active_worker.running:
         return {"success": True, "message": "Camera stream is currently active and healthy."}
 

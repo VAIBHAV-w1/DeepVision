@@ -77,6 +77,7 @@ else:
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
+SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
 
 # Messages Configuration: Cookie-based (ZERO database writes)
 MESSAGE_STORAGE = 'django.contrib.messages.storage.cookie.CookieStorage'
@@ -102,17 +103,42 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 ASGI_APPLICATION = 'config.asgi.application'
 
-# Database configuration: Pointing to existing DeepVision SQLite database in READ-ONLY mode
-# DO NOT run migrations against existing tables.
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR.parent / 'instance' / 'deepvision.db',
-        'OPTIONS': {
-            'timeout': 30.0,
-        },
+# Database configuration: Dynamic selection via DB_ENGINE / USE_MYSQL environment variables
+DB_ENGINE = os.getenv('DB_ENGINE', '').strip()
+USE_MYSQL = os.getenv('USE_MYSQL', '').lower() in ('true', '1') or DB_ENGINE == 'django.db.backends.mysql'
+
+if USE_MYSQL:
+    try:
+        import pymysql
+        pymysql.install_as_MySQLdb()
+    except ImportError:
+        pass
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.getenv('MYSQL_DATABASE', 'DeepVision'),
+            'USER': os.getenv('MYSQL_USER', 'Vaibhav'),
+            'PASSWORD': os.getenv('MYSQL_PASSWORD', ''),
+            'HOST': os.getenv('MYSQL_HOST', '127.0.0.1'),
+            'PORT': int(os.getenv('MYSQL_PORT', '3306')),
+            'OPTIONS': {
+                'charset': 'utf8mb4',
+                'connect_timeout': 10,
+            },
+        }
     }
-}
+else:
+    # Verified canonical SQLite database
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR.parent / 'instance' / 'deepvision.db',
+            'OPTIONS': {
+                'timeout': 30.0,
+            },
+        }
+    }
+
 
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/dashboard/'

@@ -62,16 +62,16 @@ export function Notifications({ onNavigate }) {
 
   return (
     <div className="notifications-page-container">
-      {/* Editorial Header */}
-      <div className="hero-editorial-wrap">
-        <div className="editorial-badge-pill">
-          <span>Security Inbox</span>
+      {/* Operational Header */}
+      <div className="hero-editorial-wrap" style={{ marginBottom: '1.25rem' }}>
+        <div className="editorial-badge-pill" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#10b981', padding: '4px 12px', borderRadius: '9999px', fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', marginBottom: '8px' }}>
+          <span>SECURITY INBOX</span>
         </div>
-        <h1 className="editorial-hero-title" style={{ fontSize: 'clamp(2.2rem, 4vw, 3.25rem)', marginBottom: '0.5rem' }}>
-          Security Notifications
+        <h1 className="editorial-hero-title" style={{ fontSize: '1.6rem', fontWeight: 700, margin: '2px 0 6px 0', letterSpacing: '-0.02em', color: 'var(--text-main)' }}>
+          System Notifications
         </h1>
-        <p className="editorial-hero-subtitle" style={{ marginBottom: '2rem' }}>
-          Review, acknowledge, and resolve dispatch notifications triggered by real-time surveillance rules.
+        <p className="editorial-hero-subtitle" style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: 0 }}>
+          Review dispatch notifications and operational notices triggered by optical surveillance channels.
         </p>
       </div>
 

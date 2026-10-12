@@ -8,60 +8,60 @@
    1. Theme Variables & Design Tokens
    -------------------------------------------------------------------------- */
 :root {
-  /* LIGHT MODE (Default: Soft warm off-white / subtle lavender canvas) */
-  --bg-canvas: #fbfbfe;
-  --bg-surface: #ffffff;
-  --bg-surface-raised: #f5f7fc;
-  --bg-surface-subtle: #f0f3fa;
-  --bg-surface-hover: #e8ecf8;
-  --bg-surface-glass: #ffffff;
+  /* DARK SOC WORKSTATION THEME (Default: Deep Obsidian & Carbon Canvas) */
+  --bg-canvas: #090d16;
+  --bg-surface: #0f1626;
+  --bg-surface-raised: #151e33;
+  --bg-surface-subtle: #1a253d;
+  --bg-surface-hover: #22304d;
+  --bg-surface-glass: rgba(15, 22, 38, 0.92);
 
   /* Legacy aliases for existing template compatibility */
   --bg-body: var(--bg-canvas);
   --bg-sidebar: var(--bg-surface);
-  --bg-header: var(--bg-surface-glass);
+  --bg-header: var(--bg-surface);
 
-  /* Borders & Dividers (Crystal Clear High Contrast) */
-  --border-subtle: rgba(15, 23, 42, 0.08);
-  --border-color: rgba(15, 23, 42, 0.12);
-  --border-color-subtle: rgba(15, 23, 42, 0.06);
-  --border-focus: #2563eb;
+  /* High Contrast Restrained Borders */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-color: rgba(255, 255, 255, 0.10);
+  --border-color-subtle: rgba(255, 255, 255, 0.05);
+  --border-focus: #10b981;
 
   /* Typography */
-  --text-main: #0a0e1a;
-  --text-secondary: #475569;
-  --text-muted: #8492a6;
-  --text-inverse: #ffffff;
+  --text-main: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-inverse: #090d16;
 
-  /* Electric Royal Blue Accent (Signature Spark / Webflow Style) */
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
-  --color-primary-active: #1e40af;
-  --color-primary-subtle: rgba(37, 99, 235, 0.08);
-  --color-primary-border: rgba(37, 99, 235, 0.22);
+  /* Emerald Security Green Accent (Reference 2 Enterprise Security Direction) */
+  --color-primary: #10b981;
+  --color-primary-hover: #059669;
+  --color-primary-active: #047857;
+  --color-primary-subtle: rgba(16, 185, 129, 0.12);
+  --color-primary-border: rgba(16, 185, 129, 0.28);
 
   /* Restrained State Colors */
   --color-live: #10b981;
-  --color-live-subtle: rgba(16, 185, 129, 0.10);
-  --color-live-border: rgba(16, 185, 129, 0.25);
+  --color-live-subtle: rgba(16, 185, 129, 0.12);
+  --color-live-border: rgba(16, 185, 129, 0.30);
 
   --color-offline: #ef4444;
-  --color-offline-subtle: rgba(239, 68, 68, 0.10);
-  --color-offline-border: rgba(239, 68, 68, 0.25);
+  --color-offline-subtle: rgba(239, 68, 68, 0.12);
+  --color-offline-border: rgba(239, 68, 68, 0.30);
 
   --color-warn: #f59e0b;
-  --color-warn-subtle: rgba(245, 158, 11, 0.10);
-  --color-warn-border: rgba(245, 158, 11, 0.25);
+  --color-warn-subtle: rgba(245, 158, 11, 0.12);
+  --color-warn-border: rgba(245, 158, 11, 0.30);
 
   --color-critical: #dc2626;
-  --color-critical-subtle: rgba(220, 38, 38, 0.12);
+  --color-critical-subtle: rgba(220, 38, 38, 0.14);
 
-  /* Elevation & Shadows (Soft, diffuse, premium human-designed) */
-  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.04);
-  --shadow-md: 0 6px 20px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.03);
-  --shadow-lg: 0 16px 36px -6px rgba(15, 23, 42, 0.08), 0 4px 12px -2px rgba(15, 23, 42, 0.03);
-  --shadow-xl: 0 28px 64px -12px rgba(15, 23, 42, 0.12);
-  --shadow-glow: 0 0 28px -4px rgba(37, 99, 235, 0.22);
+  /* Elevation & Shadows (Understated, crisp, enterprise security precision) */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 12px 0 rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 8px 24px 0 rgba(0, 0, 0, 0.55);
+  --shadow-xl: 0 16px 36px 0 rgba(0, 0, 0, 0.65);
+  --shadow-glow: 0 0 14px -2px rgba(16, 185, 129, 0.25);
 
   /* Font Families */
   --font-display: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -69,33 +69,34 @@
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
 
   /* Layout Constants */
-  --header-height: 64px;
+  --header-height: 60px;
   --content-max-width: 100%;
   --sidebar-width: 0px;
 
-  /* Border Radii (Generous modern curvature: 16-24px) */
-  --radius-xs: 6px;
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
-  --radius-xl: 26px;
+  /* Border Radii: Restrained, sharp, enterprise surveillance precision */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
   --radius-full: 9999px;
 
   /* Transitions */
-  --transition-fast: 160ms cubic-bezier(0.16, 1, 0.3, 1);
-  --transition-normal: 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: 140ms ease-out;
+  --transition-normal: 200ms ease-out;
 }
 
+
 /* --------------------------------------------------------------------------
-   2. Dark Theme (Deep Charcoal / Midnight Slate with Electric Blue Accent)
+   2. Dark Theme (Deep Obsidian / Midnight Slate with Emerald Security Accent)
    -------------------------------------------------------------------------- */
 [data-theme="dark"] {
-  --bg-canvas: #0b0f17;
-  --bg-surface: #121824;
-  --bg-surface-raised: #182232;
-  --bg-surface-subtle: #1e2a3c;
-  --bg-surface-hover: #243247;
-  --bg-surface-glass: #121824;
+  --bg-canvas: #080c14;
+  --bg-surface: #0f172a;
+  --bg-surface-raised: #1e293b;
+  --bg-surface-subtle: #1e293b;
+  --bg-surface-hover: #334155;
+  --bg-surface-glass: #0f172a;
 
   --bg-body: var(--bg-canvas);
   --bg-sidebar: var(--bg-surface);
@@ -104,18 +105,18 @@
   --border-subtle: rgba(255, 255, 255, 0.08);
   --border-color: rgba(255, 255, 255, 0.12);
   --border-color-subtle: rgba(255, 255, 255, 0.06);
-  --border-focus: #3b82f6;
+  --border-focus: #10b981;
 
   --text-main: #f8fafc;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
-  --text-inverse: #0b0f17;
+  --text-inverse: #080c14;
 
-  --color-primary: #3b82f6;
-  --color-primary-hover: #2563eb;
-  --color-primary-active: #1d4ed8;
-  --color-primary-subtle: rgba(59, 130, 246, 0.14);
-  --color-primary-border: rgba(59, 130, 246, 0.30);
+  --color-primary: #10b981;
+  --color-primary-hover: #059669;
+  --color-primary-active: #047857;
+  --color-primary-subtle: rgba(16, 185, 129, 0.14);
+  --color-primary-border: rgba(16, 185, 129, 0.32);
 
   --color-live: #10b981;
   --color-live-subtle: rgba(16, 185, 129, 0.14);
@@ -136,8 +137,9 @@
   --shadow-md: 0 6px 20px -2px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 18px 42px -6px rgba(0, 0, 0, 0.6);
   --shadow-xl: 0 28px 60px -10px rgba(0, 0, 0, 0.75);
-  --shadow-glow: 0 0 28px -4px rgba(59, 130, 246, 0.32);
+  --shadow-glow: 0 0 28px -4px rgba(16, 185, 129, 0.32);
 }
+
 
 /* --------------------------------------------------------------------------
    3. Base HTML & Global Reset
@@ -362,13 +364,14 @@ h1, h2, h3, h4, h5, h6 {
   width: 36px;
   height: 36px;
   border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, var(--color-primary) 0%, #1d4ed8 100%);
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #ffffff;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
 }
+
 
 .brand-title-wrap {
   display: flex;
@@ -409,10 +412,10 @@ h1, h2, h3, h4, h5, h6 {
 .nav-link-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.5rem 0.95rem;
+  gap: 0.35rem;
+  padding: 0.38rem 0.72rem;
   border-radius: var(--radius-full);
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   font-weight: 600;
   color: var(--text-secondary);
   text-decoration: none;
@@ -583,15 +586,16 @@ h1, h2, h3, h4, h5, h6 {
   background-color: var(--color-primary);
   color: #ffffff !important;
   border-color: var(--color-primary);
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.28);
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.30);
 }
 
 .btn-primary:hover {
   background-color: var(--color-primary-hover);
   color: #ffffff !important;
   transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.42);
 }
+
 
 .btn-secondary {
   background-color: var(--bg-surface);

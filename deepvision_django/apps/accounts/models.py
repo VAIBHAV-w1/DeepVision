@@ -95,24 +95,26 @@ class User(models.Model):
             pass
         return False
 
-    # Email OTP lifecycle
-    def generate_otp(self):
+    # Email OTP lifecycle (Supports distinct purpose: "signup" vs "login")
+    def generate_otp(self, purpose: str = "signup"):
         """
         Generates 6-digit numeric OTP, sets 15-minute expiry, resets attempts.
-        Hashes with Django PBKDF2. Returns the plaintext OTP.
+        Hashes token with purpose salt (e.g. 'SIGNUP:<otp>' or 'LOGIN:<otp>') using Django PBKDF2.
+        Returns the plaintext OTP.
         """
         from django.contrib.auth.hashers import make_password
         otp = "".join(secrets.choice("0123456789") for _ in range(6))
-        self.email_otp_hash = make_password(otp)
+        purpose_tag = purpose.strip().upper()
+        self.email_otp_hash = make_password(f"{purpose_tag}:{otp}")
         now = timezone.now()
         self.email_otp_expires_at = now + timedelta(minutes=15)
         self.email_otp_sent_at = now
         self.email_otp_attempts = 0
         return otp
 
-    def verify_otp(self, otp):
+    def verify_otp(self, otp: str, purpose: str = "signup"):
         """
-        Validates OTP against stored hash, expiry, and attempt limit (max 5).
+        Validates OTP against stored hash, purpose salt, expiry, and attempt limit (max 5).
         Returns (True, None) on success or (False, error_message) on failure.
         """
         if self.email_otp_attempts >= 5:
@@ -130,13 +132,22 @@ class User(models.Model):
             return False, "Verification code has expired. Please request a new code."
 
         from django.contrib.auth.hashers import check_password as django_check_password
+        purpose_tag = purpose.strip().upper()
+        salted_token = f"{purpose_tag}:{otp}"
+
         valid = False
         if self.email_otp_hash.startswith(('pbkdf2_', 'pbkdf2_sha256$', 'pbkdf2_sha1$')):
-            valid = django_check_password(otp, self.email_otp_hash)
+            # First check purpose-salted token
+            valid = django_check_password(salted_token, self.email_otp_hash)
+            # If not valid and purpose is signup, check legacy unsalted token for backward compatibility
+            if not valid and purpose_tag == "SIGNUP":
+                valid = django_check_password(otp, self.email_otp_hash)
         else:
             try:
                 from werkzeug.security import check_password_hash as werkzeug_check_password
-                valid = werkzeug_check_password(self.email_otp_hash, otp)
+                valid = werkzeug_check_password(self.email_otp_hash, salted_token)
+                if not valid and purpose_tag == "SIGNUP":
+                    valid = werkzeug_check_password(self.email_otp_hash, otp)
             except ImportError:
                 pass
 
@@ -144,7 +155,9 @@ class User(models.Model):
             self.email_otp_attempts += 1
             return False, "Invalid verification code."
 
-        self.is_email_verified = True
+        if purpose_tag == "SIGNUP":
+            self.is_email_verified = True
+
         self.email_otp_hash = None
         self.email_otp_expires_at = None
         self.email_otp_attempts = 0

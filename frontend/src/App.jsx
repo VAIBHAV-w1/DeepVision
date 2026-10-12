@@ -75,7 +75,7 @@ function MainApp() {
       return (
         <VerifyEmail
           email={unverifiedEmail}
-          onVerified={() => { setUnverifiedEmail(''); checkAuth(); navigate('dashboard'); }}
+          onVerified={() => { setUnverifiedEmail(''); checkAuth(); navigate('login'); }}
           onNavigate={(p) => { setUnverifiedEmail(''); navigate(p); }}
         />
       );

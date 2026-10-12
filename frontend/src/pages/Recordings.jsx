@@ -88,16 +88,16 @@ export function Recordings({ initialCameraId, selectedId, onNavigate }) {
 
   return (
     <div className="recordings-page-container">
-      {/* Editorial Header */}
-      <div className="hero-editorial-wrap">
-        <div className="editorial-badge-pill">
-          <span>Media Library</span>
+      {/* Operational Header */}
+      <div className="hero-editorial-wrap" style={{ marginBottom: '1.25rem' }}>
+        <div className="editorial-badge-pill" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#10b981', padding: '4px 12px', borderRadius: '9999px', fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', marginBottom: '8px' }}>
+          <span>VIDEO ARCHIVE</span>
         </div>
-        <h1 className="editorial-hero-title" style={{ fontSize: 'clamp(2.2rem, 4vw, 3.25rem)', marginBottom: '0.5rem' }}>
-          Footage &amp; Recordings
+        <h1 className="editorial-hero-title" style={{ fontSize: '1.6rem', fontWeight: 700, margin: '2px 0 6px 0', letterSpacing: '-0.02em', color: 'var(--text-main)' }}>
+          Surveillance Recordings
         </h1>
-        <p className="editorial-hero-subtitle" style={{ marginBottom: '2rem' }}>
-          Review continuous security archives, anomaly clips, and motion-triggered surveillance footage.
+        <p className="editorial-hero-subtitle" style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: 0 }}>
+          Search, playback, and download security footage captured by optical camera channels.
         </p>
       </div>
 

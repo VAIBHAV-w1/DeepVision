@@ -1,0 +1,57 @@
+{
+  "timestamp": "20261011_232015",
+  "active_db": {
+    "path": "D:\\DeepVision\\instance\\deepvision.db",
+    "size_bytes": 3219456,
+    "sha256": "bbbca008ba17ae41cc33332e54728a209a7e062a4aabe797aa2a0571e6159d77",
+    "integrity": "ok",
+    "table_count": 18,
+    "tables": {
+      "alerts": 4416,
+      "audit_logs": 1850,
+      "camera_groups": 0,
+      "cameras": 10,
+      "detection_profiles": 0,
+      "devices": 0,
+      "evidence": 5473,
+      "incident_cases": 840,
+      "incident_notes": 20,
+      "incident_playbooks": 0,
+      "incident_policies": 0,
+      "notification_preferences": 0,
+      "notifications": 3581,
+      "products": 24,
+      "recordings": 2674,
+      "restricted_zones": 0,
+      "surveillance_presets": 0,
+      "users": 14
+    }
+  },
+  "backup_db": {
+    "path": "D:\\DeepVision\\backups\\deepvision_baseline_20261011_232015.db",
+    "size_bytes": 3219456,
+    "sha256": "bbbca008ba17ae41cc33332e54728a209a7e062a4aabe797aa2a0571e6159d77",
+    "integrity": "ok"
+  },
+  "restore_test": "VERIFIED_PASSED",
+  "assets": {
+    "yolo_model_root": {
+      "exists": false
+    },
+    "yolo_model_django": {
+      "exists": false
+    },
+    "recordings_dir": {
+      "type": "dir",
+      "path": "D:\\DeepVision\\recordings",
+      "file_count": 1,
+      "total_bytes": 34
+    },
+    "evidence_dir": {
+      "exists": false
+    },
+    "backend_env": {
+      "exists": false
+    }
+  }
+}

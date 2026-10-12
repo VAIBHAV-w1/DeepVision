@@ -86,46 +86,44 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
   }, [fetchAlerts]);
 
   // Fetch single incident workspace detail when activeAlertId is set
-  const loadIncidentDetail = useCallback(async (alertId) => {
-    if (!alertId) {
+  useEffect(() => {
+    if (!activeAlertId) {
       activeRequestRef.current++;
       setActiveIncidentData(null);
       setIncidentLoading(false);
       return;
     }
 
+    let isMounted = true;
     const reqId = ++activeRequestRef.current;
-    // CRITICAL: Immediately clear previous incident data to prevent cross-incident contamination
     setActiveIncidentData(null);
     setIncidentLoading(true);
 
-    try {
-      const data = await api.alerts.get(alertId);
-      // Ensure only the response for the most recent active alert is accepted
-      if (reqId === activeRequestRef.current && data && data.alert && Number(data.alert.id) === Number(alertId)) {
-        setActiveIncidentData(data);
-      }
-    } catch (err) {
-      if (reqId === activeRequestRef.current) {
-        console.warn(`Failed to load incident detail for alert ${alertId}:`, err);
-        addToast('Failed to load incident detail', 'error');
-      }
-    } finally {
-      if (reqId === activeRequestRef.current) {
-        setIncidentLoading(false);
-      }
-    }
-  }, [addToast]);
+    api.alerts.get(activeAlertId)
+      .then((data) => {
+        if (!isMounted) return;
+        if (reqId === activeRequestRef.current && data && data.alert) {
+          setActiveIncidentData(data);
+        }
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        if (reqId === activeRequestRef.current) {
+          console.warn(`Failed to load incident detail for alert ${activeAlertId}:`, err);
+          addToast('Failed to load incident detail', 'error');
+        }
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        if (reqId === activeRequestRef.current) {
+          setIncidentLoading(false);
+        }
+      });
 
-  useEffect(() => {
-    if (activeAlertId) {
-      loadIncidentDetail(activeAlertId);
-    } else {
-      activeRequestRef.current++;
-      setActiveIncidentData(null);
-      setIncidentLoading(false);
-    }
-  }, [activeAlertId, loadIncidentDetail]);
+    return () => {
+      isMounted = false;
+    };
+  }, [activeAlertId]);
 
   // Acknowledge handler
   const handleAcknowledge = async (id) => {

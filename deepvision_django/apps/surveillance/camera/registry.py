@@ -26,6 +26,10 @@ class CameraRegistry:
             if worker and worker.running:
                 worker.ref_count += 1
                 return worker
+            elif worker and not worker.running:
+                self._workers.pop(camera_id, None)
+                if getattr(worker, "physical_source_id", None) in self._physical_map:
+                    self._physical_map.pop(worker.physical_source_id, None)
 
             # 2. Look up camera in Django database
             from apps.cameras.models import Camera
@@ -45,6 +49,8 @@ class CameraRegistry:
                 self._workers[camera_id] = existing_physical
                 existing_physical.ref_count += 1
                 return existing_physical
+            elif existing_physical and not existing_physical.running:
+                self._physical_map.pop(physical_key, None)
 
             # 4. Resolve source and allocate new CameraWorker
             cap_source = resolve_camera_capture_source(source_type, source)
@@ -67,6 +73,13 @@ class CameraRegistry:
     def get_active_worker(self, camera_id: int) -> CameraWorker:
         with self._lock:
             worker = self._workers.get(camera_id)
+            if worker and worker.running:
+                return worker
+            return None
+
+    def get_physical_worker(self, physical_key: str) -> CameraWorker:
+        with self._lock:
+            worker = self._physical_map.get(physical_key)
             if worker and worker.running:
                 return worker
             return None

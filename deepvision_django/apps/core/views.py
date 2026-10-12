@@ -130,6 +130,7 @@ def health_check_view(request):
         "status": overall_status,
         "django_app": "online",
         "database": "connected" if db_ok else "disconnected",
+        "database_backend": getattr(connection, 'vendor', 'unknown'),
         "surveillance_engine": engine_health.get("status", "unknown"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

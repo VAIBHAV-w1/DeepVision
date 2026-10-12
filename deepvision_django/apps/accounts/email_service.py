@@ -24,6 +24,8 @@ except Exception:
     pass
 
 
+import threading
+
 def _send_smtp_email(recipient_email, subject, html_content):
     """
     Sends HTML email via SMTP using environment configuration or Django settings.
@@ -50,7 +52,7 @@ def _send_smtp_email(recipient_email, subject, html_content):
 
     try:
         port = int(mail_port)
-        smtp_client = smtplib.SMTP(mail_server, port, timeout=10)
+        smtp_client = smtplib.SMTP(mail_server, port, timeout=5)
         if mail_use_tls:
             smtp_client.starttls()
         # Clean potential spaces in app passwords
@@ -62,6 +64,18 @@ def _send_smtp_email(recipient_email, subject, html_content):
     except Exception as e:
         logger.error(f"[EMAIL] SMTP transmission to {recipient_email} failed: {e}")
         return False
+
+
+def _dispatch_email_async(recipient_email, subject, html_content):
+    """Dispatches email asynchronously in a background thread to prevent HTTP blocking."""
+    t = threading.Thread(
+        target=_send_smtp_email,
+        args=(recipient_email, subject, html_content),
+        daemon=True,
+        name=f"SMTP-{recipient_email}"
+    )
+    t.start()
+    return True
 
 
 def send_verification_email(recipient_email, otp, full_name=None):
@@ -86,7 +100,7 @@ def send_verification_email(recipient_email, otp, full_name=None):
       </body>
     </html>
     """
-    return _send_smtp_email(recipient_email, "DeepVision - Email Verification", html_content)
+    return _dispatch_email_async(recipient_email, "DeepVision - Email Verification", html_content)
 
 
 def send_password_reset_email(recipient_email, otp, full_name=None):
@@ -112,4 +126,30 @@ def send_password_reset_email(recipient_email, otp, full_name=None):
       </body>
     </html>
     """
-    return _send_smtp_email(recipient_email, "DeepVision - Password Reset Verification", html_content)
+    return _dispatch_email_async(recipient_email, "DeepVision - Password Reset Verification", html_content)
+
+
+def send_login_otp_email(recipient_email, otp, full_name=None):
+    """
+    Sends sign-in verification HTML message containing 6-digit login OTP.
+    Accepts optional full_name parameter for personalization.
+    """
+    greeting = f"Hello {full_name}," if full_name else "Hello,"
+    html_content = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; padding: 20px; color: #333; line-height: 1.6;">
+        <h2 style="color: #2b5c8f; border-bottom: 2px solid #2b5c8f; padding-bottom: 10px;">DeepVision</h2>
+        <p>{greeting}</p>
+        <p>A sign-in attempt was detected for your DeepVision operator account.</p>
+        <p>To complete your login, enter the 6-digit verification code below:</p>
+        <div style="font-size: 28px; font-weight: bold; background-color: #f4f6f9; padding: 15px 25px; display: inline-block; letter-spacing: 4px; border-radius: 6px; border: 1px solid #e1e4e8; color: #2b5c8f; margin: 15px 0;">
+          {otp}
+        </div>
+        <p>This sign-in code is valid for <strong>15 minutes</strong> and can only be used once.</p>
+        <p style="color: #666; font-size: 14px; margin-top: 25px;">If you did not initiate this sign-in request, please secure your account credentials immediately.</p>
+        <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;">
+        <p style="font-size: 11px; color: #999;">This is an automated message. Please do not reply to this email.</p>
+      </body>
+    </html>
+    """
+    return _dispatch_email_async(recipient_email, "DeepVision - Sign-In Verification Code", html_content)

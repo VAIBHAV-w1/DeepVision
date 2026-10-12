@@ -87,6 +87,47 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 
+def ensure_database():
+    """
+    Ensures the SQLite database exists and has the required schema if in SQLite mode.
+    If MySQL is configured, defers schema to MySQL backend.
+    """
+    use_mysql = os.getenv('USE_MYSQL', '').lower() in ('true', '1') or os.getenv('DB_ENGINE', '') == 'django.db.backends.mysql'
+    if use_mysql:
+        logger.info("Using MySQL backend for DeepVision (configured via environment variables).")
+        return
+
+    db_dir = ROOT_DIR / "instance"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    db_path = db_dir / "deepvision.db"
+
+    import sqlite3
+    need_init = True
+    if db_path.exists() and db_path.stat().st_size > 0:
+        try:
+            conn = sqlite3.connect(str(db_path))
+            c = conn.cursor()
+            c.execute("SELECT count(*) FROM sqlite_master WHERE type='table'")
+            count = c.fetchone()[0]
+            conn.close()
+            if count >= 18:
+                need_init = False
+        except Exception:
+            pass
+
+    if need_init:
+        logger.info("Initializing clean DeepVision database schema at %s...", db_path)
+        schema_file = DJANGO_DIR / "schema.sql"
+        if schema_file.exists():
+            with open(schema_file, "r", encoding="utf-8") as f:
+                schema_sql = f.read()
+            conn = sqlite3.connect(str(db_path))
+            conn.executescript(schema_sql)
+            conn.commit()
+            conn.close()
+            logger.info("Clean database schema successfully initialized (18 tables).")
+
+
 def main():
     global django_proc
 
@@ -94,6 +135,9 @@ def main():
     logger.info("  DEEPVISION AI SMART SURVEILLANCE — PRODUCTION LAUNCHER")
     logger.info("  Architecture: Unified Native Django (:8000) Surveillance System")
     logger.info("=================================================================")
+
+    # Ensure database schema exists before launching Django
+    ensure_database()
 
     # Start Django Application (configurable via DEEPVISION_HOST and DEEPVISION_PORT)
     host = os.getenv("DEEPVISION_HOST", "127.0.0.1")

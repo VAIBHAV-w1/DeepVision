@@ -5,9 +5,31 @@ import { useToast } from '../components/common/Toast';
 
 export function ForgotPassword({ onNavigate }) {
   // Step 1: email, Step 2: otp, Step 3: new password
-  const [step, setStep] = useState(1);
-  const [email, setEmail] = useState('');
-  const [digits, setDigits] = useState(['', '', '', '', '', '']);
+  const [step, setStep] = useState(() => {
+    try {
+      const storedEmail = sessionStorage.getItem('deepvision_reset_email');
+      const storedOtp = sessionStorage.getItem('deepvision_reset_otp');
+      if (storedEmail && storedOtp && storedOtp.length === 6) return 3;
+      if (storedEmail) return 2;
+    } catch (_) {}
+    return 1;
+  });
+  const [email, setEmail] = useState(() => {
+    try {
+      return sessionStorage.getItem('deepvision_reset_email') || '';
+    } catch (_) {
+      return '';
+    }
+  });
+  const [digits, setDigits] = useState(() => {
+    try {
+      const storedOtp = sessionStorage.getItem('deepvision_reset_otp');
+      if (storedOtp && storedOtp.length === 6) {
+        return storedOtp.split('');
+      }
+    } catch (_) {}
+    return ['', '', '', '', '', ''];
+  });
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -18,6 +40,28 @@ export function ForgotPassword({ onNavigate }) {
   const [error, setError] = useState(null);
   const inputRefs = useRef([]);
   const { addToast } = useToast();
+
+  // Check URL parameters for direct reset links
+  useEffect(() => {
+    try {
+      const search = window.location.search || '';
+      const hash = window.location.hash || '';
+      const params = new URLSearchParams(search || hash.split('?')[1] || '');
+      const urlEmail = params.get('email');
+      const urlCode = params.get('code') || params.get('otp');
+      if (urlEmail) {
+        setEmail(urlEmail);
+        sessionStorage.setItem('deepvision_reset_email', urlEmail);
+      }
+      if (urlCode && urlCode.length === 6) {
+        setDigits(urlCode.split(''));
+        sessionStorage.setItem('deepvision_reset_otp', urlCode);
+        if (urlEmail) {
+          setStep(3);
+        }
+      }
+    } catch (_) {}
+  }, []);
 
   useEffect(() => {
     if (step === 2) {
@@ -91,11 +135,18 @@ export function ForgotPassword({ onNavigate }) {
   // Step 1: Submit email
   const handleEmailSubmit = async (e) => {
     e.preventDefault();
-    if (!email) return;
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setError('Please enter your email address.');
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
-      const res = await api.auth.forgotPassword(email);
+      const res = await api.auth.forgotPassword(cleanEmail);
+      try {
+        sessionStorage.setItem('deepvision_reset_email', cleanEmail);
+      } catch (_) {}
       addToast(res.message || 'Verification code sent to your email', 'info');
       setStep(2);
       setCooldown(60);
@@ -107,24 +158,52 @@ export function ForgotPassword({ onNavigate }) {
   };
 
   // Step 2: Verify OTP
-  const handleOtpSubmit = (e) => {
+  const handleOtpSubmit = async (e) => {
     e.preventDefault();
-    const code = digits.join('');
+    const code = digits.join('').trim();
     if (code.length !== 6) {
       setError('Please enter the full 6-digit recovery code.');
       return;
     }
-    setError(null);
-    setStep(3);
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setError('Email address is missing. Please restart recovery.');
+      setStep(1);
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await api.auth.verifyResetOtp(cleanEmail, code);
+      if (res && res.success) {
+        try {
+          sessionStorage.setItem('deepvision_reset_email', cleanEmail);
+          sessionStorage.setItem('deepvision_reset_otp', code);
+        } catch (_) {}
+        setStep(3);
+      } else {
+        setError(res?.error || 'Invalid verification code.');
+      }
+    } catch (err) {
+      setError(err.message || 'Invalid verification code.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Resend OTP
   const handleResend = async () => {
     if (cooldown > 0) return;
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setError('Please enter your email address.');
+      setStep(1);
+      return;
+    }
     try {
       setResending(true);
       setError(null);
-      const res = await api.auth.forgotPassword(email);
+      const res = await api.auth.forgotPassword(cleanEmail);
       addToast(res.message || 'New recovery code sent', 'info');
       setCooldown(60);
     } catch (err) {
@@ -137,6 +216,20 @@ export function ForgotPassword({ onNavigate }) {
   // Step 3: Reset password
   const handleResetSubmit = async (e) => {
     e.preventDefault();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanOtp = digits.join('').trim();
+
+    if (!cleanEmail || cleanOtp.length !== 6) {
+      setError('Email and reset code are required. Please start the recovery process again.');
+      setStep(1);
+      return;
+    }
+
+    if (!newPassword) {
+      setError('Please enter a new password.');
+      return;
+    }
+
     if (newPassword !== confirmPassword) {
       setError('Passwords do not match');
       return;
@@ -145,8 +238,17 @@ export function ForgotPassword({ onNavigate }) {
     try {
       setLoading(true);
       setError(null);
-      const res = await api.auth.resetPassword(email, digits.join(''), newPassword, confirmPassword);
+      const res = await api.auth.resetPassword({
+        email: cleanEmail,
+        otp: cleanOtp,
+        new_password: newPassword,
+        confirm_password: confirmPassword,
+      });
       if (res && res.success) {
+        try {
+          sessionStorage.removeItem('deepvision_reset_email');
+          sessionStorage.removeItem('deepvision_reset_otp');
+        } catch (_) {}
         addToast('Password successfully reset! You can now sign in.', 'success');
         onNavigate('login');
       } else {

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-theme-pref="dark"><head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/static/dist/static/images/favicon.svg">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="DeepVision AI-Based Intelligent Surveillance &amp; Security Operations Center.">
+    <title>DeepVision — Intelligent Surveillance SOC</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Plus+Jakarta+Sans:wght@500;600;700;800&amp;display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        try {
+          var urlParams = new URLSearchParams(window.location.search);
+          var urlTheme = urlParams.get('theme');
+          var pref = (urlTheme && (urlTheme === 'light' || urlTheme === 'dark' || urlTheme === 'system')) ? urlTheme : (localStorage.getItem('deepvision_theme') || 'dark');
+          var resolved = pref;
+          if (pref === 'system') {
+            resolved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', resolved);
+          document.documentElement.setAttribute('data-theme-pref', pref);
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin="" src="/static/dist/assets/index-CmQFRJ0v.js"></script>
+    <link rel="stylesheet" crossorigin="" href="/static/dist/assets/index-gWgrZBug.css">
+  </head>
+  <body>
+    <div id="root"><div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: var(--bg-canvas); color: var(--text-main); gap: 16px;"><div style="width: 40px; height: 40px; border-top-color: var(--color-primary); border-top-style: ; border-top-width: ; border-right-color: ; border-right-style: ; border-right-width: ; border-bottom-color: ; border-bottom-style: ; border-bottom-width: ; border-left-color: ; border-left-style: ; border-left-width: ; border-image-source: ; border-image-slice: ; border-image-width: ; border-image-outset: ; border-image-repeat: ; border-radius: 50%; animation: 1s linear 0s infinite normal none running spin;"></div><div style="font-size: 0.9rem; color: var(--text-muted);">Initializing DeepVision SOC...</div></div><div class="toast-container" style="position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px;"></div></div>
+  
+
+</body></html>

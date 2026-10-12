@@ -48,6 +48,9 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
     { key: 'dashboard', label: 'Dashboard' },
     { key: 'cameras', label: 'Cameras' },
     { key: 'alerts', label: 'Alerts' },
+    { key: 'recordings', label: 'Recordings' },
+    { key: 'evidence', label: 'Evidence' },
+    { key: 'cases', label: 'Cases' },
     { key: 'notifications', label: 'Notifications', badge: unreadNotifCount },
     { key: 'help', label: 'Help' },
   ];
@@ -141,17 +144,22 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
             onClick={(e) => { e.preventDefault(); handleNavClick('dashboard'); }}
             className="brand-link"
           >
-            <div className="brand-emblem">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M 23 7 l -7 5 7 5 V 7 z"></path>
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+            <div className="brand-emblem" style={{ background: '#0f172a', border: '1px solid rgba(16, 185, 129, 0.4)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.5)' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" stroke="#10b981" strokeWidth="1.8" />
+                <circle cx="12" cy="12" r="4" fill="#10b981" />
+                <line x1="12" y1="2" x2="12" y2="5" />
+                <line x1="12" y1="19" x2="12" y2="22" />
+                <line x1="2" y1="12" x2="5" y2="12" />
+                <line x1="19" y1="12" x2="22" y2="12" />
               </svg>
             </div>
             <div className="brand-title-wrap">
-              <span className="brand-title">DeepVision</span>
-              <span className="brand-tagline">Intelligent Surveillance</span>
+              <span className="brand-title" style={{ letterSpacing: '0.06em', fontWeight: 800 }}>DEEPVISION</span>
+              <span className="brand-tagline" style={{ color: 'var(--text-muted)', fontSize: '0.62rem', letterSpacing: '0.08em', fontWeight: 600 }}>SURVEILLANCE SOC</span>
             </div>
           </a>
+
 
           {/* Center: Minimal Top Navigation Links */}
           <nav className="nav-links-center" aria-label="Main Navigation">
@@ -164,8 +172,15 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
                   href={`#${item.key}`}
                   onClick={(e) => { e.preventDefault(); handleNavClick(item.key); }}
                   className={`nav-link-pill ${isActive ? 'active' : ''}`}
+                  style={{
+                    border: isActive ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid transparent',
+                    background: isActive ? 'rgba(16, 185, 129, 0.10)' : undefined,
+                    color: isActive ? '#10b981' : undefined,
+                    fontWeight: 700,
+                  }}
                 >
-                  {item.label}
+                  {isActive && <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }}></span>}
+                  <span>{item.label}</span>
                   {Boolean(item.badge && item.badge > 0) && (
                     <span className="nav-badge">{item.badge}</span>
                   )}
@@ -174,8 +189,15 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
             })}
           </nav>
 
-          {/* Right: Search, Notifications, Theme, User Controls */}
+
+          {/* Right: Status, Theme, User Controls */}
           <div className="nav-controls-right">
+            {/* Live SOC Status Indicator */}
+            <div className="soc-status-badge-top" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '9999px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', fontSize: '0.72rem', color: '#10b981', fontWeight: 700, letterSpacing: '0.04em' }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981', boxShadow: '0 0 6px #10b981', display: 'inline-block' }}></span>
+              <span>SOC ONLINE</span>
+            </div>
+
             {/* Theme Switcher (3-Way: Dark / Light / System) */}
             <div className="theme-menu-wrap" ref={themeMenuRef} style={{ position: 'relative' }}>
               <button

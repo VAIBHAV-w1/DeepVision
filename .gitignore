@@ -195,3 +195,36 @@ docker-compose.override.yml
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
+# Ultralytics runtime config
+Ultralytics/
+.config/
+
+# Backups
+backups/
+
+# Runtime instance & database files
+instance/
+deepvision_django/db.sqlite3
+deepvision_django/db.sqlite3-journal
+deepvision_django/db.sqlite3-wal
+deepvision_django/db.sqlite3-shm
+
+# Recordings & Evidence
+recordings/
+!recordings/.gitkeep
+evidence/
+!evidence/.gitkeep
+
+# Local inspection artifacts
+structure.txt
+
+# Docker distribution archives
+*.tar
+DeepVision-*/DeepVision-*.tar
+

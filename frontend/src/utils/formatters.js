@@ -3,7 +3,7 @@
  */
 
 export function formatDate(isoString) {
-  if (!isoString) return '—';
+  if (!isoString) return '-';
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return isoString;
@@ -21,7 +21,7 @@ export function formatDate(isoString) {
 }
 
 export function formatRelativeTime(isoString) {
-  if (!isoString) return '—';
+  if (!isoString) return '-';
   try {
     const d = new Date(isoString);
     const now = new Date();

@@ -1,0 +1,280 @@
+{
+  "timestamp": "2026-10-11T01:10:10.891249",
+  "duration_seconds": 59.5,
+  "total": 54,
+  "pass": 39,
+  "fail": 0,
+  "warning": 15,
+  "results": [
+    {
+      "test": "Server Running",
+      "status": "PASS",
+      "detail": "Port 8000 open"
+    },
+    {
+      "test": "Health Endpoint",
+      "status": "PASS",
+      "detail": "HTTP 200"
+    },
+    {
+      "test": "Root Page",
+      "status": "PASS",
+      "detail": "HTTP 200, 1753 bytes"
+    },
+    {
+      "test": "Django Check",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Python Imports",
+      "status": "PASS",
+      "detail": "17 modules"
+    },
+    {
+      "test": "Pip Check",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Database Exists",
+      "status": "PASS",
+      "detail": "3080192 bytes"
+    },
+    {
+      "test": "Database Integrity",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Database Tables",
+      "status": "PASS",
+      "detail": "18 tables"
+    },
+    {
+      "test": "Schema Hash",
+      "status": "PASS",
+      "detail": "6ea2fe2c4fae4f2b"
+    },
+    {
+      "test": "Table users",
+      "status": "PASS",
+      "detail": "14 rows"
+    },
+    {
+      "test": "Table cameras",
+      "status": "PASS",
+      "detail": "10 rows"
+    },
+    {
+      "test": "Table recordings",
+      "status": "PASS",
+      "detail": "2521 rows"
+    },
+    {
+      "test": "Table alerts",
+      "status": "PASS",
+      "detail": "4171 rows"
+    },
+    {
+      "test": "Table evidence",
+      "status": "PASS",
+      "detail": "5170 rows"
+    },
+    {
+      "test": "Table incident_cases",
+      "status": "PASS",
+      "detail": "839 rows"
+    },
+    {
+      "test": "CSRF Token",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Unauthenticated Guard",
+      "status": "PASS",
+      "detail": "Returns unauthenticated state"
+    },
+    {
+      "test": "Login (OTP Required)",
+      "status": "PASS",
+      "detail": "OTP flow triggered"
+    },
+    {
+      "test": "API Health",
+      "status": "PASS",
+      "detail": "HTTP 200, 183 bytes"
+    },
+    {
+      "test": "API Dashboard Stats",
+      "status": "WARNING",
+      "detail": "HTTP 401 (auth required)"
+    },
+    {
+      "test": "API Camera List",
+      "status": "WARNING",
+      "detail": "HTTP 401 (auth required)"
+    },
+    {
+      "test": "API Recordings List",
+      "status": "WARNING",
+      "detail": "HTTP 401 (auth required)"
+    },
+    {
+      "test": "API Alerts List",
+      "status": "WARNING",
+      "detail": "HTTP 401 (auth required)"
+    },
+    {
+      "test": "API Evidence List",
+      "status": "WARNING",
+      "detail": "HTTP 401 (auth required)"
+    },
+    {
+      "test": "API Cases List",
+      "status": "WARNING",
+      "detail": "HTTP 401 (auth required)"
+    },
+    {
+      "test": "API Unread Notifications",
+      "status": "WARNING",
+      "detail": "HTTP 401 (auth required)"
+    },
+    {
+      "test": "Route Root",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Route Dashboard",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Route Cameras",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Route Recordings",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Route Alerts",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Route Evidence",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Route Cases",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Route Notifications",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Route Login",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Route Signup",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Route Help",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Production Build Exists",
+      "status": "PASS",
+      "detail": "1753 bytes"
+    },
+    {
+      "test": "JS Bundle",
+      "status": "PASS",
+      "detail": "1 file(s), 440249 bytes total"
+    },
+    {
+      "test": "CSS Bundle",
+      "status": "PASS",
+      "detail": "1 file(s)"
+    },
+    {
+      "test": "Node Modules",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Asset index-Bokc1dMD.js",
+      "status": "PASS",
+      "detail": "440070 bytes"
+    },
+    {
+      "test": "Asset index-DewQnuvv.css",
+      "status": "PASS",
+      "detail": "78300 bytes"
+    },
+    {
+      "test": "Camera List API",
+      "status": "WARNING",
+      "detail": "Auth required (401)"
+    },
+    {
+      "test": "Recordings API",
+      "status": "WARNING",
+      "detail": "Auth required (401)"
+    },
+    {
+      "test": "Alerts API",
+      "status": "WARNING",
+      "detail": "Auth required (401)"
+    },
+    {
+      "test": "Evidence API",
+      "status": "WARNING",
+      "detail": "Auth required (401)"
+    },
+    {
+      "test": "Cases API",
+      "status": "WARNING",
+      "detail": "Auth required (401)"
+    },
+    {
+      "test": "Notifications Unread Count",
+      "status": "WARNING",
+      "detail": "Auth required (401)"
+    },
+    {
+      "test": "Dockerfile Exists",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "docker-compose.yml Exists",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "test": "Docker Engine",
+      "status": "WARNING",
+      "detail": "Docker not available"
+    },
+    {
+      "test": "Docker Image",
+      "status": "WARNING",
+      "detail": "No deepvision image found"
+    }
+  ]
+}

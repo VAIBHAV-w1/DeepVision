@@ -1,22 +1,346 @@
-/* Dashboard Page Styles */
-.dashboard-camera-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 1.25rem;
+/* ==========================================================================
+   DEEPVISION — Operational SOC Dashboard Styles (dashboard.css)
+   Clean, dense, enterprise security operations overview
+   ========================================================================== */
+
+.dashboard-page-container {
+  padding: 1.5rem 0 3rem 0;
+  max-width: 1440px;
+  margin: 0 auto;
 }
 
-@media (max-width: 576px) {
-  .dashboard-camera-grid {
+/* Dashboard Header & Health Status */
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.dashboard-title-area h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0 0 0.25rem 0;
+  letter-spacing: -0.02em;
+}
+
+.dashboard-title-area p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.dashboard-clock-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dashboard-clock {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.dashboard-health-strip {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius-sm);
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.health-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.health-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.health-dot.nominal {
+  background-color: var(--color-live, #10b981);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+.health-dot.warning {
+  background-color: var(--color-warn, #f59e0b);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+}
+
+/* Metric Cards Grid - High Density Enterprise Telemetry */
+.dashboard-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.metric-stat-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.metric-stat-card:hover {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: var(--bg-surface-raised);
+}
+
+.metric-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.metric-card-title {
+  font-size: 0.70rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.metric-card-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--text-main);
+  line-height: 1.1;
+  margin-bottom: 0.25rem;
+  font-family: var(--font-mono);
+}
+
+.metric-card-subtitle {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+
+/* Operational 2-Column Split Layout */
+.dashboard-operational-split {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 1080px) {
+  .dashboard-operational-split {
     grid-template-columns: 1fr;
   }
 }
 
-.metric-card {
-  border-left: 4px solid var(--dv-primary);
+/* Main Column Sections */
+.dashboard-main-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
-.quick-start-banner {
-  background: linear-gradient(135deg, rgba(2, 132, 199, 0.08) 0%, rgba(15, 23, 42, 0.02) 100%);
-  border: 1px solid rgba(2, 132, 199, 0.25);
-  border-radius: 8px;
+.dashboard-panel-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.dashboard-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.dashboard-panel-header h2 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.panel-view-all-link {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.panel-view-all-link:hover {
+  text-decoration: underline;
+}
+
+/* Camera Availability List */
+.camera-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.camera-summary-table th {
+  text-align: left;
+  padding: 0.75rem 1.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-surface-raised);
+}
+
+.camera-summary-table td {
+  padding: 0.85rem 1.25rem;
+  font-size: 0.82rem;
+  color: var(--text-main);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+
+.camera-summary-table tr:last-child td {
+  border-bottom: none;
+}
+
+.camera-summary-table tr:hover td {
+  background: var(--bg-surface-hover);
+}
+
+/* Feed lists for alerts and recordings */
+.feed-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border-subtle);
+  gap: 1rem;
+}
+
+.feed-item:last-child {
+  border-bottom: none;
+}
+
+.feed-item:hover {
+  background: var(--bg-surface-hover);
+}
+
+.feed-item-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.feed-item-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.feed-item-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-item-sub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Secondary Compact Live Monitor */
+.compact-monitor-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+}
+
+.compact-monitor-viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #020408;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.compact-monitor-viewport img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.compact-monitor-footer {
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-surface-raised);
+}
+
+/* Quick Action Buttons */
+.quick-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+}
+
+.quick-nav-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition: all var(--transition-fast);
+}
+
+.quick-nav-button:hover {
+  background: var(--bg-surface-hover);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: var(--color-primary);
 }
