@@ -168,6 +168,16 @@ def migrate_data(sqlite_conn, pg_conn, source_stats, drop_first=False):
                 "or use --verify-only to inspect existing data."
             )
 
+    # Introspect destination boolean columns to cast SQLite 0/1 integers to PostgreSQL booleans
+    pg_cur.execute("""
+        SELECT table_name, column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' AND data_type = 'boolean'
+    """)
+    boolean_cols = {}
+    for tbl, col in pg_cur.fetchall():
+        boolean_cols.setdefault(tbl, set()).add(col)
+
     for table in TABLE_ORDER:
         cnt = source_stats[table]['count']
         cols = source_stats[table]['columns']
@@ -185,11 +195,14 @@ def migrate_data(sqlite_conn, pg_conn, source_stats, drop_first=False):
 
         # Convert row tuples for PostgreSQL compatibility
         data_tuples = []
+        tbl_bool_cols = boolean_cols.get(table, set())
         for r in rows:
             row_data = list(r)
-            for idx, val in enumerate(row_data):
-                # Clean string dates if needed
-                if isinstance(val, str) and len(val) >= 19:
+            for idx, col_name in enumerate(cols):
+                val = row_data[idx]
+                if col_name in tbl_bool_cols and val is not None:
+                    row_data[idx] = bool(val)
+                elif isinstance(val, str) and len(val) >= 19:
                     try:
                         # Validate ISO format
                         datetime.datetime.fromisoformat(val.replace("Z", "+00:00"))

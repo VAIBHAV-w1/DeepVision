@@ -8,7 +8,10 @@ Provides:
 """
 import os
 import json
+import logging
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
@@ -114,7 +117,8 @@ def health_check_view(request):
             cursor.execute("SELECT 1")
             row = cursor.fetchone()
             db_ok = (row is not None and row[0] == 1)
-    except Exception:
+    except Exception as e:
+        logger.error(f"Health check DB connection error: {type(e).__name__}: {e}")
         db_ok = False
 
     db_vendor = getattr(connection, 'vendor', 'unknown')
