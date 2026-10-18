@@ -10,6 +10,8 @@ import argparse
 import sqlite3
 import datetime
 
+from urllib.parse import urlsplit, urlunsplit
+
 try:
     import psycopg2
     from psycopg2 import extras
@@ -41,9 +43,35 @@ SQLITE_BACKUP_DEFAULT = r'D:\DeepVision\verification\deepvision_backup_for_migra
 POSTGRES_SCHEMA_FILE = r'D:\DeepVision\deepvision_django\schema_postgres.sql'
 
 
-def get_sqlite_conn(db_path):
+def redact_url(url):
+    """Safely redacts passwords and credentials from PostgreSQL connection strings for logging."""
+    if not url:
+        return "[NOT SET]"
+    try:
+        parts = urlsplit(url)
+        netloc = parts.hostname or 'unknown'
+        if parts.port:
+            netloc += f":{parts.port}"
+        redacted_netloc = f"***:***@{netloc}" if (parts.username or parts.password) else netloc
+        return urlunsplit((parts.scheme, redacted_netloc, parts.path, '', ''))
+    except Exception:
+        return "[REDACTED_URL]"
+
+
+def get_sqlite_conn(db_path, for_apply=False):
     if not os.path.exists(db_path):
         raise FileNotFoundError(f"SQLite backup database not found at {db_path}")
+
+    # Safety Guard: Never allow live instance/deepvision.db as migration source
+    norm_path = os.path.normpath(os.path.abspath(db_path)).lower()
+    live_path = os.path.normpath(os.path.abspath(r'D:\DeepVision\instance\deepvision.db')).lower()
+    if for_apply and norm_path == live_path:
+        raise PermissionError(
+            "CRITICAL SAFETY VIOLATION: Using live production database 'instance/deepvision.db' "
+            "as a migration source is forbidden. Always use a verified backup copy "
+            "such as 'verification/deepvision_backup_for_migration.db'."
+        )
+
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
@@ -67,6 +95,7 @@ def parse_args():
     parser.add_argument("--apply", action="store_true", help="Execute schema and data migration against PostgreSQL")
     parser.add_argument("--verify-only", action="store_true", help="Verify existing PostgreSQL data against SQLite backup")
     parser.add_argument("--drop-first", action="store_true", help="Drop existing tables before recreating schema (clean slate)")
+    parser.add_argument("--confirm-isolated-target", action="store_true", help="Required confirmation that target DB is an isolated test environment")
     return parser.parse_args()
 
 
@@ -97,12 +126,10 @@ def apply_schema(pg_conn, drop_first=False):
             print("Dropping existing tables in reverse dependency order...")
             for table in reversed(TABLE_ORDER):
                 cur.execute(f"DROP TABLE IF EXISTS \"{table}\" CASCADE;")
-            pg_conn.commit()
             print("Existing tables dropped.")
 
         print("Executing schema_postgres.sql DDL...")
         cur.execute(schema_sql)
-        pg_conn.commit()
     print("PostgreSQL schema created successfully.\n")
 
 
@@ -141,7 +168,6 @@ def migrate_data(sqlite_conn, pg_conn, source_stats):
             data_tuples.append(tuple(row_data))
 
         extras.execute_batch(pg_cur, insert_query, data_tuples, page_size=1000)
-        pg_conn.commit()
 
         # Reset serial sequence
         pg_cur.execute(f"""
@@ -151,7 +177,6 @@ def migrate_data(sqlite_conn, pg_conn, source_stats):
                 (SELECT MAX(id) FROM "{table}") IS NOT NULL
             );
         """)
-        pg_conn.commit()
         print(" DONE")
 
     print("\nData migration finished successfully.\n")
@@ -205,11 +230,11 @@ def verify_migration(sqlite_conn, pg_conn, source_stats):
 
 def main():
     args = parse_args()
-    sqlite_conn = get_sqlite_conn(args.sqlite_db)
+    sqlite_conn = get_sqlite_conn(args.sqlite_db, for_apply=args.apply)
     source_stats = inspect_source(sqlite_conn)
 
     if args.dry_run or (not args.apply and not args.verify_only):
-        print("Dry run mode complete. To execute migration, supply --pg-url and --apply.")
+        print("Dry run mode complete. To execute migration, supply --pg-url, --apply, and --confirm-isolated-target.")
         sqlite_conn.close()
         return
 
@@ -218,13 +243,28 @@ def main():
         sqlite_conn.close()
         sys.exit(1)
 
+    # Fail closed if attempting to apply without explicit isolated target confirmation
+    if args.apply and not args.confirm_isolated_target:
+        print(f"\nCRITICAL SAFETY ABORT: Refusing to apply schema/data migration to {redact_url(args.pg_url)}")
+        print("without explicit confirmation. To target an isolated test database, pass:")
+        print("  --confirm-isolated-target\n")
+        sqlite_conn.close()
+        sys.exit(2)
+
+    print(f"Connecting to target PostgreSQL: {redact_url(args.pg_url)}")
     pg_conn = get_pg_conn(args.pg_url)
 
     try:
         if args.apply:
             apply_schema(pg_conn, drop_first=args.drop_first)
             migrate_data(sqlite_conn, pg_conn, source_stats)
+            pg_conn.commit()
+            print("All migration changes committed to PostgreSQL atomically.")
         verify_migration(sqlite_conn, pg_conn, source_stats)
+    except Exception as e:
+        pg_conn.rollback()
+        print(f"\nMigration failed; rolled back all uncommitted changes. Error: {e}")
+        raise
     finally:
         pg_conn.close()
         sqlite_conn.close()
