@@ -6,6 +6,7 @@ Provides:
 - DeepVision Assistant API (grounded domain assistant)
 - User Profile view
 """
+import os
 import json
 from datetime import datetime, timezone
 from django.shortcuts import render, redirect
@@ -102,16 +103,36 @@ def health_check_view(request):
     Django Application & System Health Endpoint.
     Checks:
     1. Django process liveness
-    2. SQLite database connectivity
-    3. Canonical surveillance engine reachability & status
+    2. Database connectivity via real query execution (SELECT 1)
+    3. Schema readiness (existence of required tables: users, cameras, alerts)
+    4. Serverless environment persistence guarantees
+    5. Canonical surveillance engine reachability & status
     """
     db_ok = False
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
-            db_ok = cursor.fetchone()[0] == 1
+            row = cursor.fetchone()
+            db_ok = (row is not None and row[0] == 1)
     except Exception:
         db_ok = False
+
+    db_vendor = getattr(connection, 'vendor', 'unknown')
+    tables = []
+    schema_ready = False
+    required_core_tables = {'users', 'cameras', 'alerts'}
+
+    if db_ok:
+        try:
+            tables = connection.introspection.table_names()
+            schema_ready = required_core_tables.issubset(set(tables))
+        except Exception:
+            schema_ready = False
+
+    # Detect serverless ephemeral SQLite fallback
+    is_serverless = bool(os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
+    db_name = str(connection.settings_dict.get('NAME') or '')
+    is_ephemeral_sqlite = (db_vendor == 'sqlite' and (db_name == ':memory:' or not db_name))
 
     try:
         user_id = request.user.id if getattr(request, 'user', None) and request.user.is_authenticated else None
@@ -119,21 +140,42 @@ def health_check_view(request):
     except Exception as e:
         engine_health = {"status": "standby", "note": str(e)}
 
+    # Diagnostic state resolution
     if not db_ok:
         overall_status = "unavailable"
         http_status = 503
+        db_state = "disconnected"
+        diagnostic = "Database connection failed. Service is unavailable."
+    elif is_serverless and is_ephemeral_sqlite:
+        overall_status = "pending_configuration"
+        http_status = 503
+        db_state = "pending_configuration"
+        schema_ready = False
+        diagnostic = "Serverless deployment requires persistent database configuration (DATABASE_URL). Ephemeral in-memory database cannot persist user records."
+    elif not schema_ready:
+        overall_status = "pending_migration"
+        http_status = 503
+        db_state = "connected"
+        diagnostic = f"Database connected ({db_vendor}), but required tables are missing ({len(tables)} tables found). Schema migration required."
     elif engine_health.get("status") != "healthy":
         overall_status = "degraded"
         http_status = 200
+        db_state = "connected"
+        diagnostic = "Database connected and schema verified. Surveillance engine standby or degraded."
     else:
         overall_status = "healthy"
         http_status = 200
+        db_state = "connected"
+        diagnostic = "Database connected and schema verified."
 
     payload = {
         "status": overall_status,
         "django_app": "online",
-        "database": "connected" if db_ok else "disconnected",
-        "database_backend": getattr(connection, 'vendor', 'unknown'),
+        "database": db_state,
+        "database_backend": db_vendor,
+        "schema_ready": schema_ready,
+        "tables_count": len(tables),
+        "diagnostic": diagnostic,
         "surveillance_engine": engine_health.get("status", "unknown"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

@@ -140,8 +140,10 @@ USE_MYSQL = os.getenv('USE_MYSQL', '').lower() in ('true', '1') or DB_ENGINE == 
 
 if USE_POSTGRES:
     if DATABASE_URL:
-        from urllib.parse import urlparse, unquote
+        from urllib.parse import urlparse, unquote, parse_qs
         parsed_db = urlparse(DATABASE_URL)
+        query_params = parse_qs(parsed_db.query)
+        sslmode = query_params.get('sslmode', [os.getenv('DB_SSLMODE', 'require')])[0]
         DATABASES = {
             'default': {
                 'ENGINE': 'django.db.backends.postgresql',
@@ -151,9 +153,10 @@ if USE_POSTGRES:
                 'HOST': parsed_db.hostname or 'localhost',
                 'PORT': parsed_db.port or 5432,
                 'OPTIONS': {
-                    'sslmode': os.getenv('DB_SSLMODE', 'require'),
+                    'sslmode': sslmode,
                     'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '10')),
                 },
+                'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '0')),
             }
         }
     else:
@@ -169,6 +172,7 @@ if USE_POSTGRES:
                     'sslmode': os.getenv('DB_SSLMODE', 'require'),
                     'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '10')),
                 },
+                'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '0')),
             }
         }
 elif USE_MYSQL:
@@ -189,6 +193,7 @@ elif USE_MYSQL:
                 'charset': 'utf8mb4',
                 'connect_timeout': 10,
             },
+            'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '0')),
         }
     }
 else:
@@ -205,6 +210,7 @@ else:
             'OPTIONS': {
                 'timeout': 30.0,
             },
+            'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '0')),
         }
     }
 

@@ -100,11 +100,16 @@ DeepVision includes production-grade PostgreSQL DDL schema and automated data mi
 
 ### 1. Supabase Dashboard Steps
 1. Create a free account at [supabase.com](https://supabase.com).
-2. Create a new project (e.g., `deepvision-db`) and set a strong database password.
-3. In the project dashboard under **Project Settings > Database**, copy the **Transaction Connection Pooler** or **Direct Connection** URI:
-   ```text
-   postgresql://postgres.[project-ref]:[db-password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require
-   ```
+2. Create a dedicated project (e.g., `deepvision-db`) and set a strong database password. Keep this password safe and never share or commit it.
+3. Under **Project Settings > Database**, retrieve the connection URIs:
+   - **For Vercel Serverless Function (`DATABASE_URL`)**: Use the **Transaction Pooler** (port `6543` with PgBouncer) so serverless lambdas reuse connections efficiently:
+     ```text
+     postgresql://postgres.[project-ref]:[db-password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require
+     ```
+   - **For Initial Data Migration (`--pg-url`)**: Use the **Direct Connection** (port `5432`) or Session Pooler:
+     ```text
+     postgresql://postgres.[project-ref]:[db-password]@aws-0-[region].pooler.supabase.com:5432/postgres?sslmode=require
+     ```
 4. Under **Storage**, create two private storage buckets:
    - `recordings` (private)
    - `evidence` (private)
@@ -119,16 +124,20 @@ python verification/create_consistent_backup.py
 # Step 2: Test migration in dry-run mode (read-only inspection)
 python verification/migrate_sqlite_to_postgres.py --dry-run
 
-# Step 3: Apply PostgreSQL schema and migrate all 18 tables to Supabase
-$env:DATABASE_URL="postgresql://postgres.[project-ref]:[db-password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require"
-python verification/migrate_sqlite_to_postgres.py --apply
+# Step 3: Apply PostgreSQL schema and migrate all 18 tables to isolated Supabase test target
+$env:DATABASE_URL="postgresql://postgres.[project-ref]:[db-password]@aws-0-[region].pooler.supabase.com:5432/postgres?sslmode=require"
+python verification/migrate_sqlite_to_postgres.py --apply --confirm-isolated-target
 ```
 
 The migration tool automatically:
-- Executes `deepvision_django/schema_postgres.sql` (creating all 18 tables, primary keys, and secondary indexes).
+- Enforces safety gates prohibiting migration from `instance/deepvision.db`.
+- Requires `--confirm-isolated-target` to prevent accidental overwrites.
+- Executes `deepvision_django/schema_postgres.sql` (creating all 18 tables, primary keys, and secondary indexes) inside an atomic transaction.
+- Aborts repeat runs safely (`check_destination_populated`) unless `--drop-first` is explicitly specified.
 - Inserts data while preserving primary keys, user roles, and password hashes.
 - Resets all serial sequences (`setval`) to match `MAX(id) + 1`.
 - Compares source and target row counts, ID ranges, and credentials.
+- Redacts all passwords and credentials from console output.
 
 ---
 
