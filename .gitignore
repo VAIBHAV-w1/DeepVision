@@ -233,4 +233,5 @@ memory.md
 s
 *.session.sql
 security/
+.vercel/
 
