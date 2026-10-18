@@ -1,27 +1,55 @@
 # DeepVision — Intelligent Surveillance & Incident Monitoring Platform
 
-DeepVision is a production-grade, local AI surveillance platform structured as a modern **React SPA frontend** connected to a **Django backend**, backed by an embedded native computer vision pipeline utilizing **OpenCV / DirectShow**, **YOLO11n (PyTorch)**, and **ByteTrack** for real-time tracking, incident evidence preservation, and forensic investigation.
+**GitHub Repository:** [https://github.com/VAIBHAV-w1/DeepVision](https://github.com/VAIBHAV-w1/DeepVision)  
+**Live Frontend (Vercel):** [https://frontend-ten-tau-nm1m468imk.vercel.app](https://frontend-ten-tau-nm1m468imk.vercel.app)  
+**Backend & Native Engine Status:** [Pending Persistent Host / Local Docker](#component-deployment-matrix)
+
+DeepVision is a production-grade AI surveillance and incident monitoring platform structured with a decoupled **React SPA frontend** on Vercel, a **Django backend** for REST APIs and authentication, and an embedded native computer vision pipeline utilizing **OpenCV / DirectShow**, **YOLO11n (PyTorch)**, and **ByteTrack** for real-time tracking, incident evidence preservation, and forensic investigation.
+
+---
+
+## Component Deployment Matrix
+
+| Component | Target Architecture | Status | URL / Location |
+| :--- | :--- | :---: | :--- |
+| **Vite / React SPA Frontend** | Vercel Edge CDN | **DEPLOYED (LIVE)** | [https://frontend-ten-tau-nm1m468imk.vercel.app](https://frontend-ten-tau-nm1m468imk.vercel.app) |
+| **PostgreSQL Database** | Supabase Free Tier | **SCHEMA & MIGRATION READY** | DDL: `deepvision_django/schema_postgres.sql` |
+| **Django REST API Gateway** | Persistent Host / Cloud VM | **PENDING PERSISTENT HOST** | Container image: `deepvision:1.1.0-hardened-candidate` |
+| **AI Surveillance Engine** | On-Premises Edge / VM with GPU/CPU | **DEPLOYED (LOCAL DOCKER)** | `deepvision-app` container (port 8000) |
+| **Recordings & Evidence** | Persistent Volume / Supabase Storage | **READY FOR STORAGE** | Local mount `./recordings/`, `./evidence/` |
+
+> [!IMPORTANT]
+> **Architecture Split & Cloud Limitations:**
+> A sleeping free-tier web service is **not** an always-on surveillance engine. DeepVision requires persistent background processing for continuous camera frame ingestion, YOLO singleton neural inference, and ByteTrack tracking loops. Furthermore, physical USB / DirectShow cameras cannot be accessed from cloud servers.
+>
+> Therefore, DeepVision is structured as a decoupled architecture:
+> 1. **Vercel** serves the client-side Single Page Application globally.
+> 2. **Supabase** provides the managed PostgreSQL database and cloud storage buckets.
+> 3. **Persistent Host / Edge Server** runs the containerized Django backend and native OpenCV/YOLO surveillance pipeline.
 
 ---
 
 ## Architecture Overview
 
 ```text
-React SPA Frontend (Vite)
-        ↓  (HTTP/JSON REST & Multipart MJPEG)
-Django 5.2 Application (:8000)
-        ↓  (Native In-Process Services)
-Surveillance Engine (CameraRegistry, InferenceRegistry)
-        ↓
-OpenCV / DirectShow (dshow://0)
-        ↓
-YOLO11n + PyTorch (Singleton Model Weights)
-        ↓
-ByteTrack (Kalman Filtering & Hungarian Association)
-        ↓
-Recording / Alerts / Forensic Evidence / Cases / Notifications
-        ↓
-SQLite (instance/deepvision.db - 18 Tables)
+┌─────────────────────────────────────────────────────────────┐
+│                   React SPA Frontend                        │
+│            (Deployed on Vercel Edge CDN)                    │
+│      https://frontend-ten-tau-nm1m468imk.vercel.app         │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                HTTP REST & CSRF (VITE_API_BASE_URL)
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│                    Django 5.2 Application                   │
+│             (Persistent Host / Docker Runtime)              │
+├──────────────────────────────┬──────────────────────────────┤
+│      Database Layer          │      Surveillance Engine     │
+│   • Supabase PostgreSQL      │   • CameraRegistry           │
+│   • Canonical SQLite fallback│   • OpenCV / DirectShow      │
+│   • PBKDF2 Password Hashing  │   • YOLO11n + PyTorch        │
+│   • 18 Relational Tables     │   • ByteTrack Tracking       │
+└──────────────────────────────┴──────────────────────────────┘
 ```
 
 ---
@@ -37,7 +65,7 @@ SQLite (instance/deepvision.db - 18 Tables)
 - **React SPA Frontend**:
   - High-performance Single Page Application built with React 19, JavaScript ES6+, HTML5, and CSS3 via Vite.
   - Zero bloated external component libraries; clean, custom design system preserving DeepVision visual identity (SOC Dark & Daylight modes).
-  - Centralized API layer (`services/api.js`) with automatic CSRF token management.
+  - Centralized API layer (`services/api.js`) with automatic CSRF token management and dynamic backend base URL configuration via `VITE_API_BASE_URL`.
   - Interactive live camera feeds with instantaneous mode toggling between:
     1. **ORIGINAL**: Raw CCTV video passthrough.
     2. **TRACKING + DETECTION**: Deep vision inference with persistent trajectory IDs, bounding boxes, and confidence levels.
@@ -57,9 +85,75 @@ SQLite (instance/deepvision.db - 18 Tables)
   - Cryptographic 6-digit OTP verification with 15-minute expiration and rate limiting.
   - Full CSRF protection and path traversal guards across all media access points.
 
-- **Database Safety & Integrity**:
+- **Database Safety & Multi-Database Engine Support**:
   - Embedded SQLite database (`instance/deepvision.db`) containing 18 relational tables.
-  - Zero schema drift, zero unverified migrations.
+  - Native Supabase / PostgreSQL engine support via `DATABASE_URL` with SSL connection pooling.
+  - Automated SQLite-to-PostgreSQL migration and sequence synchronization tool (`verification/migrate_sqlite_to_postgres.py`).
+
+---
+
+## Supabase PostgreSQL & Storage Setup
+
+DeepVision includes production-grade PostgreSQL DDL schema and automated data migration tooling compatible with Supabase's Free Tier.
+
+### 1. Supabase Dashboard Steps
+1. Create a free account at [supabase.com](https://supabase.com).
+2. Create a new project (e.g., `deepvision-db`) and set a strong database password.
+3. In the project dashboard under **Project Settings > Database**, copy the **Transaction Connection Pooler** or **Direct Connection** URI:
+   ```text
+   postgresql://postgres.[project-ref]:[db-password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require
+   ```
+4. Under **Storage**, create two private storage buckets:
+   - `recordings` (private)
+   - `evidence` (private)
+
+### 2. Apply PostgreSQL Schema & Migrate Data
+DeepVision provides an automated, non-destructive migration script that copies data from a verified SQLite backup without touching the live SQLite database:
+
+```powershell
+# Step 1: Create a consistent, verified SQLite backup using SQLite Online Backup API
+python verification/create_consistent_backup.py
+
+# Step 2: Test migration in dry-run mode (read-only inspection)
+python verification/migrate_sqlite_to_postgres.py --dry-run
+
+# Step 3: Apply PostgreSQL schema and migrate all 18 tables to Supabase
+$env:DATABASE_URL="postgresql://postgres.[project-ref]:[db-password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require"
+python verification/migrate_sqlite_to_postgres.py --apply
+```
+
+The migration tool automatically:
+- Executes `deepvision_django/schema_postgres.sql` (creating all 18 tables, primary keys, and secondary indexes).
+- Inserts data while preserving primary keys, user roles, and password hashes.
+- Resets all serial sequences (`setval`) to match `MAX(id) + 1`.
+- Compares source and target row counts, ID ranges, and credentials.
+
+---
+
+## Environment Variables Configuration
+
+Copy `.env.example` to `.env` and configure appropriate variables. **Never commit `.env` to version control.**
+
+```ini
+# Django Core Settings
+DJANGO_SECRET_KEY=your_secure_random_django_secret_key_at_least_32_chars
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost,your-backend-domain.com
+DJANGO_CSRF_TRUSTED_ORIGINS=http://127.0.0.1:8000,https://frontend-ten-tau-nm1m468imk.vercel.app
+
+# Database Configuration (Defaults to embedded SQLite if USE_POSTGRES is false)
+DATABASE_URL=sqlite:///instance/deepvision.db
+
+# Supabase / PostgreSQL Configuration (Uncomment to use Supabase):
+# USE_POSTGRES=True
+# DATABASE_URL=postgresql://postgres.[project-ref]:[db-password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require
+# SUPABASE_URL=https://[project-ref].supabase.co
+# SUPABASE_ANON_KEY=your_supabase_anon_key_here
+# SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
+
+# Frontend Configuration (for Vercel)
+# VITE_API_BASE_URL=https://your-backend-domain.com
+```
 
 ---
 
@@ -71,12 +165,14 @@ D:\DeepVision
 ├── manage.py                     # Root Django management entrypoint
 ├── start_deepvision.py           # Production application launcher
 ├── requirements.txt              # Core Python runtime dependencies
+├── Dockerfile.hardened           # Production hardened Dockerfile
+├── docker-compose.yml            # Production container configuration
 ├── README.md                     # Project overview and run guide
 ├── ARCHITECTURE.md               # Detailed architectural specification
-├── TECH_STACK.md                 # Verified runtime technology matrix
 │
 ├── deepvision_django/            # Django backend & REST APIs
 │   ├── config/                   # Settings, URLs, WSGI, and ASGI
+│   ├── schema_postgres.sql       # Canonical PostgreSQL/Supabase schema DDL
 │   ├── apps/
 │   │   ├── accounts/             # Authentication, PBKDF2 models, OTP
 │   │   ├── core/                 # REST API layer, media services, assistant
@@ -89,81 +185,52 @@ D:\DeepVision
 │   └── static/dist/              # Compiled production React frontend bundle
 │
 ├── frontend/                     # React + Vite source code
+│   ├── vercel.json               # Vercel SPA routing configuration
+│   ├── vite.config.js            # Vite build configuration (Vercel & Docker dual-target)
 │   ├── src/
-│   │   ├── components/           # Common, camera, dashboard, and layout components
-│   │   ├── pages/                # Dashboard, Cameras, Recordings, Evidence, Alerts, Cases, Auth
-│   │   ├── layouts/              # AppLayout (Navbar, Sidebar) & AuthLayout
-│   │   ├── services/             # Centralized API clients (auth, camera, recordings, etc.)
-│   │   ├── hooks/                # useAuth, useCamera, useNotifications
-│   │   ├── styles/               # Design system stylesheets
-│   │   ├── utils/                # CSRF, formatters, constants
-│   │   ├── App.jsx               # Client-side router and view controller
-│   │   └── main.jsx              # React application entrypoint
-│   ├── package.json              # Frontend dependencies and build scripts
-│   └── vite.config.js            # Vite build configuration (outputs to static/dist/)
-│
-├── models/
-│   └── yolo11n.pt                # YOLO11n weights (5.35 MB)
+│   │   ├── components/           # UI components (cameras, alerts, modals)
+│   │   ├── pages/                # Dashboard, Cameras, Recordings, Evidence, Alerts
+│   │   ├── services/             # API services with dynamic VITE_API_BASE_URL
+│   │   └── App.jsx               # Client-side router
 │
 ├── instance/
-│   ├── deepvision.db             # SQLite database (18 tables)
+│   ├── deepvision.db             # Canonical SQLite database (18 tables)
 │   ├── recordings/               # Stored surveillance MP4 files
 │   └── evidence/                 # Forensic snapshot images & incident clips
 │
-├── backups/                      # Configuration & schema archives
-└── verification/                 # Automated test and health verification scripts
+├── verification/                 # Automated verification & test suites
+│   ├── create_consistent_backup.py      # SQLite Online Backup API tool
+│   ├── migrate_sqlite_to_postgres.py    # PostgreSQL/Supabase migration & verification
+│   ├── secret_scanner.py                # Secret and credential protection scanner
+│   ├── test_backup_and_rollback_safety.py # Backup consistency validation
+│   └── verify_hardened_container.py     # Container regression test suite
+└── DeepVision-1.1.0/             # Release distribution package & setup scripts
 ```
 
 ---
 
-## Deployment Options: Native Windows vs. Docker
+## Docker Deployment
 
-| Capability | Native Windows (Reference Environment) | Linux Docker Container (`deepvision:1.1.0`) |
-| :--- | :--- | :--- |
-| **Django Application & APIs** | ✅ Full support (`:8000`) | ✅ Full support (`:8000`) |
-| **React SPA Production UI** | ✅ Pre-compiled Vite bundle | ✅ Built in multi-stage image |
-| **Session & OTP Authentication** | ✅ Supported (PBKDF2) | ✅ Supported (PBKDF2) |
-| **Forensic Operations Center** | ✅ Supported | ✅ Supported |
-| **HTTP 206 Partial Playback** | ✅ Supported | ✅ Supported |
-| **Persistent Storage & DB** | ✅ Host filesystem | ✅ Volume mounts (`./instance`, `./recordings`, etc.) |
-| **PyTorch & Ultralytics AI** | ✅ Supported (CPU) | ✅ Supported (CPU) |
-| **DirectShow Physical Webcam** | ✅ Supported (`dshow://0`) | ⚠️ **Host-only Limitation** (Linux containers cannot directly access Windows DirectShow drivers) |
+DeepVision provides a hardened, non-root Docker container image (`deepvision:1.1.0-hardened-candidate`) packaged for production deployment.
 
-> [!NOTE]
-> **Hardware Boundary**: DirectShow (`dshow://0`) is a proprietary Windows multimedia framework. Standard Linux containers cannot bind directly to physical DirectShow webcams without host-level virtualization drivers. Native Windows remains the reference operational deployment for live USB/DirectShow camera capture. The Docker deployment serves as the portable application, API, forensic operations, and data management runtime.
-
----
-
-## Docker Quick Start
-
-### 1. Prerequisites
-- Docker Engine 20.10+ / Docker Desktop (WSL 2 on Windows)
-- Docker Compose v2+
-
-### 2. Build the Production Image
+### 1. Build or Load the Image
 ```powershell
-docker build -t deepvision:1.1.0 .
+# Build from source:
+docker build -f Dockerfile.hardened -t deepvision:1.1.0-hardened-candidate .
+
+# Or load from release archive:
+docker load -i DeepVision-1.1.0\DeepVision-1.1.0-hardened-candidate.tar
 ```
 
-### 3. Start with Docker Compose
+### 2. Run with Docker Compose
 ```powershell
 docker compose up -d
 ```
 
-### 4. Verify Container Health & Status
+### 3. Verify Health & Status
 ```powershell
 docker compose ps
 curl http://127.0.0.1:8000/api/health/
-```
-
-### 5. Run the Automated Docker Verification Suite
-```powershell
-python verification/test_docker_container.py
-```
-
-### 6. Stop Container
-```powershell
-docker compose down
 ```
 
 ---
@@ -176,62 +243,46 @@ docker compose down
 - Local webcam or DirectShow-compatible capture device (`dshow://0`)
 
 ### 1. Backend Setup
-Activate the virtual environment and ensure dependencies are installed:
 ```powershell
+python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### 2. Environment Configuration
-Copy the sample environment file and configure your local settings:
-```powershell
-copy .env.example .env
-```
-*(Configure `DJANGO_SECRET_KEY`, database paths, and optional SMTP settings in `.env`)*
-
-### 3. Frontend Build
-To compile the React frontend bundle:
+### 2. Frontend Build
 ```powershell
 cd frontend
 npm install
 npm run build
 cd ..
 ```
-The output bundle will be placed directly in `deepvision_django/static/dist/`.
 
-### 4. Launch Application
-Launch the unified server using the production runner:
+### 3. Launch Application
 ```powershell
 python start_deepvision.py
 ```
-
-The application is accessible locally at:
-**http://127.0.0.1:8000/**
+Access locally at **http://127.0.0.1:8000/**.
 
 ---
 
 ## Running Verification Tests
 
-### Native Windows Full-Stack & Camera Regression Suite
-To execute the 29-point automated test suite covering all APIs, authentication, streams, singletons, and database invariants:
 ```powershell
-python verification/verify_final_restructure.py
-```
+# 1. Full security & secret scan:
+python verification/secret_scanner.py
 
-### Incident Scoping & Data Isolation Suite
-To verify zero cross-incident data bleed:
-```powershell
-python verification/test_incident_scoping.py
-```
+# 2. SQLite Online Backup verification:
+python verification/create_consistent_backup.py
 
-### Containerized Runtime Verification Suite
-To verify the Docker deployment:
-```powershell
-python verification/test_docker_container.py
+# 3. PostgreSQL migration dry-run inspection:
+python verification/migrate_sqlite_to_postgres.py --dry-run
+
+# 4. Production container health test:
+python verification/verify_hardened_container.py
 ```
 
 ---
 
-## Development & Release Workflow
+## License & Compliance
 
-DeepVision adheres to Semantic Versioning (`MAJOR.MINOR.PATCH`) with immutable version tags for every verified release. For details on the development process, testing gates, and release procedures, refer to [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md) and the [CHANGELOG.md](CHANGELOG.md).
+DeepVision is developed and maintained for secure video surveillance and operational intelligence. All source code, dependencies, and deployment templates adhere to strict security isolation and data preservation standards.

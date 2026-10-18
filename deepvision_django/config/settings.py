@@ -124,11 +124,50 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 ASGI_APPLICATION = 'config.asgi.application'
 
-# Database configuration: Dynamic selection via DB_ENGINE / USE_MYSQL environment variables
+# Database configuration: Dynamic selection via DB_ENGINE / DATABASE_URL / USE_POSTGRES / USE_MYSQL
 DB_ENGINE = os.getenv('DB_ENGINE', '').strip()
+DATABASE_URL = os.getenv('DATABASE_URL', '') or os.getenv('SUPABASE_DB_URL', '')
+USE_POSTGRES = (
+    os.getenv('USE_POSTGRES', '').lower() in ('true', '1')
+    or DB_ENGINE in ('django.db.backends.postgresql', 'postgresql', 'postgres')
+    or bool(DATABASE_URL and DATABASE_URL.startswith(('postgres://', 'postgresql://')))
+)
 USE_MYSQL = os.getenv('USE_MYSQL', '').lower() in ('true', '1') or DB_ENGINE == 'django.db.backends.mysql'
 
-if USE_MYSQL:
+if USE_POSTGRES:
+    if DATABASE_URL:
+        from urllib.parse import urlparse, unquote
+        parsed_db = urlparse(DATABASE_URL)
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.postgresql',
+                'NAME': unquote(parsed_db.path.lstrip('/')),
+                'USER': unquote(parsed_db.username or ''),
+                'PASSWORD': unquote(parsed_db.password or ''),
+                'HOST': parsed_db.hostname or 'localhost',
+                'PORT': parsed_db.port or 5432,
+                'OPTIONS': {
+                    'sslmode': os.getenv('DB_SSLMODE', 'require'),
+                    'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '10')),
+                },
+            }
+        }
+    else:
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.postgresql',
+                'NAME': os.getenv('POSTGRES_DB', os.getenv('DB_NAME', 'postgres')),
+                'USER': os.getenv('POSTGRES_USER', os.getenv('DB_USER', 'postgres')),
+                'PASSWORD': os.getenv('POSTGRES_PASSWORD', os.getenv('DB_PASSWORD', '')),
+                'HOST': os.getenv('POSTGRES_HOST', os.getenv('DB_HOST', 'localhost')),
+                'PORT': int(os.getenv('POSTGRES_PORT', os.getenv('DB_PORT', '5432'))),
+                'OPTIONS': {
+                    'sslmode': os.getenv('DB_SSLMODE', 'require'),
+                    'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '10')),
+                },
+            }
+        }
+elif USE_MYSQL:
     try:
         import pymysql
         pymysql.install_as_MySQLdb()
