@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -8,14 +9,34 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables from root .env file
 load_dotenv(BASE_DIR.parent / '.env')
 
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'dv-sec-prod-entropy-key-9f8a3c7e2b1d4f6a8e0c2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f1a3c5e7b9d')
 DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('true', '1')
+
+# Hardcoded fallback key previously exposed - strictly disallowed in production
+_COMPROMISED_KEY = 'dv-sec-prod-entropy-key-9f8a3c7e2b1d4f6a8e0c2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f1a3c5e7b9d'
+_DEV_FALLBACK_KEY = 'django-insecure-dev-only-local-secret-key-not-for-production'
+
+raw_secret = os.getenv('DJANGO_SECRET_KEY', '').strip()
+
+if not DEBUG:
+    # Production mode: require a secure, non-compromised key
+    if not raw_secret or raw_secret == _COMPROMISED_KEY or raw_secret == _DEV_FALLBACK_KEY:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set to a secure, unique key in environment variables when DEBUG=False."
+        )
+    if len(raw_secret) < 32:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be at least 32 characters in production."
+        )
+    SECRET_KEY = raw_secret
+else:
+    # Local development mode: allow dev-only fallback if not explicitly provided
+    SECRET_KEY = raw_secret if (raw_secret and raw_secret != _COMPROMISED_KEY) else _DEV_FALLBACK_KEY
 
 allowed_hosts_env = os.getenv('DJANGO_ALLOWED_HOSTS')
 if allowed_hosts_env:
     ALLOWED_HOSTS = [h.strip() for h in allowed_hosts_env.split(',') if h.strip()]
 else:
-    ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '0.0.0.0']
+    ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
 
 # Standard Django SMTP Email Configuration
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -71,7 +92,7 @@ csrf_trusted_origins_env = os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS')
 if csrf_trusted_origins_env:
     CSRF_TRUSTED_ORIGINS = [o.strip() for o in csrf_trusted_origins_env.split(',') if o.strip()]
 else:
-    CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:8000', 'http://localhost:8000', 'http://0.0.0.0:8000']
+    CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:8000', 'http://localhost:8000']
 
 # Security Headers & Protections
 SECURE_BROWSER_XSS_FILTER = True

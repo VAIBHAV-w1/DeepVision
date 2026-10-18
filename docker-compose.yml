@@ -1,3 +1,18 @@
+# =============================================================================
+# DeepVision Local Development & Source Build Compose Configuration (v1.1.0)
+#
+# PURPOSE:
+# This file is for developers working directly in the source repository.
+# It builds the image from source (./Dockerfile) and bind-mounts host working
+# tree directories (./instance, ./models, ./recordings, ./evidence) for active
+# iteration, live inspection, and optional local database testing (e.g. MySQL).
+#
+# FOR PRODUCTION / END-USER DISTRIBUTION:
+# Use DeepVision-1.1.0/docker-compose.yml instead, which uses the prebuilt,
+# hardened image (deepvision:1.1.0-hardened) and Docker named volumes without
+# source bind mounts.
+# =============================================================================
+
 services:
   deepvision:
     build:
@@ -7,14 +22,14 @@ services:
     container_name: deepvision-app
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - DEEPVISION_HOST=0.0.0.0
       - DEEPVISION_PORT=8000
       - DJANGO_DEBUG=False
-      - DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost,0.0.0.0,deepvision-app
-      - DJANGO_CSRF_TRUSTED_ORIGINS=http://127.0.0.1:8000,http://localhost:8000,http://0.0.0.0:8000
-      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
+      - DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost,deepvision-app
+      - DJANGO_CSRF_TRUSTED_ORIGINS=http://127.0.0.1:8000,http://localhost:8000
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in your .env file}
       - USE_MYSQL=${USE_MYSQL:-0}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-DeepVision}
       - MYSQL_USER=${MYSQL_USER:-Vaibhav}

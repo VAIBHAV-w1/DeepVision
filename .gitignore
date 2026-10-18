@@ -228,3 +228,9 @@ structure.txt
 *.tar
 DeepVision-*/DeepVision-*.tar
 
+# Private operational notes, local diffs, session files, and security audits
+memory.md
+s
+*.session.sql
+security/
+

@@ -2,11 +2,13 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
+const isVercel = process.env.VERCEL === '1' || process.env.BUILD_TARGET === 'vercel';
+
 export default defineConfig({
   plugins: [react()],
-  base: '/static/dist/',
+  base: isVercel ? '/' : (process.env.VITE_BASE_PATH || '/static/dist/'),
   build: {
-    outDir: path.resolve(import.meta.dirname, '../deepvision_django/static/dist'),
+    outDir: isVercel ? 'dist' : path.resolve(import.meta.dirname, '../deepvision_django/static/dist'),
     emptyOutDir: true,
   },
   server: {

@@ -1,0 +1,39 @@
+
+# =============================================================================
+# DeepVision Production Distribution Docker Compose Configuration (v1.1.0)
+# Uses prebuilt, hardened production image with host bind mounts.
+# For local source development and build configuration, see root docker-compose.yml.
+# =============================================================================
+
+services:
+  deepvision:
+    image: deepvision:1.1.0-hardened
+    container_name: deepvision-app
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:${DEEPVISION_PORT:-8000}:8000"
+
+    environment:
+      DEEPVISION_HOST: "0.0.0.0"
+      DEEPVISION_PORT: "8000"
+      DJANGO_DEBUG: "False"
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,deepvision-app"
+      DJANGO_CSRF_TRUSTED_ORIGINS: "http://127.0.0.1:${DEEPVISION_PORT:-8000},http://localhost:${DEEPVISION_PORT:-8000}"
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in your .env file}"
+      HOST_CAMERA_BRIDGE_URL: "http://host.docker.internal:8554"
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      - ${DEEPVISION_INSTANCE_DIR:-../instance}:/app/instance
+      - ${DEEPVISION_MODELS_DIR:-../models}:/app/models
+      - ${DEEPVISION_RECORDINGS_DIR:-../recordings}:/app/recordings
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

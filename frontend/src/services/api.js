@@ -5,8 +5,10 @@
 
 import { getCsrfToken, fetchCsrfToken } from '../utils/csrf';
 
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+
 async function request(endpoint, options = {}) {
-  const url = endpoint.startsWith('http') ? endpoint : endpoint;
+  const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
   const headers = {
     'Accept': 'application/json',
     ...(options.headers || {}),
@@ -122,10 +124,10 @@ export const api = {
     testConnection: (sourceType, source) =>
       request('/api/cameras/test-connection/', { method: 'POST', body: { source_type: sourceType, source } }),
     warm: (id) => request(`/cameras/${id}/warm/`),
-    getStreamUrl: (id, mode = 'tracking') => `/cameras/${id}/stream/?mode=${mode}`,
-    getOriginalStreamUrl: (id) => `/cameras/${id}/stream/original/`,
-    getTrackingStreamUrl: (id) => `/cameras/${id}/stream/tracking/`,
-    getSnapshotUrl: (id) => `/cameras/${id}/snapshot/`,
+    getStreamUrl: (id, mode = 'tracking') => `${API_BASE_URL}/cameras/${id}/stream/?mode=${mode}`,
+    getOriginalStreamUrl: (id) => `${API_BASE_URL}/cameras/${id}/stream/original/`,
+    getTrackingStreamUrl: (id) => `${API_BASE_URL}/cameras/${id}/stream/tracking/`,
+    getSnapshotUrl: (id) => `${API_BASE_URL}/cameras/${id}/snapshot/`,
   },
 
   // Recordings
@@ -135,8 +137,8 @@ export const api = {
       return request(`/api/recordings/${q ? '?' + q : ''}`);
     },
     get: (id) => request(`/api/recordings/${id}/`),
-    getViewUrl: (id) => `/recordings/${id}/view/`,
-    getDownloadUrl: (id) => `/recordings/${id}/download/`,
+    getViewUrl: (id) => `${API_BASE_URL}/recordings/${id}/view/`,
+    getDownloadUrl: (id) => `${API_BASE_URL}/recordings/${id}/download/`,
   },
 
   // Evidence
@@ -146,8 +148,8 @@ export const api = {
       return request(`/api/evidence/${q ? '?' + q : ''}`);
     },
     get: (id) => request(`/api/evidence/${id}/`),
-    getPreviewUrl: (id) => `/evidence/${id}/preview/`,
-    getDownloadUrl: (id) => `/evidence/${id}/download/`,
+    getPreviewUrl: (id) => `${API_BASE_URL}/evidence/${id}/preview/`,
+    getDownloadUrl: (id) => `${API_BASE_URL}/evidence/${id}/download/`,
   },
 
   // Alerts & Incident Workspace

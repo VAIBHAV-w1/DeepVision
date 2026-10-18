@@ -1,0 +1,20 @@
+# =============================================================================
+# DeepVision 1.1.0 Hardened Test Image
+# Builds upon verified deepvision:1.1.0 baseline, adding gunicorn and hardened code
+# =============================================================================
+FROM deepvision:1.1.0
+
+USER root
+
+# Install gunicorn for production WSGI server execution
+RUN pip install --no-cache-dir gunicorn>=21.2.0
+
+# Copy updated application code with hardened settings, wsgi, and launcher
+COPY start_deepvision.py .env.example ./
+COPY deepvision_django/ ./deepvision_django/
+
+RUN chown -R deepvision:deepvision /app
+
+USER deepvision
+
+ENTRYPOINT ["python", "start_deepvision.py"]

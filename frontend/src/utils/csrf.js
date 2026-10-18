@@ -26,9 +26,11 @@ export function getCsrfToken() {
   );
 }
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+
 export async function fetchCsrfToken() {
   try {
-    const res = await fetch('/api/auth/csrf/', { credentials: 'include' });
+    const res = await fetch(`${API_BASE_URL}/api/auth/csrf/`, { credentials: 'include' });
     if (res.ok) {
       const data = await res.json();
       return data.csrfToken || getCsrfToken();
