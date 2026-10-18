@@ -116,10 +116,17 @@ def inspect_source(sqlite_conn):
     return stats
 
 
+import re
+
+
 def apply_schema(pg_conn, drop_first=False):
     print("=== Applying PostgreSQL Schema ===")
     with open(POSTGRES_SCHEMA_FILE, 'r', encoding='utf-8') as f:
         schema_sql = f.read()
+
+    # Strip top-level BEGIN; and COMMIT; so Python connection manages the transaction boundary
+    clean_schema_sql = re.sub(r'^\s*BEGIN\s*;\s*', '', schema_sql, flags=re.IGNORECASE)
+    clean_schema_sql = re.sub(r'\s*COMMIT\s*;\s*$', '', clean_schema_sql, flags=re.IGNORECASE)
 
     with pg_conn.cursor() as cur:
         if drop_first:
@@ -129,14 +136,37 @@ def apply_schema(pg_conn, drop_first=False):
             print("Existing tables dropped.")
 
         print("Executing schema_postgres.sql DDL...")
-        cur.execute(schema_sql)
+        cur.execute(clean_schema_sql)
     print("PostgreSQL schema created successfully.\n")
 
 
-def migrate_data(sqlite_conn, pg_conn, source_stats):
+def check_destination_populated(pg_cur):
+    populated = []
+    for table in TABLE_ORDER:
+        pg_cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)", (table,))
+        res = pg_cur.fetchone()
+        if res and res[0]:
+            pg_cur.execute(f'SELECT count(*) FROM "{table}"')
+            c = pg_cur.fetchone()
+            if c and c[0] > 0:
+                populated.append((table, c[0]))
+                break
+    return populated
+
+
+def migrate_data(sqlite_conn, pg_conn, source_stats, drop_first=False):
     print("=== Migrating Data from SQLite to PostgreSQL ===")
     sq_cur = sqlite_conn.cursor()
     pg_cur = pg_conn.cursor()
+
+    if not drop_first:
+        populated = check_destination_populated(pg_cur)
+        if populated:
+            raise RuntimeError(
+                f"REPEAT-RUN SAFETY ABORT: Destination database already contains data in {len(populated)} tables "
+                f"(e.g., '{populated[0][0]}' has {populated[0][1]} rows). To re-run migration cleanly, supply --drop-first, "
+                "or use --verify-only to inspect existing data."
+            )
 
     for table in TABLE_ORDER:
         cnt = source_stats[table]['count']
@@ -257,7 +287,7 @@ def main():
     try:
         if args.apply:
             apply_schema(pg_conn, drop_first=args.drop_first)
-            migrate_data(sqlite_conn, pg_conn, source_stats)
+            migrate_data(sqlite_conn, pg_conn, source_stats, drop_first=args.drop_first)
             pg_conn.commit()
             print("All migration changes committed to PostgreSQL atomically.")
         verify_migration(sqlite_conn, pg_conn, source_stats)

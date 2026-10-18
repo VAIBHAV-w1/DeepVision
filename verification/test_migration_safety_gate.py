@@ -41,6 +41,21 @@ class MigrationSafetyGateTests(unittest.TestCase):
             main()
         self.assertEqual(cm.exception.code, 2)
 
+    def test_repeat_run_abort_when_destination_populated(self):
+        from unittest.mock import MagicMock
+        from verification.migrate_sqlite_to_postgres import migrate_data
+        mock_pg_conn = MagicMock()
+        mock_pg_cur = MagicMock()
+        mock_pg_conn.cursor.return_value = mock_pg_cur
+        # Simulate table exists and count > 0
+        mock_pg_cur.fetchone.side_effect = [(True,), (15,)]
+        mock_sqlite_conn = MagicMock()
+
+        source_stats = {"users": {"count": 15, "columns": ["id", "email"]}}
+        with self.assertRaises(RuntimeError) as ctx:
+            migrate_data(mock_sqlite_conn, mock_pg_conn, source_stats, drop_first=False)
+        self.assertIn("REPEAT-RUN SAFETY ABORT", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
