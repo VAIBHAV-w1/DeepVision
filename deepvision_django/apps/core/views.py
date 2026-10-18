@@ -113,8 +113,11 @@ def health_check_view(request):
     except Exception:
         db_ok = False
 
-    user_id = request.user.id if getattr(request, 'user', None) and request.user.is_authenticated else None
-    engine_health = get_engine_health(user_id=user_id)
+    try:
+        user_id = request.user.id if getattr(request, 'user', None) and request.user.is_authenticated else None
+        engine_health = get_engine_health(user_id=user_id)
+    except Exception as e:
+        engine_health = {"status": "standby", "note": str(e)}
 
     if not db_ok:
         overall_status = "unavailable"

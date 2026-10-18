@@ -2,7 +2,10 @@
 YOLO11n Object Detector Service for Django Surveillance Architecture.
 Runs CPU inference on raw OpenCV BGR frames and returns structured predictions.
 """
-import torch
+try:
+    import torch
+except (ImportError, Exception):
+    torch = None
 from apps.surveillance.ai.model_loader import get_shared_yolo_model, get_inference_lock
 
 
@@ -11,7 +14,7 @@ class YOLODetector:
         self.confidence_threshold = confidence_threshold
         self.model = get_shared_yolo_model()
         self.phone_class_id = None
-        if hasattr(self.model, "names") and self.model.names:
+        if hasattr(self.model, "names") and self.model and self.model.names:
             for cid, name in self.model.names.items():
                 if name == "cell phone":
                     self.phone_class_id = cid
@@ -19,6 +22,8 @@ class YOLODetector:
 
     def detect(self, frame, custom_conf=None):
         if frame is None or not hasattr(frame, "shape"):
+            return []
+        if torch is None or self.model is None:
             return []
 
         try:

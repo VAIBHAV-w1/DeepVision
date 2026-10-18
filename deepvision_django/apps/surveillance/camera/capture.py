@@ -9,8 +9,12 @@ import socket
 import ssl
 import threading
 import urllib.request
-import cv2
-import numpy as np
+try:
+    import cv2
+    import numpy as np
+except (ImportError, Exception):
+    cv2 = None
+    np = None
 
 from apps.surveillance.camera.sources import mask_url_credentials
 

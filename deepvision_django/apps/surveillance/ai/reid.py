@@ -1,7 +1,11 @@
-import cv2
+try:
+    import cv2
+    import numpy as np
+except (ImportError, Exception):
+    cv2 = None
+    np = None
 import time
 import math
-import numpy as np
 from threading import Lock
 
 class GlobalIdentityRegistry:

@@ -5,19 +5,27 @@ using shared singleton CameraWorker and InferenceWorker without Flask.
 """
 
 import time
-import cv2
+try:
+    import cv2
+    _JPEG_STREAM_QUALITY = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+except (ImportError, Exception):
+    cv2 = None
+    _JPEG_STREAM_QUALITY = [1, 80]
 import logging
 from typing import Generator, Dict, Any, List
 
 from apps.surveillance.camera.registry import get_camera_registry
-from apps.surveillance.ai.registry import get_inference_registry
 from apps.surveillance.recording import recording_service
 from apps.surveillance.health.health_service import update_camera_health
-from apps.surveillance.ai.reid import registry as reid_registry
+try:
+    from apps.surveillance.ai.registry import get_inference_registry
+    from apps.surveillance.ai.reid import registry as reid_registry
+except (ImportError, Exception):
+    get_inference_registry = None
+    reid_registry = None
 
 logger = logging.getLogger(__name__)
 
-_JPEG_STREAM_QUALITY = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
 _stream_telemetry: Dict[int, Dict[str, Any]] = {}
 
 

@@ -19,7 +19,10 @@ import os
 import json
 import urllib.request
 import urllib.error
-import cv2
+try:
+    import cv2
+except (ImportError, Exception):
+    cv2 = None
 import logging
 import datetime
 from typing import Generator, Optional, Dict, Any

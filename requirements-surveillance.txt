@@ -1,0 +1,5 @@
+# DeepVision Native AI Surveillance Engine Dependencies
+# Required on persistent hosts and edge servers for physical/RTSP camera ingest, YOLOv11, and ByteTrack
+-r requirements.txt
+opencv-python>=4.8.0
+ultralytics>=8.3.0

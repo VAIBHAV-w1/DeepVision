@@ -1,0 +1,20 @@
+# Vercel Deployment Exclusions (Root Anchored)
+/venv/
+/*.tar
+/DeepVision-*/
+/instance/
+/models/
+/backups/
+/recordings/
+/evidence/
+/node_modules/
+/frontend/node_modules/
+/security/
+/verification/
+/.git/
+/.vscode/
+*.db
+*.sqlite3
+memory.md
+s
+*.session.sql

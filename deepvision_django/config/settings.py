@@ -36,7 +36,9 @@ allowed_hosts_env = os.getenv('DJANGO_ALLOWED_HOSTS')
 if allowed_hosts_env:
     ALLOWED_HOSTS = [h.strip() for h in allowed_hosts_env.split(',') if h.strip()]
 else:
-    ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
+    ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '.vercel.app']
+if '.vercel.app' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append('.vercel.app')
 
 # Standard Django SMTP Email Configuration
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -92,7 +94,9 @@ csrf_trusted_origins_env = os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS')
 if csrf_trusted_origins_env:
     CSRF_TRUSTED_ORIGINS = [o.strip() for o in csrf_trusted_origins_env.split(',') if o.strip()]
 else:
-    CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:8000', 'http://localhost:8000']
+    CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:8000', 'http://localhost:8000', 'https://*.vercel.app']
+if 'https://*.vercel.app' not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append('https://*.vercel.app')
 
 # Security Headers & Protections
 SECURE_BROWSER_XSS_FILTER = True
@@ -189,10 +193,15 @@ elif USE_MYSQL:
     }
 else:
     # Verified canonical SQLite database
+    sqlite_db_path = BASE_DIR.parent / 'instance' / 'deepvision.db'
+    if (os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME')) and not sqlite_db_path.exists():
+        sqlite_name = ':memory:'
+    else:
+        sqlite_name = sqlite_db_path
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR.parent / 'instance' / 'deepvision.db',
+            'NAME': sqlite_name,
             'OPTIONS': {
                 'timeout': 30.0,
             },

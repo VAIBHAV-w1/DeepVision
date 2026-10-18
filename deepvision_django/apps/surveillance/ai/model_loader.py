@@ -5,7 +5,10 @@ Guarantees MODEL_LOAD_COUNT=1 from disk and shared nn.Module weights in RAM.
 import os
 import copy
 import threading
-from ultralytics import YOLO
+try:
+    from ultralytics import YOLO
+except (ImportError, Exception):
+    YOLO = None
 
 _model_lock = threading.Lock()
 _shared_yolo_model = None
@@ -31,6 +34,8 @@ def get_shared_yolo_model():
     global _shared_yolo_model, _model_load_count
     with _model_lock:
         if _shared_yolo_model is None:
+            if YOLO is None:
+                return None
             _model_load_count += 1
             from django.conf import settings
             models_dir = os.path.join(settings.BASE_DIR.parent, "models")
@@ -63,6 +68,8 @@ def create_camera_model_wrapper():
     """
     global _model_instance_count
     shared = get_shared_yolo_model()
+    if shared is None:
+        return None
     wrapper = copy.copy(shared)
     wrapper.predictor = None  # fresh tracker state for this camera instance
     with _instance_lock:

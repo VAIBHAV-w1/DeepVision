@@ -9,8 +9,12 @@ import time
 import threading
 import logging
 from datetime import datetime, timezone, timedelta
-import cv2
-import numpy as np
+try:
+    import cv2
+    import numpy as np
+except (ImportError, Exception):
+    cv2 = None
+    np = None
 
 from django.db import connection
 from django.utils import timezone as django_timezone

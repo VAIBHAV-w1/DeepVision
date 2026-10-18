@@ -5,7 +5,10 @@ Reads frames continuously from VideoCapture into thread-safe rolling buffers.
 import time
 import threading
 from collections import deque
-import cv2
+try:
+    import cv2
+except (ImportError, Exception):
+    cv2 = None
 
 from apps.surveillance.camera.capture import safe_open_video_capture
 

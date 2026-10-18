@@ -7,7 +7,10 @@ and storage statistics using Django ORM.
 import os
 import threading
 import logging
-import cv2
+try:
+    import cv2
+except (ImportError, Exception):
+    cv2 = None
 from datetime import datetime, timezone
 
 from django.conf import settings

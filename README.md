@@ -1,8 +1,8 @@
 # DeepVision — Intelligent Surveillance & Incident Monitoring Platform
 
 **GitHub Repository:** [https://github.com/VAIBHAV-w1/DeepVision](https://github.com/VAIBHAV-w1/DeepVision)  
-**Live Frontend (Vercel):** [https://frontend-ten-tau-nm1m468imk.vercel.app](https://frontend-ten-tau-nm1m468imk.vercel.app)  
-**Backend & Native Engine Status:** [Pending Persistent Host / Local Docker](#component-deployment-matrix)
+**Live Frontend & API (Vercel):** [https://frontend-ten-tau-nm1m468imk.vercel.app](https://frontend-ten-tau-nm1m468imk.vercel.app)  
+**Live API Health Check:** [https://frontend-ten-tau-nm1m468imk.vercel.app/api/health/](https://frontend-ten-tau-nm1m468imk.vercel.app/api/health/)
 
 DeepVision is a production-grade AI surveillance and incident monitoring platform structured with a decoupled **React SPA frontend** on Vercel, a **Django backend** for REST APIs and authentication, and an embedded native computer vision pipeline utilizing **OpenCV / DirectShow**, **YOLO11n (PyTorch)**, and **ByteTrack** for real-time tracking, incident evidence preservation, and forensic investigation.
 
@@ -19,13 +19,15 @@ DeepVision is a production-grade AI surveillance and incident monitoring platfor
 | **Recordings & Evidence** | Persistent Volume / Supabase Storage | **READY FOR STORAGE** | Local mount `./recordings/`, `./evidence/` |
 
 > [!IMPORTANT]
-> **Architecture Split & Cloud Limitations:**
-> A sleeping free-tier web service is **not** an always-on surveillance engine. DeepVision requires persistent background processing for continuous camera frame ingestion, YOLO singleton neural inference, and ByteTrack tracking loops. Furthermore, physical USB / DirectShow cameras cannot be accessed from cloud servers.
+> **HTTP 405 Method Not Allowed Resolution:**
+> The previous HTTP 405 error occurred because a single blanket SPA rewrite (/(.*) -> /index.html) routed API POST requests to static HTML, which Vercel CDN rejects. This is resolved with an explicit routing precedence in root ercel.json:
+> 1. /api/(.*) routes to the serverless Python WSGI bridge (pi/index.py).
+> 2. /(.*) routes to the Vite single-page application (index.html).
+> Both frontend and backend share the same origin, eliminating CORS issues and preserving native CSRF and session cookie security.
 >
-> Therefore, DeepVision is structured as a decoupled architecture:
-> 1. **Vercel** serves the client-side Single Page Application globally.
-> 2. **Supabase** provides the managed PostgreSQL database and cloud storage buckets.
-> 3. **Persistent Host / Edge Server** runs the containerized Django backend and native OpenCV/YOLO surveillance pipeline.
+> [!NOTE]
+> **Surveillance Hardware & Cloud Feasibility Boundaries:**
+> Serverless cloud functions (Vercel) have bounded execution times (10s-60s) and cannot access local physical USB/DirectShow camera hardware or sustain long-lived background capture threads. Full neural YOLO11n + ByteTrack pipelines also require significant RAM/GPU beyond standard serverless function limits. DeepVision keeps its physical camera workers and YOLO inference intact on the dedicated edge / Docker host (deepvision-app), while the REST API, incident reporting, and frontend are unified on Vercel.
 
 ---
 

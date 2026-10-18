@@ -119,7 +119,12 @@ def api_login(request):
     if not email or not password:
         return JsonResponse({"success": False, "error": "Email and password are required."}, status=400)
 
-    user = User.objects.filter(email=email).first()
+    try:
+        user = User.objects.filter(email=email).first()
+    except Exception as db_err:
+        logger.error(f"Database error in api_login: {db_err}")
+        return JsonResponse({"success": False, "error": "Database service is not ready. Please verify database connection."}, status=503)
+
     if not user or not user.check_password(password):
         return JsonResponse({"success": False, "error": "Invalid email or password."}, status=401)
 
