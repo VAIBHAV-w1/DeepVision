@@ -67,7 +67,14 @@ def _send_smtp_email(recipient_email, subject, html_content):
 
 
 def _dispatch_email_async(recipient_email, subject, html_content):
-    """Dispatches email asynchronously in a background thread to prevent HTTP blocking."""
+    """
+    Dispatches email synchronously in serverless environments (to prevent process freezing)
+    and asynchronously in persistent server environments.
+    """
+    is_serverless = bool(os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
+    if is_serverless:
+        return _send_smtp_email(recipient_email, subject, html_content)
+
     t = threading.Thread(
         target=_send_smtp_email,
         args=(recipient_email, subject, html_content),
