@@ -358,11 +358,17 @@ export function CameraPreview({ cameraId, onNavigate }) {
                 REFERENCE IMAGE 1: TOP FLOATING PILLS
                 ------------------------------------------------------------- */}
             {/* Left Top Pill: Live indicator with Bitrate/FPS */}
-            <div className="hud-pill-top-left">
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'pulse-dot 1.2s infinite' }}></span>
-              <span>Live</span>
-              <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 500, fontSize: '0.72rem' }}>{fpsDisplay > 0 ? `${fpsDisplay * 18}kb/s` : '430kb/s'}</span>
-            </div>
+            {(() => {
+              const isOnline = camera?.status === 'online';
+              const isLive = isOnline && fpsDisplay > 0;
+              return (
+                <div className="hud-pill-top-left">
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: isLive ? '#10b981' : isOnline ? '#f59e0b' : '#ef4444', animation: isLive ? 'pulse-dot 1.2s infinite' : undefined }}></span>
+                  <span style={{ fontWeight: 700 }}>{isLive ? 'LIVE' : isOnline ? 'STANDBY' : 'OFFLINE'}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 500, fontSize: '0.72rem' }}>{fpsDisplay > 0 ? `${Math.round(fpsDisplay * 18)} kb/s` : '0 kb/s'}</span>
+                </div>
+              );
+            })()}
 
             {/* Center Top Pill: Camera Location / Name */}
             <div className="hud-pill-top-center">

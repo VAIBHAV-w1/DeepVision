@@ -128,36 +128,22 @@ class CameraWorker:
                     self.last_error = str(read_err)
 
                 if success and frame is not None and frame.size > 0:
-                    # Check for muted/zero DirectShow frames
-                    mean_val = float(frame.mean())
-                    if mean_val < 0.1:
-                        self.consecutive_black_frames += 1
-                    else:
-                        self.consecutive_black_frames = 0
-
                     now = time.time()
                     consecutive_failures = 0
 
-                    if self.consecutive_black_frames < 30:
-                        with self.lock:
-                            self.latest_frame = frame
-                            self.rolling_buffer.append(frame.copy())
-                            self.frame_id += 1
-                            self.last_frame_time = now
-                            if self.consecutive_black_frames == 0:
-                                self.last_valid_frame_time = now
-                                self.state = "ONLINE"
+                    with self.lock:
+                        self.latest_frame = frame
+                        self.rolling_buffer.append(frame.copy())
+                        self.frame_id += 1
+                        self.last_frame_time = now
+                        self.last_valid_frame_time = now
+                        self.state = "ONLINE"
 
-                        try:
-                            from apps.surveillance.recording import recording_service
-                            recording_service.write_frame(self.camera_id, frame)
-                        except Exception:
-                            pass
-                    else:
-                        # Muted/zeroed camera stream detected — attempt reconnection
-                        if self.consecutive_black_frames % 30 == 0:
-                            print(f"[CAMERA_WORKER_WARN] Camera {self.camera_id}: {self.consecutive_black_frames} zero-mean frames. DirectShow stream may be muted or unhooked.")
-                            self._attempt_reconnect()
+                    try:
+                        from apps.surveillance.recording import recording_service
+                        recording_service.write_frame(self.camera_id, frame)
+                    except Exception:
+                        pass
 
                     frames_read += 1
                     if frames_read >= 15:

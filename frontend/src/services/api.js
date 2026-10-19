@@ -60,8 +60,18 @@ async function request(endpoint, options = {}) {
   }
 
   if (!response.ok) {
-    const errorMsg = (data && typeof data === 'object' && (data.error || data.message))
-      || `Request failed with status ${response.status}`;
+    let errorMsg;
+    if (data && typeof data === 'object' && (data.error || data.message || data.detail)) {
+      errorMsg = data.error || data.message || data.detail;
+    } else if (response.status === 503 || response.status === 502 || response.status === 504) {
+      errorMsg = 'Database or service temporarily unavailable. Please retry in a few moments.';
+    } else if (response.status === 403 && typeof data === 'string' && data.includes('CSRF')) {
+      errorMsg = 'Security validation failed (CSRF token expired). Please refresh the page.';
+    } else if (response.status === 401) {
+      errorMsg = 'Authentication required. Please sign in to proceed.';
+    } else {
+      errorMsg = `Request failed (${response.status}). Please try again later.`;
+    }
     const error = new Error(errorMsg);
     error.status = response.status;
     error.data = data;

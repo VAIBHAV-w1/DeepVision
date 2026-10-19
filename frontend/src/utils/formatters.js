@@ -2,19 +2,23 @@
  * DeepVision formatting helpers
  */
 
-export function formatDate(isoString) {
+export function formatDate(isoString, options = {}) {
   if (!isoString) return '-';
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return isoString;
-    return d.toLocaleDateString(undefined, {
+    const formatted = d.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
       year: 'numeric',
       month: 'short',
-      day: 'numeric',
+      day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
+      hour12: false,
+      ...options,
     });
+    return `${formatted} IST`;
   } catch {
     return isoString;
   }

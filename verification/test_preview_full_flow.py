@@ -23,7 +23,7 @@ import requests
 import psycopg2
 import sys
 
-PREVIEW_BASE_URL = os.getenv("PREVIEW_URL", "https://deepvision-frontend-5gb0ld9ib-vaibhav-wandkar-s-projects.vercel.app")
+PREVIEW_BASE_URL = os.getenv("PREVIEW_URL", "https://deepvision-frontend-5vo0g1gs3-vaibhav-wandkar-s-projects.vercel.app")
 BYPASS_TOKEN = os.getenv("VERCEL_PROTECTION_BYPASS", "tY9WWoVjHSG0HDs1IfOSC9eprIMynGBS")
 PG_URL = os.getenv("DATABASE_URL") or "postgresql://postgres.aqmngllkiepacjrasraf:DeepVision%4012@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres?sslmode=require"
 

@@ -15,6 +15,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone as dt_timezone
+from functools import wraps
 from django.shortcuts import get_object_or_404
 from django.http import JsonResponse, Http404
 from django.middleware.csrf import get_token
@@ -23,6 +24,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.core.paginator import Paginator
 from django.db.models import Q
+from django.db import DatabaseError, OperationalError, InterfaceError, connection
 from django.utils import timezone
 
 from apps.accounts.decorators import login_required
@@ -73,6 +75,26 @@ def _parse_body(request):
         return {}
 
 
+def handle_db_errors(view_func):
+    """
+    Decorator ensuring database connection drops, timeouts,
+    or schema errors return a structured HTTP 503 response instead of unhandled 500s.
+    """
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        try:
+            return view_func(request, *args, **kwargs)
+        except (OperationalError, InterfaceError, DatabaseError) as db_err:
+            logger.error(f"[DB_ERROR] {view_func.__name__}: {type(db_err).__name__}: {db_err}")
+            return JsonResponse({
+                "success": False,
+                "error": "Database service is temporarily unavailable. Please try again later.",
+                "code": "DATABASE_UNAVAILABLE",
+                "detail": "Connection to the database cluster timed out or failed. Please retry in a few moments."
+            }, status=503)
+    return _wrapped
+
+
 # =========================================================================
 # AUTHENTICATION APIS
 # =========================================================================
@@ -106,6 +128,7 @@ def api_me(request):
 
 
 @require_POST
+@handle_db_errors
 def api_login(request):
     """
     Step 1 of Login: Validates username/email and password.
@@ -167,6 +190,7 @@ def api_login(request):
 
 
 @require_POST
+@handle_db_errors
 def api_verify_login_otp(request):
     """
     Step 2 of Login: Validates the 6-digit Login OTP.
@@ -209,6 +233,7 @@ def api_verify_login_otp(request):
 
 
 @require_POST
+@handle_db_errors
 def api_resend_login_otp(request):
     """Resends single-use 6-digit Login OTP for pending login session."""
     data = _parse_body(request)
@@ -236,6 +261,7 @@ def api_resend_login_otp(request):
 
 
 @require_POST
+@handle_db_errors
 def api_signup(request):
     """Creates user in pending/unverified state and sends 6-digit Signup OTP."""
     data = _parse_body(request)
@@ -282,6 +308,7 @@ def api_signup(request):
 
 
 @require_POST
+@handle_db_errors
 def api_verify_otp(request):
     """
     Validates 6-digit email verification OTP for newly registered accounts.
@@ -322,6 +349,7 @@ def api_verify_otp(request):
 
 
 @require_POST
+@handle_db_errors
 def api_resend_otp(request):
     """Resends email verification OTP for signup."""
     data = _parse_body(request)
@@ -355,6 +383,7 @@ def api_resend_otp(request):
 
 
 @require_POST
+@handle_db_errors
 def api_forgot_password(request):
     """Initiates password reset flow."""
     data = _parse_body(request)
@@ -380,6 +409,7 @@ def api_forgot_password(request):
 
 
 @require_POST
+@handle_db_errors
 def api_verify_reset_otp(request):
     """
     Verifies password reset OTP without altering password yet.
@@ -405,6 +435,7 @@ def api_verify_reset_otp(request):
 
 
 @require_POST
+@handle_db_errors
 def api_reset_password(request):
     """Verifies OTP and resets password using PBKDF2."""
     data = _parse_body(request)
@@ -455,6 +486,7 @@ def api_logout(request):
 
 @never_cache
 @login_required
+@handle_db_errors
 def api_dashboard_stats(request):
     """Returns SOC dashboard real metrics and recent activities."""
     user_id = request.user.id
@@ -512,6 +544,7 @@ def api_dashboard_stats(request):
         })
 
     engine_reachable = is_engine_reachable(timeout=0.5)
+    db_backend = getattr(connection, 'vendor', 'unknown')
 
     return JsonResponse({
         "total_cameras": total_cameras,
@@ -527,6 +560,8 @@ def api_dashboard_stats(request):
         "recent_recordings": recent_recordings,
         "cameras": cameras_data,
         "engine_reachable": engine_reachable,
+        "database_backend": db_backend,
+        "database_status": "connected",
     })
 
 
@@ -536,6 +571,7 @@ def api_dashboard_stats(request):
 
 @never_cache
 @login_required
+@handle_db_errors
 def api_cameras_list(request):
     """Returns cameras list for authenticated user with operational status."""
     cameras_qs = get_accessible_cameras_qs(request.user)
@@ -626,6 +662,7 @@ def api_camera_detail(request, camera_id):
 
 @never_cache
 @login_required
+@handle_db_errors
 def api_recordings_list(request):
     """Returns paginated recordings with filter criteria."""
     user_id = request.user.id
@@ -697,6 +734,7 @@ def api_recordings_list(request):
 
 @never_cache
 @login_required
+@handle_db_errors
 def api_recording_detail(request, recording_id):
     """Returns single recording metadata and events."""
     recording = get_object_or_404(Recording.objects.select_related('camera'), id=recording_id, user_id=request.user.id)
@@ -745,6 +783,7 @@ def api_recording_detail(request, recording_id):
 
 @never_cache
 @login_required
+@handle_db_errors
 def api_evidence_list(request):
     """Returns forensic evidence vault assets."""
     user_id = request.user.id
@@ -809,6 +848,7 @@ def api_evidence_list(request):
 
 @never_cache
 @login_required
+@handle_db_errors
 def api_evidence_detail(request, evidence_id):
     """Returns single evidence metadata."""
     ev = get_object_or_404(Evidence.objects.select_related('camera', 'alert'), id=evidence_id, user_id=request.user.id)
@@ -840,6 +880,7 @@ def api_evidence_detail(request, evidence_id):
 
 @never_cache
 @login_required
+@handle_db_errors
 def api_alerts_list(request):
     """Returns alerts inbox with severity/status filters, media flags, case association, and metrics."""
     user_id = request.user.id
@@ -1136,6 +1177,7 @@ def api_alert_add_note(request, alert_id):
 
 @never_cache
 @login_required
+@handle_db_errors
 def api_cases_list(request):
     """Returns incident cases list."""
     user_id = request.user.id

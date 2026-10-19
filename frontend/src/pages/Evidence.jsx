@@ -182,27 +182,63 @@ export function Evidence({ onNavigate, initialCameraId, initialAlertId, selected
         <div className="camera-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
           {evidenceList.map((item) => (
             <div key={item.id} className="camera-card" style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{ position: 'relative', width: '100%', height: '180px', background: '#000', overflow: 'hidden', borderTopLeftRadius: 'var(--radius-lg)', borderTopRightRadius: 'var(--radius-lg)' }}>
-                {item.preview_url ? (
+              <div style={{ position: 'relative', width: '100%', height: '180px', background: 'var(--bg-canvas, #090d16)', overflow: 'hidden', borderTopLeftRadius: 'var(--radius-lg)', borderTopRightRadius: 'var(--radius-lg)' }}>
+                {item.file_available && item.preview_url ? (
                   item.evidence_type === 'snapshot' ? (
                     <img
                       src={item.preview_url}
-                      alt={item.title || 'Evidence item'}
+                      alt={item.alert_title || item.file_name || 'Evidence artifact'}
                       loading="lazy"
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        const fallback = e.currentTarget.nextElementSibling;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
                     />
                   ) : (
                     <video
                       src={item.preview_url}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       controls
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        const fallback = e.currentTarget.nextElementSibling;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
                     />
                   )
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                    <span>Forensic file logged</span>
-                  </div>
-                )}
+                ) : null}
+
+                {/* Graceful Forensic Storage Artifact Display */}
+                <div
+                  className="forensic-fallback-card"
+                  style={{
+                    display: item.file_available ? 'none' : 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '100%',
+                    color: 'var(--text-secondary)',
+                    fontSize: '0.82rem',
+                    padding: '1.25rem',
+                    textAlign: 'center',
+                    background: 'var(--bg-surface-raised, #151e33)',
+                    borderBottom: '1px solid var(--border-color)',
+                  }}
+                >
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary, #10b981)" strokeWidth="1.8" style={{ marginBottom: '8px', opacity: 0.85 }}>
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    <circle cx="12" cy="11" r="3"></circle>
+                  </svg>
+                  <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.84rem' }}>
+                    {item.file_available ? 'Forensic File Ready' : 'Preserved in Vault'}
+                  </span>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: '4px', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {item.file_name || `evidence_${item.id}.dat`}
+                  </span>
+                </div>
+
                 <div style={{ position: 'absolute', top: '0.5rem', left: '0.5rem', right: '0.5rem', display: 'flex', justifyContent: 'space-between', pointerEvents: 'none' }}>
                   <span className="badge" style={{ backgroundColor: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: '0.70rem' }}>
                     {(item.evidence_type || 'evidence').toUpperCase()}
@@ -216,7 +252,7 @@ export function Evidence({ onNavigate, initialCameraId, initialAlertId, selected
               <div style={{ padding: '1rem', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                 <div>
                   <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: '4px' }}>
-                    {item.title || item.filename || `Evidence #${item.id}`}
+                    {item.alert_title || item.title || item.file_name || `Evidence #${item.id}`}
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                     {formatDate(item.created_at || item.captured_at)}

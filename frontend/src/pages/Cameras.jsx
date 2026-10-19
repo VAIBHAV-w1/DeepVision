@@ -15,7 +15,7 @@ export function Cameras({ onNavigate }) {
   const [isRecording, setIsRecording] = useState(false);
   const [recLoading, setRecLoading] = useState(false);
   const [clockStr, setClockStr] = useState('');
-  const [camStats, setCamStats] = useState({ fps: 28, detections: 0, tracks: 0, bitrate: '430kb/s' });
+  const [camStats, setCamStats] = useState({ fps: 0, detections: 0, tracks: 0, bitrate: '0 kb/s' });
 
   // Reference 1 Floating HUD Interactive States
   const [zoom, setZoom] = useState(1);
@@ -77,11 +77,13 @@ export function Cameras({ onNavigate }) {
       try {
         const s = await cameraService.getStats(selectedCameraId);
         if (s) {
+          const rawFps = typeof s.fps === 'number' ? s.fps : 0;
+          const displayFps = rawFps > 0 ? Math.round(rawFps * 10) / 10 : 0;
           setCamStats({
-            fps: s.fps || 25,
+            fps: displayFps,
             detections: s.detections || (s.tracks ? s.tracks.length : 0),
             tracks: s.tracks ? s.tracks.length : 0,
-            bitrate: s.fps ? `${Math.round(s.fps * 16.5)}kb/s` : '430kb/s',
+            bitrate: displayFps > 0 ? `${Math.round(displayFps * 18)} kb/s` : '0 kb/s',
           });
           if (typeof s.is_recording === 'boolean') {
             setIsRecording(s.is_recording);
@@ -279,12 +281,18 @@ export function Cameras({ onNavigate }) {
                  =================================================================== */}
             <div style={{ position: 'absolute', top: '18px', left: '20px', right: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 25, pointerEvents: 'none' }}>
               {/* Top-Left: Live Pill with Bitrate */}
-              <div style={{ pointerEvents: 'auto', display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.15)', padding: '6px 14px', borderRadius: '9999px', color: '#ffffff', fontSize: '0.78rem', fontWeight: 600, boxShadow: '0 4px 16px rgba(0,0,0,0.3)' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', boxShadow: '0 0 8px #ef4444', animation: 'pulse-dot 1.5s infinite' }}></span>
-                <span style={{ fontWeight: 700 }}>Live</span>
-                <span style={{ color: '#94a3b8', fontSize: '0.74rem' }}>{camStats.bitrate}</span>
-                <span style={{ color: '#10b981', fontSize: '0.72rem', fontWeight: 700 }}>{camStats.fps} FPS</span>
-              </div>
+              {(() => {
+                const isOnline = activeCam?.status === 'online';
+                const isLive = isOnline && camStats.fps > 0;
+                return (
+                  <div style={{ pointerEvents: 'auto', display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.15)', padding: '6px 14px', borderRadius: '9999px', color: '#ffffff', fontSize: '0.78rem', fontWeight: 600, boxShadow: '0 4px 16px rgba(0,0,0,0.3)' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: isLive ? '#10b981' : isOnline ? '#f59e0b' : '#ef4444', boxShadow: isLive ? '0 0 8px #10b981' : undefined, animation: isLive ? 'pulse-dot 1.5s infinite' : undefined }}></span>
+                    <span style={{ fontWeight: 700 }}>{isLive ? 'LIVE' : isOnline ? 'STANDBY' : 'OFFLINE'}</span>
+                    <span style={{ color: '#94a3b8', fontSize: '0.74rem' }}>{camStats.bitrate}</span>
+                    <span style={{ color: isLive ? '#10b981' : '#94a3b8', fontSize: '0.72rem', fontWeight: 700 }}>{camStats.fps} FPS</span>
+                  </div>
+                );
+              })()}
 
               {/* Top-Center: Camera Location Pill */}
               <div style={{ pointerEvents: 'auto', display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.15)', padding: '6px 18px', borderRadius: '9999px', color: '#ffffff', fontSize: '0.84rem', fontWeight: 700, letterSpacing: '-0.01em', boxShadow: '0 4px 16px rgba(0,0,0,0.3)' }}>

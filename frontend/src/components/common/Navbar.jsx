@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../hooks/useAuth';
+import { useTranslation } from '../../i18n/i18nContext';
+import { LanguageSelector } from './LanguageSelector';
+import Logo from './Logo';
 
 export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
   const { user, logout } = useAuth();
+  const { t } = useTranslation();
   const [themePref, setThemePref] = useState(() => localStorage.getItem('deepvision_theme') || 'dark');
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -45,14 +49,14 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
   }, []);
 
   const navItems = [
-    { key: 'dashboard', label: 'Dashboard' },
-    { key: 'cameras', label: 'Cameras' },
-    { key: 'alerts', label: 'Alerts' },
-    { key: 'recordings', label: 'Recordings' },
-    { key: 'evidence', label: 'Evidence' },
-    { key: 'cases', label: 'Cases' },
-    { key: 'notifications', label: 'Notifications', badge: unreadNotifCount },
-    { key: 'help', label: 'Help' },
+    { key: 'dashboard', label: t('nav.dashboard', 'Dashboard') },
+    { key: 'cameras', label: t('nav.cameras', 'Live Feeds') },
+    { key: 'alerts', label: t('nav.alerts', 'Security Alerts') },
+    { key: 'recordings', label: t('nav.recordings', 'Recordings') },
+    { key: 'evidence', label: t('nav.evidence', 'Evidence Vault') },
+    { key: 'cases', label: t('nav.cases', 'Incident Cases') },
+    { key: 'notifications', label: t('nav.notifications', 'Notifications'), badge: unreadNotifCount },
+    { key: 'help', label: t('nav.help', 'Help & Support') },
   ];
 
   const handleNavClick = (key) => {
@@ -81,16 +85,7 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
       <aside className={`app-sidebar ${mobileMenuOpen ? 'open' : ''}`} id="appSidebar" style={{ transform: mobileMenuOpen ? 'translateX(0)' : undefined }}>
         <div className="mobile-drawer-header">
           <a href="#dashboard" onClick={(e) => { e.preventDefault(); handleNavClick('dashboard'); }} className="brand-link">
-            <div className="brand-emblem">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M 23 7 l -7 5 7 5 V 7 z"></path>
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
-              </svg>
-            </div>
-            <div className="brand-title-wrap">
-              <span className="brand-title">DEEPVISION</span>
-              <span className="brand-tagline">INTELLIGENT SURVEILLANCE</span>
-            </div>
+            <Logo size="sm" subtext="SURVEILLANCE SOC" />
           </a>
           <button
             type="button"
@@ -121,14 +116,17 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
                 </a>
               </li>
             ))}
-            <li style={{ marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem' }}>
+            <li style={{ marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ padding: '0 8px' }}>
+                <LanguageSelector compact />
+              </div>
               <button
                 type="button"
                 onClick={() => { setMobileMenuOpen(false); logout(); }}
                 className="mobile-nav-link"
                 style={{ width: '100%', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', color: 'var(--color-danger, #ef4444)' }}
               >
-                <span>Sign Out</span>
+                <span>{t('nav.logout', 'Sign Out')}</span>
               </button>
             </li>
           </ul>
@@ -144,20 +142,7 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
             onClick={(e) => { e.preventDefault(); handleNavClick('dashboard'); }}
             className="brand-link"
           >
-            <div className="brand-emblem" style={{ background: '#0f172a', border: '1px solid rgba(16, 185, 129, 0.4)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.5)' }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" stroke="#10b981" strokeWidth="1.8" />
-                <circle cx="12" cy="12" r="4" fill="#10b981" />
-                <line x1="12" y1="2" x2="12" y2="5" />
-                <line x1="12" y1="19" x2="12" y2="22" />
-                <line x1="2" y1="12" x2="5" y2="12" />
-                <line x1="19" y1="12" x2="22" y2="12" />
-              </svg>
-            </div>
-            <div className="brand-title-wrap">
-              <span className="brand-title" style={{ letterSpacing: '0.06em', fontWeight: 800 }}>DEEPVISION</span>
-              <span className="brand-tagline" style={{ color: 'var(--text-muted)', fontSize: '0.62rem', letterSpacing: '0.08em', fontWeight: 600 }}>SURVEILLANCE SOC</span>
-            </div>
+            <Logo size="md" subtext="SURVEILLANCE SOC" />
           </a>
 
 
@@ -197,6 +182,9 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981', boxShadow: '0 0 6px #10b981', display: 'inline-block' }}></span>
               <span>SOC ONLINE</span>
             </div>
+
+            {/* Indian Language Selector (22 Languages + EN) */}
+            <LanguageSelector />
 
             {/* Theme Switcher (3-Way: Dark / Light / System) */}
             <div className="theme-menu-wrap" ref={themeMenuRef} style={{ position: 'relative' }}>

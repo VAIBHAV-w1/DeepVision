@@ -140,6 +140,69 @@
   --shadow-glow: 0 0 28px -4px rgba(16, 185, 129, 0.32);
 }
 
+/* --------------------------------------------------------------------------
+   2B. Light Theme (Daylight Security SOC / Crisp Neutral Slate & Emerald)
+   -------------------------------------------------------------------------- */
+[data-theme="light"] {
+  --bg-canvas: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-surface-raised: #f1f5f9;
+  --bg-surface-subtle: #e2e8f0;
+  --bg-surface-hover: #cbd5e1;
+  --bg-surface-glass: rgba(255, 255, 255, 0.96);
+
+  --bg-body: var(--bg-canvas);
+  --bg-sidebar: var(--bg-surface);
+  --bg-header: var(--bg-surface-glass);
+
+  --border-subtle: rgba(15, 23, 42, 0.08);
+  --border-color: rgba(15, 23, 42, 0.14);
+  --border-color-subtle: rgba(15, 23, 42, 0.06);
+  --border-focus: #059669;
+
+  --text-main: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-inverse: #ffffff;
+
+  --color-primary: #059669;
+  --color-primary-hover: #047857;
+  --color-primary-active: #065f46;
+  --color-primary-subtle: rgba(5, 150, 105, 0.10);
+  --color-primary-border: rgba(5, 150, 105, 0.35);
+
+  --color-live: #059669;
+  --color-live-subtle: rgba(5, 150, 105, 0.10);
+  --color-live-border: rgba(5, 150, 105, 0.30);
+
+  --color-offline: #e11d48;
+  --color-offline-subtle: rgba(225, 29, 72, 0.10);
+  --color-offline-border: rgba(225, 29, 72, 0.30);
+
+  --color-warn: #d97706;
+  --color-warn-subtle: rgba(217, 119, 6, 0.10);
+  --color-warn-border: rgba(217, 119, 6, 0.30);
+
+  --color-critical: #dc2626;
+  --color-critical-subtle: rgba(220, 38, 38, 0.12);
+
+  --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 28px -4px rgba(15, 23, 42, 0.12);
+  --shadow-xl: 0 20px 40px -8px rgba(15, 23, 42, 0.15);
+  --shadow-glow: 0 0 20px -2px rgba(5, 150, 105, 0.22);
+}
+
+/* --------------------------------------------------------------------------
+   2C. Vercel Toolbar & Feedback Indicator Suppression
+   -------------------------------------------------------------------------- */
+vercel-live-feedback,
+#vercel-toolbar,
+[data-vercel-toolbar] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
 
 /* --------------------------------------------------------------------------
    3. Base HTML & Global Reset
@@ -1009,3 +1072,36 @@ h1, h2, h3, h4, h5, h6 {
   white-space: nowrap !important;
   border: 0 !important;
 }
+
+/* --------------------------------------------------------------------------
+   8. Indian Languages Localization & RTL Layout Support
+   -------------------------------------------------------------------------- */
+[dir="rtl"], .rtl-layout {
+  direction: rtl;
+  text-align: right;
+}
+
+[dir="rtl"] .nav-links-center,
+[dir="rtl"] .sidebar-nav {
+  direction: rtl;
+}
+
+[dir="rtl"] .lang-dropdown-menu {
+  right: auto !important;
+  left: 0 !important;
+  text-align: right;
+}
+
+[dir="rtl"] .metric-card-header {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .hud-status-pill {
+  flex-direction: row-reverse;
+}
+
+.language-selector-wrapper button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+

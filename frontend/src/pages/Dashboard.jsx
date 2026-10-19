@@ -117,8 +117,8 @@ export function Dashboard({ onNavigate }) {
           <span><strong>Surveillance Engine:</strong> {stats?.engine_reachable !== false ? 'Online (DirectShow / OpenCV)' : 'Signal Reconnecting'}</span>
         </div>
         <div className="health-item">
-          <span className="health-dot nominal"></span>
-          <span><strong>Database Pipeline:</strong> SQLite Connected</span>
+          <span className={`health-dot ${stats?.database_status === 'connected' || stats ? 'nominal' : 'warning'}`}></span>
+          <span><strong>Database Pipeline:</strong> {stats?.database_backend ? `${stats.database_backend.toUpperCase()} Connected` : (stats ? 'Database Connected' : 'Checking...')}</span>
         </div>
         <div className="health-item">
           <span className="health-dot nominal"></span>
