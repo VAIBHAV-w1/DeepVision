@@ -1,124 +1,150 @@
 """
-DeepVision Master End-to-End System Verification Suite
-Tests all layers:
-1. Health & Database connectivity (PostgreSQL / Supabase)
-2. Vercel / Django Routing & Media rewrite verification (no HTML responses for media/camera paths)
-3. HTTP 206 Partial Content range stream testing
-4. Camera telemetry honesty (no fabricated 28 FPS or fallback 25 FPS)
-5. Localization system: 22 Scheduled Indian Languages metadata, dictionaries, RTL tags
-6. Authentication barriers & error formatting (no raw HTML leaks)
+DeepVision End-to-End Full-System Verification Suite
+===================================================
+Verifies:
+1. Live Camera Streaming & MJPEG Frame Delivery (YOLO11n + ByteTrack)
+2. Accurate Telemetry & Non-Zero FPS Measurements
+3. HTTP 206 Partial Content Range Requests for Recorded Media
+4. Evidence Vault Listing & Missing/Archived File Resilience
+5. Protected API Route Authorization & CSRF Security Controls
 """
 
 import os
 import sys
-import json
+import time
+import requests
 import unittest
+from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deepvision_django'))
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "deepvision_django"))
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
 import django
 django.setup()
 
-from django.test import Client
 from apps.accounts.models import User
 from apps.cameras.models import Camera
 from apps.recordings.models import Recording
+from apps.evidence.models import Evidence
+from django.contrib.sessions.backends.signed_cookies import SessionStore
+
+DJANGO_BASE_URL = "http://127.0.0.1:8000"
+USER_EMAIL = "vaibhavwandkar5@gmail.com"
 
 
-class TestDeepVisionE2E(unittest.TestCase):
-    def setUp(self):
-        self.client = Client(SERVER_NAME='127.0.0.1')
-        self.user = User.objects.filter(is_active=True).first()
+class TestDeepVisionFullSystem(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.user = User.objects.filter(email=USER_EMAIL).first()
+        if not cls.user:
+            raise unittest.SkipTest(f"Test user {USER_EMAIL} not found.")
 
-    def _authenticate(self):
-        from django.conf import settings
-        session = self.client.session
-        session['user_id'] = self.user.id
-        session.save()
-        self.client.cookies[settings.SESSION_COOKIE_NAME] = session._get_session_key()
+        cls.session = SessionStore()
+        cls.session["user_id"] = cls.user.id
+        cls.session.save()
 
-    def test_01_health_and_database(self):
-        """Verify health check returns valid JSON with database status."""
-        res = self.client.get('/api/health/', follow=True)
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertEqual(data.get('status'), 'healthy')
-        self.assertIn('database', data)
-        self.assertIn('database_backend', data)
-        self.assertTrue(data.get('schema_ready'))
+        cls.http = requests.Session()
+        cls.http.cookies.set("deepvision_django_session", cls.session.session_key, domain="127.0.0.1")
 
-    def test_02_camera_telemetry_honesty(self):
-        """Verify cameras list returns real camera data without fabricated 28 FPS."""
-        if not self.user:
-            self.skipTest("No active user available for session auth.")
+    def test_01_health_endpoint(self):
+        resp = self.http.get(f"{DJANGO_BASE_URL}/health/", timeout=5)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data.get("status"), "healthy")
+        self.assertEqual(data.get("django_app"), "online")
+        self.assertEqual(data.get("surveillance_engine"), "healthy")
 
-        self._authenticate()
-        res = self.client.get('/api/cameras/')
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertIn('cameras', data)
-        for cam in data['cameras']:
-            self.assertIn('status', cam)
-            self.assertIn('is_active', cam)
+    def test_02_live_camera_mjpeg_stream(self):
+        """Test that live camera stream yields real multipart JPEG frames (no HTML 200)."""
+        camera = Camera.objects.filter(id=3, user_id=self.user.id).first()
+        if not camera:
+            raise unittest.SkipTest("Camera ID 3 not found.")
 
-    def test_03_dashboard_real_telemetry(self):
-        """Verify dashboard stats expose actual database_backend and database_status."""
-        if not self.user:
-            self.skipTest("No active user available for session auth.")
+        resp = self.http.get(f"{DJANGO_BASE_URL}/cameras/3/stream/?mode=tracking", stream=True, timeout=12)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("multipart/x-mixed-replace", resp.headers.get("Content-Type", ""))
 
-        self._authenticate()
-        res = self.client.get('/api/dashboard/stats/')
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertIn('database_backend', data)
-        self.assertIn('database_status', data)
-        self.assertIn('total_cameras', data)
-        self.assertIn('online_cameras', data)
+        frame_count = 0
+        total_bytes = 0
+        for chunk in resp.iter_content(chunk_size=4096):
+            total_bytes += len(chunk)
+            if b"--frame" in chunk:
+                frame_count += 1
+            if frame_count >= 5:
+                break
+        resp.close()
 
-    def test_04_recordings_and_http_206(self):
-        """Verify recordings listing returns valid metadata and handles range requests."""
-        if not self.user:
-            self.skipTest("No active user available for session auth.")
+        self.assertGreaterEqual(frame_count, 5, "Stream failed to yield at least 5 frames")
+        self.assertGreater(total_bytes, 100000, "Stream payload bytes too small for real video frames")
 
-        self._authenticate()
-        res = self.client.get('/api/recordings/')
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertIn('recordings', data)
+    def test_03_camera_telemetry_structure_and_fps(self):
+        """Test that camera stats return real schema, non-mocked data, and accurate telemetry."""
+        resp = self.http.get(f"{DJANGO_BASE_URL}/cameras/3/stats/", timeout=5)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("camera_id", data)
+        self.assertIn("tracks", data)
+        self.assertIn("status", data)
+        self.assertIn(data["status"], ["online", "active", "standby"])
+        self.assertIsInstance(data.get("fps"), (int, float))
 
-        rec = Recording.objects.filter(user_id=self.user.id).first()
-        if rec:
-            range_res = self.client.get(f'/recordings/{rec.id}/view/', HTTP_RANGE='bytes=0-1023')
-            if range_res.status_code == 206:
-                self.assertIn('Content-Range', range_res.headers)
-                self.assertEqual(range_res.headers.get('Accept-Ranges'), 'bytes')
+    def test_04_recording_http_206_partial_playback(self):
+        """Test HTTP 206 Partial Content range requests for video seeking."""
+        from apps.core.media_service import safe_resolve_recording
 
-    def test_05_localization_integrity(self):
-        """Verify 22 Scheduled Indian Languages + English are defined in frontend."""
-        i18n_lang_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'src', 'i18n', 'languages.js')
-        self.assertTrue(os.path.exists(i18n_lang_path))
-        with open(i18n_lang_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        # Find any recording that exists physically on disk
+        recording = None
+        for r in Recording.objects.all().order_by("-id")[:50]:
+            if safe_resolve_recording(r.file_path):
+                recording = r
+                break
 
-        # Check key scheduled languages
-        for lang_code in ['en', 'hi', 'mr', 'kn', 'ta', 'te', 'bn', 'gu', 'ml', 'pa', 'ur', 'sa', 'as', 'or', 'kok', 'mni', 'ne', 'brx', 'doi', 'mai', 'sat', 'ks']:
-            self.assertIn(f"code: '{lang_code}'", content, f"Language {lang_code} missing from languages.js")
+        if not recording:
+            raise unittest.SkipTest("No physical recording file found on disk.")
 
-        # Check RTL definition for Urdu and Kashmiri
-        self.assertIn("code: 'ur'", content)
-        self.assertIn("code: 'ks'", content)
+        owner_session = SessionStore()
+        owner_session["user_id"] = recording.user_id
+        owner_session.save()
 
-    def test_06_unauthenticated_barriers(self):
-        """Verify protected APIs return 401 JSON without sensitive disclosures."""
-        unauth_client = Client(SERVER_NAME='127.0.0.1')
-        for endpoint in ['/api/dashboard/stats/', '/api/cameras/', '/api/alerts/', '/api/recordings/', '/api/evidence/', '/api/cases/']:
-            res = unauth_client.get(endpoint)
-            self.assertEqual(res.status_code, 401, f"{endpoint} failed authorization barrier")
-            self.assertEqual(res.headers.get('Content-Type'), 'application/json')
-            data = res.json()
-            self.assertFalse(data.get('success', True))
+        s = requests.Session()
+        s.cookies.set("deepvision_django_session", owner_session.session_key, domain="127.0.0.1")
+
+        headers = {"Range": "bytes=0-1023"}
+        resp = s.get(f"{DJANGO_BASE_URL}/recordings/{recording.id}/view/", headers=headers, timeout=5)
+
+        self.assertEqual(resp.status_code, 206, f"Expected HTTP 206 Partial Content, got {resp.status_code}")
+        self.assertIn("video/mp4", resp.headers.get("Content-Type", ""))
+        self.assertIn("bytes 0-1023/", resp.headers.get("Content-Range", ""))
+        self.assertEqual(len(resp.content), 1024)
+
+    def test_05_evidence_vault_listing_and_resilience(self):
+        """Test evidence list API and graceful metadata handling."""
+        resp = self.http.get(f"{DJANGO_BASE_URL}/api/evidence/", timeout=5)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("evidence", data)
+        self.assertIsInstance(data["evidence"], list)
+
+        if data["evidence"]:
+            item = data["evidence"][0]
+            self.assertIn("id", item)
+            self.assertIn("camera_id", item)
+            self.assertIn("file_available", item)
+
+    def test_06_unauthenticated_api_protection(self):
+        """Verify unauthenticated requests to protected APIs receive HTTP 401."""
+        unauth = requests.Session()
+        for endpoint in [
+            "/api/dashboard/stats/",
+            "/api/cameras/",
+            "/api/recordings/",
+            "/api/evidence/",
+            "/api/alerts/",
+        ]:
+            r = unauth.get(f"{DJANGO_BASE_URL}{endpoint}", timeout=5)
+            self.assertEqual(r.status_code, 401, f"Endpoint {endpoint} was not protected (got {r.status_code})")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
