@@ -255,14 +255,16 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
         is_rec = recording_service.get_active_recording(camera_id, user_id) is not None
     except Exception:
         pass
-    tracks_list = telemetry.get("tracks", [])
+    cam_reg = get_camera_registry()
+    active_worker = cam_reg.get_active_worker(camera_id) if cam_reg else None
+    real_fps = health.get("fps", 0.0) or telemetry.get("fps", 0.0) or (active_worker.fps if active_worker else 0.0)
     return {
         "camera_id": camera_id,
         "tracks": tracks_list,
         "detections": len(tracks_list),
         "anomalies": telemetry.get("anomalies", []),
-        "fps": health.get("fps", 0.0),
-        "ai_fps": health.get("ai_fps"),
+        "fps": real_fps,
+        "ai_fps": health.get("ai_fps") or telemetry.get("ai_fps"),
         "latency_ms": health.get("inference_latency_ms"),
         "status": health.get("status", "active"),
         "is_recording": is_rec,

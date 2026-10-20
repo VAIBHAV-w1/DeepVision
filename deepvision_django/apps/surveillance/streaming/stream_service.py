@@ -151,11 +151,21 @@ def generate_tracking_stream(camera_id: int, user_id: int) -> Generator[bytes, N
             start_no_frame_time = time.time()
             last_processed_id = current_id
             now = time.time()
+            disp_frame_times.append(now)
+            if len(disp_frame_times) > 15:
+                disp_frame_times.pop(0)
+            display_fps = 0.0
+            if len(disp_frame_times) >= 2:
+                elapsed = disp_frame_times[-1] - disp_frame_times[0]
+                if elapsed > 0:
+                    display_fps = round((len(disp_frame_times) - 1) / elapsed, 1)
 
             display_frame = frame.copy()
 
             # Read cached inference results (non-blocking)
             _, cached_tracks, latency_ms, ai_fps, inference_id, _ = inference_worker.get_cached_result()
+            if display_fps > 0:
+                update_camera_health(camera_id, fps=display_fps, ai_fps=ai_fps, inference_latency_ms=latency_ms)
 
             # Reprocess tracks if a new inference result is available
             if inference_id != last_inference_id and cached_tracks is not None:
@@ -255,7 +265,7 @@ def generate_tracking_stream(camera_id: int, user_id: int) -> Generator[bytes, N
                 "camera_id": camera_id,
                 "tracks": ui_tracks,
                 "anomalies": getattr(inference_worker, "cached_anomalies", []),
-                "fps": getattr(inference_worker, "ai_fps", 0.0),
+                "fps": display_fps if display_fps > 0 else (getattr(inference_worker, "ai_fps", 0.0) or (worker.fps if worker else 0.0)),
                 "status": "active"
             }
 
