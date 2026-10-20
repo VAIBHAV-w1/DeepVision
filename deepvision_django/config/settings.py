@@ -3,6 +3,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
 
+def _safe_int(val, default):
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -43,7 +49,7 @@ if '.vercel.app' not in ALLOWED_HOSTS:
 # Standard Django SMTP Email Configuration
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = os.getenv('MAIL_SERVER') or os.getenv('SMTP_HOST', 'smtp.gmail.com')
-EMAIL_PORT = int(os.getenv('MAIL_PORT') or os.getenv('SMTP_PORT', 587))
+EMAIL_PORT = _safe_int(os.getenv('MAIL_PORT') or os.getenv('SMTP_PORT'), 587)
 EMAIL_HOST_USER = os.getenv('MAIL_USERNAME') or os.getenv('SMTP_USERNAME', '')
 EMAIL_HOST_PASSWORD = os.getenv('MAIL_PASSWORD') or os.getenv('SMTP_PASSWORD', '')
 EMAIL_USE_TLS = (os.getenv('MAIL_USE_TLS') or os.getenv('SMTP_USE_TLS', 'True')).lower() == 'true'
@@ -154,9 +160,9 @@ if USE_POSTGRES:
                 'PORT': parsed_db.port or 5432,
                 'OPTIONS': {
                     'sslmode': sslmode,
-                    'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '10')),
+                    'connect_timeout': _safe_int(os.getenv('DB_CONNECT_TIMEOUT'), 10),
                 },
-                'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '0')),
+                'CONN_MAX_AGE': _safe_int(os.getenv('DB_CONN_MAX_AGE'), 0),
             }
         }
     else:
@@ -167,12 +173,12 @@ if USE_POSTGRES:
                 'USER': os.getenv('POSTGRES_USER', os.getenv('DB_USER', 'postgres')),
                 'PASSWORD': os.getenv('POSTGRES_PASSWORD', os.getenv('DB_PASSWORD', '')),
                 'HOST': os.getenv('POSTGRES_HOST', os.getenv('DB_HOST', 'localhost')),
-                'PORT': int(os.getenv('POSTGRES_PORT', os.getenv('DB_PORT', '5432'))),
+                'PORT': _safe_int(os.getenv('POSTGRES_PORT') or os.getenv('DB_PORT'), 5432),
                 'OPTIONS': {
                     'sslmode': os.getenv('DB_SSLMODE', 'require'),
-                    'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '10')),
+                    'connect_timeout': _safe_int(os.getenv('DB_CONNECT_TIMEOUT'), 10),
                 },
-                'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '0')),
+                'CONN_MAX_AGE': _safe_int(os.getenv('DB_CONN_MAX_AGE'), 0),
             }
         }
 elif USE_MYSQL:
@@ -188,7 +194,7 @@ elif USE_MYSQL:
             'USER': os.getenv('MYSQL_USER', 'Vaibhav'),
             'PASSWORD': os.getenv('MYSQL_PASSWORD', ''),
             'HOST': os.getenv('MYSQL_HOST', '127.0.0.1'),
-            'PORT': int(os.getenv('MYSQL_PORT', '3306')),
+            'PORT': _safe_int(os.getenv('MYSQL_PORT'), 3306),
             'OPTIONS': {
                 'charset': 'utf8mb4',
                 'connect_timeout': 10,

@@ -3,8 +3,10 @@ import { useAuth } from '../hooks/useAuth';
 import { api } from '../services/api';
 import AuthLayout from '../layouts/AuthLayout';
 import { useToast } from '../components/common/Toast';
+import { useTranslation } from '../i18n/i18nContext';
 
 export function Login({ onNavigate, onNeedsVerification }) {
+  const { t } = useTranslation();
   const { checkAuth } = useAuth();
   const [step, setStep] = useState('credentials'); // 'credentials' | 'otp'
   const [email, setEmail] = useState('');
@@ -158,10 +160,10 @@ export function Login({ onNavigate, onNeedsVerification }) {
         <>
           <div className="auth-header" style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
             <h2 className="auth-title" style={{ fontSize: '1.55rem', fontWeight: 800, letterSpacing: '-0.025em', color: 'var(--text-main)', marginBottom: '6px' }}>
-              Surveillance Operations Center
+              {t('auth.loginTitle', 'Surveillance Operations Center')}
             </h2>
             <p className="auth-subtitle" style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: 0 }}>
-              Hardware Camera Ingestion &amp; Optical AI Control
+              {t('auth.loginSubtitle', 'Hardware Camera Ingestion & Optical AI Control')}
             </p>
           </div>
 
@@ -180,7 +182,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
           <form onSubmit={handleCredentialsSubmit} id="login-form" noValidate>
             {/* Email Input */}
             <div className="form-group">
-              <label className="form-label" htmlFor="email">Email Address</label>
+              <label className="form-label" htmlFor="email">{t('auth.email', 'Email Address')}</label>
               <input
                 type="email"
                 id="email"
@@ -198,13 +200,13 @@ export function Login({ onNavigate, onNeedsVerification }) {
             {/* Password Input with Eye Toggle */}
             <div className="form-group">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                <label className="form-label" htmlFor="password" style={{ marginBottom: 0 }}>Password</label>
+                <label className="form-label" htmlFor="password" style={{ marginBottom: 0 }}>{t('auth.password', 'Password')}</label>
                 <a
                   href="#forgot-password"
                   onClick={(e) => { e.preventDefault(); onNavigate('forgot-password'); }}
                   style={{ fontSize: '0.8rem', color: 'var(--color-primary)', textDecoration: 'none' }}
                 >
-                  Forgot password?
+                  {t('auth.forgotPassword', 'Forgot password?')}
                 </a>
               </div>
               <div style={{ position: 'relative' }}>
@@ -275,7 +277,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
               className="btn btn-primary btn-lg"
               style={{ width: '100%', marginTop: '0.5rem' }}
             >
-              {loading ? 'Signing In...' : 'Sign In'}
+              {loading ? `${t('auth.signIn', 'Sign In')}...` : t('auth.signIn', 'Sign In')}
             </button>
 
             <div className="auth-footer-text">
@@ -285,7 +287,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                 onClick={(e) => { e.preventDefault(); onNavigate('signup'); }}
                 style={{ fontWeight: 600 }}
               >
-                Create account
+                {t('auth.signUp', 'Create account')}
               </a>
             </div>
           </form>

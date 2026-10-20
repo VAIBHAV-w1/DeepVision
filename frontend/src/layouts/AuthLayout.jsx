@@ -1,9 +1,17 @@
 import React from 'react';
 import Logo from '../components/common/Logo';
+import LanguageSelector from '../components/common/LanguageSelector';
+import ThemeToggle from '../components/common/ThemeToggle';
 
 export function AuthLayout({ children }) {
   return (
-    <div className="auth-page-wrap">
+    <div className="auth-page-wrap" style={{ position: 'relative' }}>
+      {/* Top Utility Bar for Theme & Language */}
+      <div style={{ position: 'absolute', top: '1.25rem', right: '1.5rem', display: 'flex', alignItems: 'center', gap: '8px', zIndex: 100 }}>
+        <LanguageSelector compact />
+        <ThemeToggle compact />
+      </div>
+
       {/* Enterprise Security Brand Header */}
       <a href="#login" className="brand-link" style={{ marginBottom: '1.5rem', textDecoration: 'none', display: 'flex', justifyContent: 'center' }}>
         <Logo size="lg" subtext="INTELLIGENT SURVEILLANCE SOC" />

@@ -23,13 +23,37 @@ import requests
 import psycopg2
 import sys
 
+def _get_bypass_token():
+    token = os.getenv("VERCEL_PROTECTION_BYPASS")
+    if token:
+        return token
+    env_path = os.path.join(os.path.dirname(__file__), "..", ".vercel", ".env.preview.local")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("VERCEL_PROTECTION_BYPASS=") or line.startswith("VERCEL_AUTOMATION_BYPASS_SECRET="):
+                    val = line.split("=", 1)[1].strip().strip('"\'')
+                    if val and val != "[SENSITIVE]":
+                        return val
+    try:
+        import subprocess, json
+        res = subprocess.run("npx vercel api /v9/projects/prj_PQWC1sBTk5KXNiAXE0UgrkEHNUIT", shell=True, capture_output=True, text=True)
+        data = json.loads(res.stdout)
+        keys = list(data.get("protectionBypass", {}).keys())
+        if keys:
+            return keys[0]
+    except Exception:
+        pass
+    return ""
+
 PREVIEW_BASE_URL = os.getenv("PREVIEW_URL", "https://deepvision-frontend-5vo0g1gs3-vaibhav-wandkar-s-projects.vercel.app")
-BYPASS_TOKEN = os.getenv("VERCEL_PROTECTION_BYPASS", "tY9WWoVjHSG0HDs1IfOSC9eprIMynGBS")
+BYPASS_TOKEN = _get_bypass_token()
 PG_URL = os.getenv("DATABASE_URL") or "postgresql://postgres.aqmngllkiepacjrasraf:DeepVision%4012@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres?sslmode=require"
 
 session = requests.Session()
+if BYPASS_TOKEN:
+    session.headers.update({"x-vercel-protection-bypass": BYPASS_TOKEN})
 session.headers.update({
-    "x-vercel-protection-bypass": BYPASS_TOKEN,
     "Referer": PREVIEW_BASE_URL + "/",
     "Origin": PREVIEW_BASE_URL,
     "Accept": "application/json"

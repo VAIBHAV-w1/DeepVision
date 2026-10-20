@@ -137,6 +137,8 @@ export function LanguageSelector({ compact = false }) {
                     key={l.code}
                     type="button"
                     role="option"
+                    className="lang-menu-item"
+                    data-lang-code={l.code}
                     aria-selected={isSelected}
                     onClick={() => {
                       setLanguage(l.code);
@@ -185,3 +187,5 @@ export function LanguageSelector({ compact = false }) {
     </div>
   );
 }
+
+export default LanguageSelector;
