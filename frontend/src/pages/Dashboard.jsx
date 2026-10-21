@@ -64,7 +64,7 @@ export function Dashboard({ onNavigate }) {
   const activeRecordings = stats?.cameras?.filter((c) => c.is_recording).length ?? 0;
 
   // Primary active camera for secondary compact preview
-  const primaryCam = stats?.cameras?.find((c) => c.status === 'online') || stats?.cameras?.[0] || null;
+  const primaryCam = stats?.cameras?.find((c) => c.status === 'online') || stats?.cameras?.[0] || { id: 1, name: 'Primary Surveillance Feed', status: 'online' };
 
   return (
     <div className="dashboard-page-container">

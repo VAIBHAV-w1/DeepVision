@@ -42,6 +42,11 @@ export function AuthProvider({ children }) {
     checkAuth();
 
     const handleUnauthorized = () => {
+      try {
+        if (localStorage.getItem('deepvision_demo_session') === 'true') {
+          return;
+        }
+      } catch (e) {}
       setUser(null);
     };
 

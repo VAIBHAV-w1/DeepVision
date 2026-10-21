@@ -330,9 +330,9 @@ async def run_browser_audit():
             soc_badge_present = await driver.eval("Boolean(document.querySelector('.soc-status-badge-top'))")
             print(f"  SOC Online status badge visible: {soc_badge_present}")
 
-            # Navigate to #cameras
-            await driver.navigate(f"{TARGET_URL}/#cameras")
-            await asyncio.sleep(1.5)
+            # Navigate to #cameras via SPA hash
+            await driver.eval("window.location.hash = '#cameras'")
+            await asyncio.sleep(2.0)
 
             # Check CameraLivePlayer presence
             has_player = await driver.eval("Boolean(document.querySelector('.camera-live-player-container'))")
