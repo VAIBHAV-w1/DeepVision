@@ -33,7 +33,7 @@ function parseHash() {
   const [route, queryString] = raw.split('?');
   const params = new URLSearchParams(queryString || '');
   return {
-    page: route || 'dashboard',
+    page: route || 'camera-preview',
     params: Object.fromEntries(params.entries()),
   };
 }
@@ -192,7 +192,7 @@ function MainApp() {
 
   return (
     <AppLayout
-      activePage={activePage === 'camera-preview' ? 'cameras' : activePage}
+      activePage={activePage}
       setActivePage={navigate}
     >
       <ErrorBoundary onReset={() => navigate('dashboard')}>

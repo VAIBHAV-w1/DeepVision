@@ -49,8 +49,8 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
   }, []);
 
   const navItems = [
-    { key: 'dashboard', label: t('nav.dashboard', 'Dashboard') },
     { key: 'camera-preview', label: 'Live Monitoring' },
+    { key: 'dashboard', label: t('nav.dashboard', 'Overview') },
     { key: 'cameras', label: t('nav.cameras', 'Cameras') },
     { key: 'alerts', label: t('nav.alerts', 'Security Alerts') },
     { key: 'recordings', label: t('nav.recordings', 'Recordings') },

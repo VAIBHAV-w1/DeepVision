@@ -11,65 +11,14 @@ export function CameraPreview({ cameraId, onNavigate }) {
     mode,
     isRecording,
     stats,
-    loading,
-    error,
     toggleMode,
     startRecording,
     stopRecording,
-    refreshCamera,
-    streamUrl,
   } = useCamera(cameraId);
 
-  const [clockStr, setClockStr] = useState('');
-  const [switching, setSwitching] = useState(false);
-  const [switchLabel, setSwitchLabel] = useState('');
   const [recordingLoading, setRecordingLoading] = useState(false);
-
-  // Reference Image 1 Interactive Overlay States (Software Digital Zoom & Pan)
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-
   const monitorRef = useRef(null);
-  const streamImgRef = useRef(null);
   const { addToast } = useToast();
-
-  // Digital live clock
-  useEffect(() => {
-    const updateClock = () => {
-      const now = new Date();
-      const pad = (n) => String(n).padStart(2, '0');
-      const hours = now.getHours();
-      const ampm = hours >= 12 ? 'pm' : 'am';
-      const formattedHours = pad(hours % 12 || 12);
-      setClockStr(`${formattedHours}:${pad(now.getMinutes())}:${pad(now.getSeconds())} ${ampm}`);
-    };
-    updateClock();
-    const interval = setInterval(updateClock, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Clean stream on unmount
-  useEffect(() => {
-    return () => {
-      if (streamImgRef.current) {
-        streamImgRef.current.src = '';
-      }
-    };
-  }, []);
-
-  // Mode switcher
-  const handleSwitchMode = (newMode) => {
-    if (newMode === mode) return;
-    setSwitching(true);
-    setSwitchLabel(newMode === STREAM_MODES.ORIGINAL ? 'Switching to Original Feed…' : 'Switching to Tracking + Detection…');
-    if (streamImgRef.current) {
-      streamImgRef.current.src = '';
-    }
-    toggleMode(newMode);
-    setTimeout(() => {
-      setSwitching(false);
-    }, 1200);
-  };
 
   // Fullscreen toggle
   const handleToggleFullscreen = () => {
@@ -118,49 +67,6 @@ export function CameraPreview({ cameraId, onNavigate }) {
       }
     }
     setRecordingLoading(false);
-  };
-
-  // Zoom handlers
-  const handleZoomIn = () => {
-    setZoom((prev) => Math.min(prev + 0.5, 3));
-    addToast(`Zoom: ${Math.min(zoom + 0.5, 3)}X`, 'info');
-  };
-
-  const handleZoomOut = () => {
-    setZoom((prev) => {
-      const next = Math.max(prev - 0.5, 1);
-      if (next === 1) setPan({ x: 0, y: 0 });
-      return next;
-    });
-  };
-
-  const handleZoomReset = () => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-    addToast('Digital zoom reset to 1X', 'info');
-  };
-
-  // PTZ D-pad pan handlers
-  const handlePtz = (direction) => {
-    const step = 25;
-    if (direction === 'up') setPan((p) => ({ ...p, y: p.y + step }));
-    if (direction === 'down') setPan((p) => ({ ...p, y: p.y - step }));
-    if (direction === 'left') setPan((p) => ({ ...p, x: p.x + step }));
-    if (direction === 'right') setPan((p) => ({ ...p, x: p.x - step }));
-    if (direction === 'center') {
-      setPan({ x: 0, y: 0 });
-      setZoom(1);
-      addToast('PTZ Recentered to default home position', 'info');
-    }
-  };
-
-  // Stream reload handler
-  const handleReloadStream = () => {
-    if (streamImgRef.current && camera) {
-      const modeParam = mode === STREAM_MODES.ORIGINAL ? 'raw' : 'tracking';
-      streamImgRef.current.src = `${cameraService.getStreamUrl(camera.id, modeParam)}&_t=${Date.now()}`;
-      addToast('Surveillance stream reloaded', 'info');
-    }
   };
 
   const isOriginal = mode === STREAM_MODES.ORIGINAL;

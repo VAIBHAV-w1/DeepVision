@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 import { cameraService } from '../services/camera';
 import { formatRelativeTime } from '../utils/formatters';
-import { useToast } from '../components/common/Toast';
 
 export function Dashboard({ onNavigate }) {
   const [stats, setStats] = useState(null);
@@ -10,7 +9,6 @@ export function Dashboard({ onNavigate }) {
   const [error, setError] = useState(null);
   const [clockStr, setClockStr] = useState('');
   const streamImgRef = useRef(null);
-  const { addToast } = useToast();
 
   // Digital live clock
   useEffect(() => {
