@@ -16,6 +16,9 @@ export default defineConfig({
           if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
             return 'vendor';
           }
+          if (id.includes('translations') || id.includes('i18nContext') || id.includes('/i18n/')) {
+            return 'i18n';
+          }
         },
       },
     },

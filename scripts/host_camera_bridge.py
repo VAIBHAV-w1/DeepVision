@@ -128,8 +128,8 @@ class HostCameraBridgeHandler(BaseHTTPRequestHandler):
                 for chunk in stream_camera_frames(camera_id, user_id, canonical_mode):
                     self.wfile.write(chunk)
                     self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                logger.info("Client disconnected from stream (Camera #%d)", camera_id)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as ce:
+                logger.info("Client disconnected from stream (Camera #%d): %s", camera_id, ce)
             except Exception as e:
                 logger.error("Error streaming Camera #%d: %s", camera_id, e)
             return
@@ -231,13 +231,18 @@ def main():
     logger.info("  Provides physical camera & YOLO11n telemetry to Docker container")
     logger.info("=" * 65)
 
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        logger.info("Stopping host camera bridge...")
-    finally:
-        httpd.server_close()
-        logger.info("Host camera bridge stopped.")
+    import time
+    while True:
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            logger.info("Stopping host camera bridge...")
+            break
+        except Exception as e:
+            logger.error("Bridge server loop error: %s. Resuming...", e)
+            time.sleep(0.5)
+    httpd.server_close()
+    logger.info("Host camera bridge stopped.")
 
 
 if __name__ == "__main__":

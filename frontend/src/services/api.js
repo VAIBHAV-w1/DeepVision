@@ -138,6 +138,7 @@ export const api = {
     getOriginalStreamUrl: (id) => `${API_BASE_URL}/cameras/${id}/stream/original/`,
     getTrackingStreamUrl: (id) => `${API_BASE_URL}/cameras/${id}/stream/tracking/`,
     getSnapshotUrl: (id) => `${API_BASE_URL}/cameras/${id}/snapshot/`,
+    captureSnapshot: (id) => request(`/api/cameras/${id}/snapshot/`, { method: 'POST' }),
   },
 
   // Recordings

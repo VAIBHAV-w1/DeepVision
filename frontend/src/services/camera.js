@@ -14,6 +14,7 @@ export const cameraService = {
   getOriginalStreamUrl: (id) => api.cameras.getOriginalStreamUrl(id),
   getTrackingStreamUrl: (id) => api.cameras.getTrackingStreamUrl(id),
   getSnapshotUrl: (id) => api.cameras.getSnapshotUrl(id),
+  captureSnapshot: (id) => api.cameras.captureSnapshot(id),
 };
 
 export default cameraService;

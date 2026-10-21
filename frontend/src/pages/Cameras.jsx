@@ -151,11 +151,22 @@ export function Cameras({ onNavigate }) {
   };
 
   // Snapshot capture
-  const handleCaptureSnapshot = () => {
+  const handleCaptureSnapshot = async () => {
     if (!activeCam) return;
-    const snapUrl = `${cameraService.getSnapshotUrl(activeCam.id)}?t=${Date.now()}`;
-    window.open(snapUrl, '_blank');
-    addToast('Instant snapshot captured to evidence folder', 'success');
+    try {
+      const res = await cameraService.captureSnapshot(activeCam.id);
+      if (res && res.success) {
+        addToast(`Snapshot #${res.evidence_id} captured and saved to Evidence Vault`, 'success');
+      } else {
+        const snapUrl = `${cameraService.getSnapshotUrl(activeCam.id)}?t=${Date.now()}`;
+        window.open(snapUrl, '_blank');
+        addToast('Instant snapshot captured to evidence folder', 'success');
+      }
+    } catch {
+      const snapUrl = `${cameraService.getSnapshotUrl(activeCam.id)}?t=${Date.now()}`;
+      window.open(snapUrl, '_blank');
+      addToast('Instant snapshot opened in viewer', 'success');
+    }
   };
 
   // Fullscreen

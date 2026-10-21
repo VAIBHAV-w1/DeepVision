@@ -250,6 +250,7 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
 
     telemetry = get_camera_telemetry(camera_id)
     health = get_camera_health(camera_id)
+    tracks_list = telemetry.get("tracks", [])
     is_rec = False
     try:
         is_rec = recording_service.get_active_recording(camera_id, user_id) is not None

@@ -226,10 +226,82 @@ def _get_offline_snapshot_bytes():
 @login_required
 def camera_snapshot_view(request, camera_id):
     """
-    Single frame snapshot JPEG endpoint.
-    Returns live captured frame or standard diagnostic offline placeholder.
+    Single frame snapshot JPEG endpoint (GET) or persistent Evidence capture (POST).
     """
+    import os
+    import datetime
+    from django.utils import timezone
+    from apps.core.media_service import EVIDENCE_DIR
+
     camera = get_user_camera_or_404(request.user, camera_id)
+
+    if request.method == "POST":
+        jpeg_bytes = get_camera_snapshot(camera.id, camera.user_id)
+        if not jpeg_bytes:
+            return JsonResponse({
+                "success": False,
+                "error": "Failed to capture frame from camera. Camera may be initializing or offline."
+            }, status=503)
+
+        now = timezone.now()
+        date_str = now.strftime("%Y-%m-%d")
+        ts_str = now.strftime("%Y%m%d_%H%M%S")
+        target_dir = os.path.normpath(os.path.join(EVIDENCE_DIR, f"camera_{camera.id}", date_str))
+        os.makedirs(target_dir, exist_ok=True)
+        filename = f"manual_snap_{camera.id}_{ts_str}.jpg"
+        abs_path = os.path.join(target_dir, filename)
+        rel_path = f"camera_{camera.id}/{date_str}/{filename}"
+
+        try:
+            with open(abs_path, "wb") as f:
+                f.write(jpeg_bytes)
+        except Exception as e:
+            logger.error(f"[SNAPSHOT_SAVE_ERROR] Failed writing snapshot to disk: {e}")
+            return JsonResponse({"success": False, "error": f"Filesystem write failed: {e}"}, status=500)
+
+        from apps.alerts.models import Alert
+        from apps.evidence.models import Evidence
+
+        try:
+            alert = Alert.objects.create(
+                user_id=request.user.id,
+                camera=camera,
+                event_type="MANUAL_SNAPSHOT",
+                title=f"Manual Snapshot - {camera.name}",
+                message=f"Operator captured forensic snapshot from {camera.name}.",
+                severity="low",
+                status="resolved",
+                detected_at=now,
+                created_at=now,
+                updated_at=now,
+                response_state="RESOLVED",
+            )
+
+            evidence = Evidence.objects.create(
+                alert=alert,
+                user_id=request.user.id,
+                camera=camera,
+                evidence_type="snapshot",
+                file_path=rel_path,
+                file_name=filename,
+                mime_type="image/jpeg",
+                file_size=len(jpeg_bytes),
+                captured_at=now,
+                created_at=now,
+            )
+        except Exception as e:
+            logger.error(f"[SNAPSHOT_DB_ERROR] Failed creating Evidence metadata: {e}")
+            return JsonResponse({"success": False, "error": f"Database recording failed: {e}"}, status=500)
+
+        return JsonResponse({
+            "success": True,
+            "evidence_id": evidence.id,
+            "alert_id": alert.id,
+            "file_name": filename,
+            "preview_url": f"/evidence/{evidence.id}/preview/",
+            "message": f"Snapshot #{evidence.id} captured and saved to Evidence Vault."
+        })
+
     jpeg_bytes = get_camera_snapshot(camera.id, camera.user_id)
     if jpeg_bytes:
         return HttpResponse(jpeg_bytes, content_type="image/jpeg")

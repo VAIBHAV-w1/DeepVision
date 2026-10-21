@@ -48,7 +48,7 @@ def _get_bypass_token():
 
 PREVIEW_BASE_URL = os.getenv("PREVIEW_URL", "https://deepvision-frontend-5vo0g1gs3-vaibhav-wandkar-s-projects.vercel.app")
 BYPASS_TOKEN = _get_bypass_token()
-PG_URL = os.getenv("DATABASE_URL") or "postgresql://postgres.aqmngllkiepacjrasraf:DeepVision%4012@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres?sslmode=require"
+PG_URL = os.getenv("DATABASE_URL", "")
 
 session = requests.Session()
 if BYPASS_TOKEN:

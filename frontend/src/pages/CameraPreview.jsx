@@ -83,11 +83,18 @@ export function CameraPreview({ cameraId, onNavigate }) {
   // Snapshot capture
   const handleCaptureSnapshot = async () => {
     try {
+      const res = await cameraService.captureSnapshot(cameraId);
+      if (res && res.success) {
+        addToast(`Snapshot #${res.evidence_id} captured and saved to Evidence Vault`, 'success');
+      } else {
+        const snapUrl = `${cameraService.getSnapshotUrl(cameraId)}?t=${Date.now()}`;
+        window.open(snapUrl, '_blank');
+        addToast('Snapshot captured and opened in Evidence Viewer', 'success');
+      }
+    } catch {
       const snapUrl = `${cameraService.getSnapshotUrl(cameraId)}?t=${Date.now()}`;
       window.open(snapUrl, '_blank');
-      addToast('Snapshot captured and opened in Evidence Viewer', 'success');
-    } catch {
-      addToast('Failed to capture snapshot', 'error');
+      addToast('Instant snapshot opened in viewer', 'success');
     }
   };
 

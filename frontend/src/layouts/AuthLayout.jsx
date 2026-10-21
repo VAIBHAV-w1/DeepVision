@@ -22,13 +22,13 @@ export function AuthLayout({ children }) {
         {children}
       </div>
 
-      {/* Minimal Operator Security Notice */}
-      <div style={{ marginTop: '1.75rem', fontSize: '0.74rem', color: 'var(--text-muted)', textAlign: 'center', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'center' }}>
+      {/* Minimal Operator Security Notice & Legal Links */}
+      <div style={{ marginTop: '1.75rem', fontSize: '0.74rem', color: 'var(--text-muted)', textAlign: 'center', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
         <span>Authorized Personnel Only</span>
         <span>&bull;</span>
-        <span>Session Audited</span>
+        <a href="#privacy" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>Privacy Policy</a>
         <span>&bull;</span>
-        <span>SOC Hardened</span>
+        <a href="#terms" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>Terms &amp; Conditions</a>
       </div>
 
     </div>

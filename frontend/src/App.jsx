@@ -15,6 +15,7 @@ const Alerts = React.lazy(() => import('./pages/Alerts'));
 const Cases = React.lazy(() => import('./pages/Cases'));
 const Notifications = React.lazy(() => import('./pages/Notifications'));
 const Help = React.lazy(() => import('./pages/Help'));
+const Legal = React.lazy(() => import('./pages/Legal'));
 const Login = React.lazy(() => import('./pages/Login'));
 const Signup = React.lazy(() => import('./pages/Signup'));
 const ForgotPassword = React.lazy(() => import('./pages/ForgotPassword'));
@@ -97,6 +98,22 @@ function MainApp() {
       );
     } else if (activePage === 'forgot-password' || activePage === 'reset-password') {
       unauthContent = <ForgotPassword onNavigate={navigate} />;
+    } else if (activePage === 'privacy' || activePage === 'terms' || activePage === 'legal') {
+      unauthContent = (
+        <div style={{ minHeight: '100vh', background: 'var(--bg-canvas)', padding: '2rem 1rem' }}>
+          <div style={{ maxWidth: '960px', margin: '0 auto 1.5rem auto' }}>
+            <button
+              type="button"
+              onClick={() => navigate('login')}
+              className="btn btn-secondary btn-sm"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              &larr; Back to Login
+            </button>
+          </div>
+          <Legal initialTab={activePage === 'terms' ? 'terms' : 'privacy'} onNavigate={navigate} />
+        </div>
+      );
     } else {
       unauthContent = (
         <Login
@@ -163,6 +180,10 @@ function MainApp() {
         return <Notifications onNavigate={navigate} />;
       case 'help':
         return <Help onNavigate={navigate} />;
+      case 'privacy':
+      case 'terms':
+      case 'legal':
+        return <Legal initialTab={activePage === 'terms' ? 'terms' : 'privacy'} onNavigate={navigate} />;
       case 'dashboard':
       default:
         return <Dashboard onNavigate={navigate} />;

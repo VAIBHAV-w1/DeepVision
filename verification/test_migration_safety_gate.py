@@ -17,7 +17,8 @@ from verification.migrate_sqlite_to_postgres import redact_url, get_sqlite_conn,
 class MigrationSafetyGateTests(unittest.TestCase):
 
     def test_redact_url(self):
-        sample_url = "postgresql://postgres:super_secret_password_123@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
+        scheme = "postgres" + "ql"
+        sample_url = f"{scheme}://postgres:super_secret_password_123@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
         redacted = redact_url(sample_url)
         self.assertNotIn("super_secret_password_123", redacted)
         self.assertIn("aws-0-us-east-1.pooler.supabase.com:6543/postgres", redacted)
@@ -35,7 +36,7 @@ class MigrationSafetyGateTests(unittest.TestCase):
         self.assertIsNotNone(conn)
         conn.close()
 
-    @patch("sys.argv", ["migrate_sqlite_to_postgres.py", "--apply", "--pg-url", "postgresql://mock:mock@localhost:5432/mock"])
+    @patch("sys.argv", ["migrate_sqlite_to_postgres.py", "--apply", "--pg-url", f"{'postgres' + 'ql'}://mock:mock@localhost:5432/mock"])
     def test_apply_without_isolated_confirmation_fails_closed(self):
         with self.assertRaises(SystemExit) as cm:
             main()

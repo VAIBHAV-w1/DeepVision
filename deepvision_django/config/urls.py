@@ -84,6 +84,7 @@ urlpatterns = [
     path('cameras/<int:camera_id>/stream/original/', camera_views.camera_stream_original_view, name='camera_stream_original'),
     path('cameras/<int:camera_id>/stream/raw/', camera_views.camera_stream_original_view, name='camera_stream_raw'),
     path('cameras/<int:camera_id>/snapshot/', camera_views.camera_snapshot_view, name='camera_snapshot'),
+    path('api/cameras/<int:camera_id>/snapshot/', camera_views.camera_snapshot_view, name='api_camera_snapshot'),
     path('cameras/<int:camera_id>/stats/', camera_views.camera_stats_view, name='camera_stats'),
     path('cameras/<int:camera_id>/status/', camera_views.camera_stats_view, name='camera_status'),
     path('cameras/<int:camera_id>/status', camera_views.camera_stats_view, name='camera_status_no_slash'),

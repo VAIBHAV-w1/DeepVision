@@ -1,8 +1,11 @@
 # DeepVision — Intelligent Surveillance & Incident Monitoring Platform
 
+## DeepVision Live Demo
+Live website: [https://vsw-deepvision.vercel.app/](https://vsw-deepvision.vercel.app/)  
+[Open DeepVision](https://vsw-deepvision.vercel.app/)
+
 **GitHub Repository:** [https://github.com/VAIBHAV-w1/DeepVision](https://github.com/VAIBHAV-w1/DeepVision)  
-**Live Frontend & API (Vercel):** [https://frontend-ten-tau-nm1m468imk.vercel.app](https://frontend-ten-tau-nm1m468imk.vercel.app)  
-**Live API Health Check:** [https://frontend-ten-tau-nm1m468imk.vercel.app/api/health/](https://frontend-ten-tau-nm1m468imk.vercel.app/api/health/)
+**Live API Health Check:** [https://vsw-deepvision.vercel.app/api/health/](https://vsw-deepvision.vercel.app/api/health/)
 
 DeepVision is a production-grade AI surveillance and incident monitoring platform structured with a decoupled **React SPA frontend** on Vercel, a **Django backend** for REST APIs and authentication, and an embedded native computer vision pipeline utilizing **OpenCV / DirectShow**, **YOLO11n (PyTorch)**, and **ByteTrack** for real-time tracking, incident evidence preservation, and forensic investigation.
 
@@ -12,7 +15,7 @@ DeepVision is a production-grade AI surveillance and incident monitoring platfor
 
 | Component | Target Architecture | Status | URL / Location |
 | :--- | :--- | :---: | :--- |
-| **Vite / React SPA Frontend** | Vercel Edge CDN | **DEPLOYED (LIVE)** | [https://frontend-ten-tau-nm1m468imk.vercel.app](https://frontend-ten-tau-nm1m468imk.vercel.app) |
+| **Vite / React SPA Frontend** | Vercel Edge CDN | **DEPLOYED (LIVE)** | [https://vsw-deepvision.vercel.app/](https://vsw-deepvision.vercel.app/) |
 | **PostgreSQL Database** | Supabase Free Tier | **SCHEMA & MIGRATION READY** | DDL: `deepvision_django/schema_postgres.sql` |
 | **Django REST API Gateway** | Persistent Host / Cloud VM | **PENDING PERSISTENT HOST** | Container image: `deepvision:1.1.0-hardened-candidate` |
 | **AI Surveillance Engine** | On-Premises Edge / VM with GPU/CPU | **DEPLOYED (LOCAL DOCKER)** | `deepvision-app` container (port 8000) |
@@ -37,7 +40,7 @@ DeepVision is a production-grade AI surveillance and incident monitoring platfor
 ┌─────────────────────────────────────────────────────────────┐
 │                   React SPA Frontend                        │
 │            (Deployed on Vercel Edge CDN)                    │
-│      https://frontend-ten-tau-nm1m468imk.vercel.app         │
+│            https://vsw-deepvision.vercel.app/               │
 └──────────────────────────────┬──────────────────────────────┘
                                │
                 HTTP REST & CSRF (VITE_API_BASE_URL)
