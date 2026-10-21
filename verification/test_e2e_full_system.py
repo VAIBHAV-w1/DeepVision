@@ -141,7 +141,7 @@ def test_frontend_bundle_splitting():
     return True
 
 def test_local_docker_health_and_206():
-    """Verify local Docker edge container serves health check and HTTP 206 Partial Content."""
+    """Verify local Docker edge container serves health check and strict HTTP 206 Partial Content."""
     try:
         req = urllib.request.Request("http://127.0.0.1:8000/api/health/")
         with urllib.request.urlopen(req, timeout=5) as res:
@@ -152,40 +152,87 @@ def test_local_docker_health_and_206():
     except Exception as e:
         return f"Docker edge container health check failed: {e}"
 
-    # Verify HTTP 206 Partial Content Range streaming
-    # Using recording #2719 or any existing recording with size > 0
-    import sqlite3
-    db_path = os.path.join(REPO_ROOT, "instance", "deepvision.db")
-    rec_id = 2719
-    if os.path.exists(db_path):
-        conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM recordings WHERE file_size > 1000 ORDER BY id DESC LIMIT 1")
-        row = cur.fetchone()
-        if row:
-            rec_id = row[0]
-        conn.close()
+    # Setup Django environment for signed session generation
+    import django
+    from django.conf import settings
+    if not settings.configured:
+        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+        sys.path.insert(0, os.path.join(REPO_ROOT, "deepvision_django"))
+        django.setup()
 
+    from django.contrib.sessions.backends.signed_cookies import SessionStore
+    from apps.recordings.models import Recording
+    from apps.core.media_service import safe_resolve_recording
+
+    # Find a real recording with a physical file on disk
+    recording = None
+    full_path = None
+    for r in Recording.objects.all().order_by("-id")[:50]:
+        resolved = safe_resolve_recording(r.file_path)
+        if resolved and os.path.isfile(resolved) and r.file_size > 1024:
+            recording = r
+            full_path = resolved
+            break
+
+    if not recording:
+        return "No physical recording file with size > 1024 found on disk"
+
+    actual_file_size = os.path.getsize(full_path)
+
+    # Generate authenticated session cookie
+    s = SessionStore()
+    s["user_id"] = recording.user_id
+    s.save()
+    session_cookie = s.session_key
+
+    # 1. Genuine HTTP 206 Partial Content Range Request (bytes 0-1023)
+    req_206 = urllib.request.Request(
+        f"http://127.0.0.1:8000/recordings/{recording.id}/view/",
+        headers={
+            "Range": "bytes=0-1023",
+            "Cookie": f"deepvision_django_session={session_cookie}"
+        }
+    )
+    with urllib.request.urlopen(req_206, timeout=5) as res:
+        assert res.status == 206, f"Expected HTTP 206, got {res.status}"
+        content_range = res.headers.get("Content-Range")
+        expected_range = f"bytes 0-1023/{actual_file_size}"
+        assert content_range == expected_range, f"Expected Content-Range '{expected_range}', got '{content_range}'"
+        content_len_hdr = res.headers.get("Content-Length")
+        assert content_len_hdr == "1024", f"Expected Content-Length 1024, got {content_len_hdr}"
+        body = res.read()
+        assert len(body) == 1024, f"Expected 1024 bytes body, got {len(body)}"
+        print(f"  Recording #{recording.id} HTTP 206 Verified: Range: {content_range}, Length: {content_len_hdr}")
+
+    # 2. Unsatisfiable Range (bytes 999999999-999999999) -> Expect HTTP 416
+    req_416 = urllib.request.Request(
+        f"http://127.0.0.1:8000/recordings/{recording.id}/view/",
+        headers={
+            "Range": "bytes=999999999-999999999",
+            "Cookie": f"deepvision_django_session={session_cookie}"
+        }
+    )
     try:
-        # Request first 1024 bytes
-        req = urllib.request.Request(
-            f"http://127.0.0.1:8000/recordings/{rec_id}/view/",
-            headers={"Range": "bytes=0-1023"}
-        )
-        with urllib.request.urlopen(req, timeout=5) as res:
-            assert res.status in (200, 206), f"Expected HTTP 200 or 206, got HTTP {res.status}"
-            content_range = res.headers.get("Content-Range")
-            content_len = len(res.read())
-            print(f"  Recording #{rec_id} Range response: HTTP {res.status}, Range: {content_range}, Bytes read: {content_len}")
+        with urllib.request.urlopen(req_416, timeout=5) as res:
+            return f"Expected HTTP 416 for out-of-range bytes, got {res.status}"
     except urllib.error.HTTPError as he:
-        # If authentication is required on /recordings/<id>/view/, 401 or 403 is also an acceptable API response, but NOT 404 or 500
-        if he.code in (401, 403):
-            print(f"  Recording #{rec_id} returned expected authenticated response (HTTP {he.code})")
-        else:
-            return f"Unexpected HTTP status {he.code} for recording #{rec_id}"
-    except Exception as e:
-        return f"Range request failed: {e}"
-    
+        assert he.code == 416, f"Expected HTTP 416, got {he.code}"
+        assert he.headers.get("Content-Range") == f"bytes */{actual_file_size}", "Invalid 416 Content-Range header"
+        print(f"  Recording #{recording.id} HTTP 416 Out-of-Range Guard Verified")
+
+    # 3. Full request (No Range header) -> Expect HTTP 200 with complete file
+    req_200 = urllib.request.Request(
+        f"http://127.0.0.1:8000/recordings/{recording.id}/view/",
+        headers={
+            "Cookie": f"deepvision_django_session={session_cookie}"
+        }
+    )
+    with urllib.request.urlopen(req_200, timeout=5) as res:
+        assert res.status == 200, f"Expected HTTP 200 for full stream, got {res.status}"
+        assert res.headers.get("Accept-Ranges") == "bytes", "Missing Accept-Ranges: bytes"
+        assert res.headers.get("Content-Length") == str(actual_file_size), "Mismatched full Content-Length"
+        print(f"  Recording #{recording.id} HTTP 200 Full Stream Verified: Length: {actual_file_size} bytes")
+
     return True
 
 def test_evidence_vault_resilience():
