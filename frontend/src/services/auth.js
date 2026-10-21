@@ -1,7 +1,7 @@
 import api from './api';
 
 export const authService = {
-  me: () => api.auth.me(),
+  me: (options) => api.auth.me(options),
   csrf: () => api.auth.csrf(),
   login: (email, password) => api.auth.login(email, password),
   signup: (data) => api.auth.signup(data),

@@ -9,41 +9,60 @@ export function AuthProvider({ children }) {
 
   const checkAuth = async () => {
     try {
-      const res = await authService.me();
+      // 1. Verify active session with backend (with explicit 5-second timeout)
+      const res = await authService.me({ timeout: 5000 }).catch(() => null);
       if (res && res.authenticated && res.user) {
         setUser(res.user);
         return;
       }
-    } catch (e) {
-      // ignore
-    }
-    try {
-      if (localStorage.getItem('deepvision_demo_session') === 'true') {
-        setUser({
-          id: 9999,
-          username: 'soc_operator_demo',
-          email: 'operator@deepvision.internal',
-          first_name: 'SOC',
-          last_name: 'Operator',
-          role: 'operator',
-          is_staff: false,
-        });
-      } else {
-        setUser(null);
+
+      // 2. Fall back to demo session if active in localStorage
+      try {
+        if (typeof localStorage !== 'undefined' && localStorage.getItem('deepvision_demo_session') === 'true') {
+          setUser({
+            id: 9999,
+            username: 'soc_operator_demo',
+            email: 'operator@deepvision.internal',
+            first_name: 'SOC',
+            last_name: 'Operator',
+            role: 'operator',
+            is_staff: false,
+          });
+          return;
+        }
+      } catch (e) {
+        // localStorage restricted or disabled
       }
+
+      // 3. Unauthenticated state
+      setUser(null);
     } catch (e) {
       setUser(null);
     } finally {
+      // Guaranteed execution: loading state always resolves regardless of code path
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    checkAuth();
+    // Hard ceiling: ensure loading state is never stuck longer than 5 seconds under any condition
+    const startupTimeout = setTimeout(() => {
+      setLoading((prev) => {
+        if (prev) {
+          console.warn('[DeepVision Auth] Startup timeout ceiling reached; forcing loader resolution.');
+          return false;
+        }
+        return prev;
+      });
+    }, 5000);
+
+    checkAuth().finally(() => {
+      clearTimeout(startupTimeout);
+    });
 
     const handleUnauthorized = () => {
       try {
-        if (localStorage.getItem('deepvision_demo_session') === 'true') {
+        if (typeof localStorage !== 'undefined' && localStorage.getItem('deepvision_demo_session') === 'true') {
           return;
         }
       } catch (e) {}
@@ -52,6 +71,7 @@ export function AuthProvider({ children }) {
 
     window.addEventListener('auth:unauthorized', handleUnauthorized);
     return () => {
+      clearTimeout(startupTimeout);
       window.removeEventListener('auth:unauthorized', handleUnauthorized);
     };
   }, []);

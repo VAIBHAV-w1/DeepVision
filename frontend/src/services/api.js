@@ -9,6 +9,10 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || import.meta.en
 
 async function request(endpoint, options = {}) {
   const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
+  const timeoutMs = options.timeout || 15000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   const headers = {
     'Accept': 'application/json',
     ...(options.headers || {}),
@@ -33,58 +37,77 @@ async function request(endpoint, options = {}) {
     }
   }
 
-  const response = await fetch(url, {
-    ...options,
-    method,
-    headers,
-    credentials: 'include',
-  });
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: options.signal || controller.signal,
+      method,
+      headers,
+      credentials: 'include',
+    });
 
-  // Handle unauthenticated response
-  if (response.status === 401 && !url.includes('/api/auth/me')) {
-    // Session expired or login required
-    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
-  }
+    clearTimeout(timeoutId);
 
-  // Parse JSON response
-  let data = null;
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    try {
-      data = await response.json();
-    } catch (e) {
-      data = null;
+    // Handle unauthenticated response
+    if (response.status === 401 && !url.includes('/api/auth/me')) {
+      // Session expired or login required
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
     }
-  } else {
-    data = await response.text();
-  }
 
-  if (!response.ok) {
-    let errorMsg;
-    if (data && typeof data === 'object' && (data.error || data.message || data.detail)) {
-      errorMsg = data.error || data.message || data.detail;
-    } else if (response.status === 503 || response.status === 502 || response.status === 504) {
-      errorMsg = 'Database or service temporarily unavailable. Please retry in a few moments.';
-    } else if (response.status === 403 && typeof data === 'string' && data.includes('CSRF')) {
-      errorMsg = 'Security validation failed (CSRF token expired). Please refresh the page.';
-    } else if (response.status === 401) {
-      errorMsg = 'Authentication required. Please sign in to proceed.';
+    // Special clean handling for auth/me unauthenticated state
+    if (response.status === 401 && url.includes('/api/auth/me')) {
+      return { authenticated: false, user: null };
+    }
+
+    // Parse JSON response
+    let data = null;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try {
+        data = await response.json();
+      } catch (e) {
+        data = null;
+      }
     } else {
-      errorMsg = `Request failed (${response.status}). Please try again later.`;
+      data = await response.text();
     }
-    const error = new Error(errorMsg);
-    error.status = response.status;
-    error.data = data;
-    throw error;
-  }
 
-  return data;
+    if (!response.ok) {
+      let errorMsg;
+      if (data && typeof data === 'object' && (data.error || data.message || data.detail)) {
+        errorMsg = data.error || data.message || data.detail;
+      } else if (response.status === 503 || response.status === 502 || response.status === 504) {
+        errorMsg = 'Database or service temporarily unavailable. Please retry in a few moments.';
+      } else if (response.status === 403 && typeof data === 'string' && data.includes('CSRF')) {
+        errorMsg = 'Security validation failed (CSRF token expired). Please refresh the page.';
+      } else if (response.status === 401) {
+        errorMsg = 'Authentication required. Please sign in to proceed.';
+      } else {
+        errorMsg = `Request failed (${response.status}). Please try again later.`;
+      }
+      const error = new Error(errorMsg);
+      error.status = response.status;
+      error.data = data;
+      throw error;
+    }
+
+    return data;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      const timeoutErr = new Error(`Request timed out after ${timeoutMs}ms: ${endpoint}`);
+      timeoutErr.name = 'TimeoutError';
+      timeoutErr.status = 408;
+      throw timeoutErr;
+    }
+    throw err;
+  }
 }
 
 export const api = {
   // Authentication
   auth: {
-    me: () => request('/api/auth/me/'),
+    me: (options = {}) => request('/api/auth/me/', { timeout: 6000, ...options }),
     csrf: () => request('/api/auth/csrf/'),
     login: (email, password) => request('/api/auth/login/', { method: 'POST', body: { email, password } }),
     signup: (data) => request('/api/auth/signup/', { method: 'POST', body: data }),
