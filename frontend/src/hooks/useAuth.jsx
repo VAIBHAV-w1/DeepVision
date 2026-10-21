@@ -12,6 +12,22 @@ export function AuthProvider({ children }) {
       const res = await authService.me();
       if (res && res.authenticated && res.user) {
         setUser(res.user);
+        return;
+      }
+    } catch (e) {
+      // ignore
+    }
+    try {
+      if (localStorage.getItem('deepvision_demo_session') === 'true') {
+        setUser({
+          id: 9999,
+          username: 'soc_operator_demo',
+          email: 'operator@deepvision.internal',
+          first_name: 'SOC',
+          last_name: 'Operator',
+          role: 'operator',
+          is_staff: false,
+        });
       } else {
         setUser(null);
       }
@@ -43,8 +59,28 @@ export function AuthProvider({ children }) {
     return res;
   };
 
+  const loginAsDemo = () => {
+    const demoUser = {
+      id: 9999,
+      username: 'soc_operator_demo',
+      email: 'operator@deepvision.internal',
+      first_name: 'SOC',
+      last_name: 'Operator',
+      role: 'operator',
+      is_staff: false,
+    };
+    try {
+      localStorage.setItem('deepvision_demo_session', 'true');
+    } catch (e) {
+      // ignore
+    }
+    setUser(demoUser);
+    return demoUser;
+  };
+
   const logout = async () => {
     try {
+      localStorage.removeItem('deepvision_demo_session');
       await authService.logout();
     } finally {
       setUser(null);
@@ -58,6 +94,7 @@ export function AuthProvider({ children }) {
         isAuthenticated: !!user,
         loading,
         login,
+        loginAsDemo,
         logout,
         checkAuth,
       }}

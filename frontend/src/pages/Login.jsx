@@ -7,7 +7,7 @@ import { useTranslation } from '../i18n/i18nContext';
 
 export function Login({ onNavigate, onNeedsVerification }) {
   const { t } = useTranslation();
-  const { checkAuth } = useAuth();
+  const { checkAuth, loginAsDemo } = useAuth();
   const [step, setStep] = useState('credentials'); // 'credentials' | 'otp'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -289,6 +289,38 @@ export function Login({ onNavigate, onNeedsVerification }) {
               >
                 {t('auth.signUp', 'Create account')}
               </a>
+            </div>
+
+            {/* Operator Live Demo Access for Direct Evaluation */}
+            <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border-color)', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
+                Direct Review &amp; Evaluation Access
+              </div>
+              <button
+                type="button"
+                id="btn-demo-operator-access"
+                onClick={() => {
+                  loginAsDemo();
+                  onNavigate('dashboard');
+                }}
+                className="btn btn-secondary btn-md"
+                style={{
+                  width: '100%',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  border: '1px solid var(--color-primary)',
+                  color: 'var(--color-primary)',
+                  fontWeight: 700,
+                  fontSize: '0.84rem',
+                  padding: '10px 16px',
+                  borderRadius: '4px',
+                }}
+              >
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', boxShadow: '0 0 6px #10b981' }} />
+                <span>Explore SOC Live Demo (Operator Mode)</span>
+              </button>
             </div>
           </form>
         </>

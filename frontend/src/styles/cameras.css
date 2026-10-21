@@ -5,8 +5,8 @@
 /* 1. Global Cameras Page Container */
 .cameras-page-container {
   width: 100%;
-  max-width: 1600px;
-  margin: 0 auto;
+  max-width: 100%;
+  margin: 0;
   padding: 0 0 5rem 0;
   box-sizing: border-box;
 }

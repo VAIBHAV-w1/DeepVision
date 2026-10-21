@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
-const isVercel = process.env.VERCEL === '1' || process.env.BUILD_TARGET === 'vercel';
+const isVercel = process.env.VERCEL === '1' || process.env.BUILD_TARGET?.trim() === 'vercel';
 
 export default defineConfig({
   plugins: [react()],

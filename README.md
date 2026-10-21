@@ -67,13 +67,14 @@ DeepVision is a production-grade AI surveillance and incident monitoring platfor
   - Incident-level AI forensic analysis: confidence rating, severity categorization, and chronological timeline reconstruction.
   - Global Notifications Center: separate inbox for system and event alerts with deep-linking directly to the correlated incident.
 
-- **React SPA Frontend**:
+- **React SPA Frontend & Multi-Mode Surveillance Player**:
   - High-performance Single Page Application built with React 19, JavaScript ES6+, HTML5, and CSS3 via Vite.
-  - Zero bloated external component libraries; clean, custom design system preserving DeepVision visual identity (SOC Dark & Daylight modes).
+  - Zero bloated external component libraries; clean, custom design system preserving DeepVision visual identity (Enterprise SOC Dark & Light modes).
   - Centralized API layer (`services/api.js`) with automatic CSRF token management and dynamic backend base URL configuration via `VITE_API_BASE_URL`.
-  - Interactive live camera feeds with instantaneous mode toggling between:
-    1. **ORIGINAL**: Raw CCTV video passthrough.
-    2. **TRACKING + DETECTION**: Deep vision inference with persistent trajectory IDs, bounding boxes, and confidence levels.
+  - **Multi-Mode Camera Architecture**:
+    1. **Mode A (Browser-Local Hardware Webcam)**: Direct browser camera access via `navigator.mediaDevices.getUserMedia()` with user permission, hardware device enumeration, live advancing frame counter, real measured FPS & resolution telemetry, and local canvas snapshot export. Operational in all modern browsers and public cloud deployments.
+    2. **Mode B (Edge Surveillance Gateway & Host Bridge)**: High-speed OpenCV / DirectShow acquisition via `scripts/host_camera_bridge.py` on `127.0.0.1:8554` connected to Django for YOLO11n detection & ByteTrack tracking. Bound privately to preserve network security.
+    3. **Mode C (Synthetic SOC Calibration Feed)**: Canvas-based animated test pattern with dynamic UTC/Local timestamps, simulated moving targets, and calibrated 30 FPS feed for automated testing and calibration.
   - Dedicated pages for Dashboard, Cameras, Recordings, Forensic Evidence, Security Alerts, Incident Cases, and Notification Center.
   - Integrated Assistant Chat powered by grounded surveillance telemetry.
 

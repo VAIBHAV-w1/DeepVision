@@ -178,7 +178,7 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
           {/* Right: Status, Theme, User Controls */}
           <div className="nav-controls-right">
             {/* Live SOC Status Indicator */}
-            <div className="soc-status-badge-top" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '9999px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', fontSize: '0.72rem', color: '#10b981', fontWeight: 700, letterSpacing: '0.04em' }}>
+            <div className="soc-status-badge-top" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', fontSize: '0.72rem', color: '#10b981', fontWeight: 700, letterSpacing: '0.04em' }}>
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981', boxShadow: '0 0 6px #10b981', display: 'inline-block' }}></span>
               <span>SOC ONLINE</span>
             </div>
