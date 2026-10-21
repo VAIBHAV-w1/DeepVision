@@ -94,6 +94,20 @@ urlpatterns = [
     path('cameras/<int:camera_id>/record/stop/', camera_views.camera_record_stop_view, name='camera_record_stop_slash'),
     path('cameras/<int:camera_id>/warm/', camera_views.camera_warm_view, name='camera_warm'),
 
+    # API aliases for camera streaming & telemetry
+    path('api/cameras/<int:camera_id>/stream/', camera_views.camera_stream_view, name='api_camera_stream'),
+    path('api/cameras/<int:camera_id>/stream/tracking/', camera_views.camera_stream_tracking_view, name='api_camera_stream_tracking'),
+    path('api/cameras/<int:camera_id>/stream/original/', camera_views.camera_stream_original_view, name='api_camera_stream_original'),
+    path('api/cameras/<int:camera_id>/stream/raw/', camera_views.camera_stream_original_view, name='api_camera_stream_raw'),
+    path('api/cameras/<int:camera_id>/stats/', camera_views.camera_stats_view, name='api_camera_stats'),
+    path('api/cameras/<int:camera_id>/status/', camera_views.camera_stats_view, name='api_camera_status'),
+    path('api/cameras/<int:camera_id>/status', camera_views.camera_stats_view, name='api_camera_status_no_slash'),
+    path('api/cameras/<int:camera_id>/record/start', camera_views.camera_record_start_view, name='api_camera_record_start'),
+    path('api/cameras/<int:camera_id>/record/start/', camera_views.camera_record_start_view, name='api_camera_record_start_slash'),
+    path('api/cameras/<int:camera_id>/record/stop', camera_views.camera_record_stop_view, name='api_camera_record_stop'),
+    path('api/cameras/<int:camera_id>/record/stop/', camera_views.camera_record_stop_view, name='api_camera_record_stop_slash'),
+    path('api/cameras/<int:camera_id>/warm/', camera_views.camera_warm_view, name='api_camera_warm'),
+
     # Recordings REST APIs & HTTP 206 Partial Playback
     path('api/recordings/', api_views.api_recordings_list, name='api_recordings_list'),
     path('api/recordings/<int:recording_id>/', api_views.api_recording_detail, name='api_recording_detail'),

@@ -246,6 +246,7 @@ export function Cameras({ onNavigate }) {
           <CameraLivePlayer
             camera={activeCam}
             activeMode={activeMode === STREAM_MODES.ORIGINAL ? 'raw' : 'tracking'}
+            stats={camStats}
             onModeChange={(nextMode) => {
               setActiveMode(nextMode === 'raw' ? STREAM_MODES.ORIGINAL : STREAM_MODES.TRACKING_DETECTION);
             }}
@@ -255,7 +256,7 @@ export function Cameras({ onNavigate }) {
       )}
 
       {/* Filter & Control Bar */}
-      <div className="cameras-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', padding: '10px 14px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: '16px' }}>
+      <div className="cameras-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', padding: '10px 14px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
         {/* Status Filter Tabs */}
         <div className="cameras-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
@@ -315,7 +316,7 @@ export function Cameras({ onNavigate }) {
                 style={{
                   background: 'var(--bg-surface)',
                   border: isSelected ? '2px solid #10b981' : '1px solid var(--border-color)',
-                  borderRadius: '16px',
+                  borderRadius: '4px',
                   overflow: 'hidden',
                   boxShadow: isSelected ? '0 0 20px rgba(16, 185, 129, 0.25)' : '0 4px 16px rgba(0, 0, 0, 0.08)',
                   display: 'flex',

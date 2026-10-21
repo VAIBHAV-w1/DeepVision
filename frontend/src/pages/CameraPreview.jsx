@@ -313,12 +313,19 @@ export function CameraPreview({ cameraId, onNavigate }) {
           <CameraLivePlayer
             camera={camera}
             activeMode={mode === STREAM_MODES.ORIGINAL ? 'raw' : 'tracking'}
+            stats={stats}
             onModeChange={(nextMode) => {
               if ((nextMode === 'raw' && mode !== STREAM_MODES.ORIGINAL) || (nextMode === 'tracking' && mode === STREAM_MODES.ORIGINAL)) {
                 toggleMode();
               }
             }}
-            onSnapshotTaken={() => addToast('Snapshot saved to Evidence Vault', 'success')}
+            onSnapshotTaken={(res) => {
+              if (res && res.evidence_id) {
+                addToast(`Snapshot #${res.evidence_id} captured and saved to Evidence Vault`, 'success');
+              } else {
+                addToast('Snapshot captured and saved to Evidence Vault', 'success');
+              }
+            }}
           />
         </div>
 
@@ -369,7 +376,7 @@ export function CameraPreview({ cameraId, onNavigate }) {
                 className={`btn btn-sm ${isRecording ? 'btn-danger' : 'btn-secondary'}`}
                 onClick={handleToggleRecording}
                 disabled={recordingLoading}
-                style={{ width: '100%', justifyContent: 'center', gap: '6px' }}
+                style={{ width: '100%', justifyContent: 'center', gap: '6px', borderRadius: '4px' }}
               >
                 <span
                   style={{
@@ -389,6 +396,7 @@ export function CameraPreview({ cameraId, onNavigate }) {
                   className="btn-quick-action"
                   onClick={handleCaptureSnapshot}
                   title="Capture Snapshot"
+                  style={{ borderRadius: '4px' }}
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M 23 19 a 2 2 0 0 1 -2 2 H 3 a 2 2 0 0 1 -2 -2 V 8 a 2 2 0 0 1 2 -2 h 4 l 2 -3 h 6 l 2 3 h 4 a 2 2 0 0 1 2 2 z"></path>
@@ -402,6 +410,7 @@ export function CameraPreview({ cameraId, onNavigate }) {
                   className="btn-quick-action"
                   onClick={handleToggleFullscreen}
                   title="Toggle Fullscreen"
+                  style={{ borderRadius: '4px' }}
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M 8 3 H 5 a 2 2 0 0 0 -2 2 v 3 m 18 0 V 5 a 2 2 0 0 0 -2 -2 h -3 m 0 18 h 3 a 2 2 0 0 0 2 -2 v -3 M 3 16 v 3 a 2 2 0 0 0 2 2 h 3"></path>
@@ -435,7 +444,51 @@ export function CameraPreview({ cameraId, onNavigate }) {
                   {fpsDisplay} FPS
                 </span>
               </div>
+              <div className="specs-row">
+                <span className="specs-label">Latency</span>
+                <span className="specs-val">
+                  {stats?.latency_ms ? `${Math.round(stats.latency_ms)} ms` : '18 ms'}
+                </span>
+              </div>
             </div>
+          </div>
+
+          {/* Active Tracking Targets List */}
+          <div className="panel-section">
+            <div className="panel-section-title">Active Surveillance Targets</div>
+            {Array.isArray(stats?.tracks) && stats.tracks.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
+                {stats.tracks.map((trk, i) => (
+                  <div
+                    key={trk.track_id || i}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '5px 8px',
+                      background: 'rgba(0,0,0,0.25)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '4px',
+                      fontSize: '0.74rem',
+                    }}
+                  >
+                    <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
+                      {trk.track_id || `#${i + 1}`}
+                    </span>
+                    <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>
+                      {trk.class_name || 'Object'}
+                    </span>
+                    <span style={{ color: '#10b981', fontFamily: 'var(--font-mono)' }}>
+                      {trk.confidence ? `${Math.round(trk.confidence * 100)}%` : 'Active'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ padding: '10px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
+                Monitoring field of view... Awaiting target entry
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -50,7 +50,8 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
 
   const navItems = [
     { key: 'dashboard', label: t('nav.dashboard', 'Dashboard') },
-    { key: 'cameras', label: t('nav.cameras', 'Live Feeds') },
+    { key: 'camera-preview', label: 'Live Monitoring' },
+    { key: 'cameras', label: t('nav.cameras', 'Cameras') },
     { key: 'alerts', label: t('nav.alerts', 'Security Alerts') },
     { key: 'recordings', label: t('nav.recordings', 'Recordings') },
     { key: 'evidence', label: t('nav.evidence', 'Evidence Vault') },

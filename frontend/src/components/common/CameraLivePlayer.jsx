@@ -4,8 +4,8 @@ import cameraService from '../../services/camera';
 /**
  * CameraLivePlayer — Enterprise SOC Multi-Mode Surveillance Player
  * Supports:
+ * - Mode B: Edge Surveillance Gateway (DirectShow host bridge / OpenCV YOLO11n + ByteTrack stream via backend) [DEFAULT]
  * - Mode A: Browser Local Webcam (Direct hardware via getUserMedia + device enumeration + real FPS/resolution)
- * - Mode B: Edge Surveillance Gateway (DirectShow host bridge / OpenCV YOLO stream via backend)
  * - Mode C: SOC Synthetic Test Pattern (Deterministic canvas test feed for automated calibration & testing)
  */
 export function CameraLivePlayer({
@@ -15,14 +15,15 @@ export function CameraLivePlayer({
   onSnapshotTaken,
   compact = false,
   autoStartWebcam = false,
+  stats = null,
 }) {
   const cameraId = camera?.id || 1;
   const cameraName = camera?.name || `Camera ${cameraId}`;
   const cameraLocation = camera?.location || 'Sector 01';
 
-  // Access Modes: 'browser' | 'edge' | 'test_pattern'
-  const [sourceMode, setSourceMode] = useState('browser');
-  
+  // Access Modes: 'edge' (default) | 'browser' | 'test_pattern'
+  const [sourceMode, setSourceMode] = useState('edge');
+
   // Mode A: Browser Webcam State
   const [webcamActive, setWebcamActive] = useState(false);
   const [webcamLoading, setWebcamLoading] = useState(false);
@@ -47,6 +48,7 @@ export function CameraLivePlayer({
   const containerRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const streamImgRef = useRef(null);
   const streamRef = useRef(null);
   const animationFrameRef = useRef(null);
   const frameCounterRef = useRef({ count: 0, lastTime: performance.now(), currentFps: 0 });
@@ -55,7 +57,11 @@ export function CameraLivePlayer({
   useEffect(() => {
     const updateClock = () => {
       const now = new Date();
-      setClockStr(now.toTimeString().split(' ')[0]);
+      const pad = (n) => String(n).padStart(2, '0');
+      const hours = now.getHours();
+      const ampm = hours >= 12 ? 'pm' : 'am';
+      const formattedHours = pad(hours % 12 || 12);
+      setClockStr(`${formattedHours}:${pad(now.getMinutes())}:${pad(now.getSeconds())} ${ampm}`);
     };
     updateClock();
     const interval = setInterval(updateClock, 1000);
@@ -88,9 +94,7 @@ export function CameraLivePlayer({
       streamRef.current.getTracks().forEach((track) => {
         try {
           track.stop();
-        } catch (e) {
-          // ignore
-        }
+        } catch (_) {}
       });
       streamRef.current = null;
     }
@@ -122,95 +126,85 @@ export function CameraLivePlayer({
         audio: false,
       };
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = stream;
-
-      // Enumerate available devices once permission is granted
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoInputs = devices.filter((d) => d.kind === 'videoinput');
-        setVideoDevices(videoInputs);
-        if (!deviceIdToUse && videoInputs.length > 0) {
-          const currentTrack = stream.getVideoTracks()[0];
-          const trackSettings = currentTrack?.getSettings ? currentTrack.getSettings() : {};
-          if (trackSettings.deviceId) {
-            setSelectedDeviceId(trackSettings.deviceId);
-          }
-        }
-      } catch (enumErr) {
-        // Enumerate fallback
-      }
+      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = mediaStream;
 
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => {
-          videoRef.current
-            ?.play()
-            .then(() => {
-              setWebcamActive(true);
-              setWebcamLoading(false);
-              startFrameCounter();
-            })
-            .catch((playErr) => {
-              setWebcamError(`Autoplay error: ${playErr.message}`);
-              setWebcamLoading(false);
-            });
-        };
+        videoRef.current.srcObject = mediaStream;
+        await videoRef.current.play().catch(() => {});
+      }
+
+      setWebcamActive(true);
+      setWebcamLoading(false);
+
+      // Enumerate available video inputs for selector dropdown
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const vDevices = devices.filter((d) => d.kind === 'videoinput');
+        setVideoDevices(vDevices);
+        if (!selectedDeviceId && vDevices.length > 0) {
+          setSelectedDeviceId(vDevices[0].deviceId);
+        }
+      } catch (_) {}
+
+      // Measure real advancing frames via requestVideoFrameCallback or rAF
+      frameCounterRef.current = { count: 0, lastTime: performance.now(), currentFps: 0 };
+
+      const updateFrameTelemetry = (_now, metadata) => {
+        const currentCounter = frameCounterRef.current;
+        currentCounter.count += 1;
+
+        const currentTime = performance.now();
+        const delta = currentTime - currentCounter.lastTime;
+
+        if (delta >= 1000) {
+          const fps = Math.round((currentCounter.count * 1000) / delta);
+          currentCounter.currentFps = fps;
+          currentCounter.count = 0;
+          currentCounter.lastTime = currentTime;
+
+          const res = videoRef.current
+            ? `${videoRef.current.videoWidth || 1280}x${videoRef.current.videoHeight || 720}`
+            : '1280x720';
+
+          setStreamStats({
+            fps,
+            frameCount: metadata?.presentedFrames || currentCounter.count,
+            resolution: res,
+          });
+        }
+
+        const video = videoRef.current;
+        if (video && !video.paused && !video.ended) {
+          if ('requestVideoFrameCallback' in HTMLVideoElement.prototype && video.requestVideoFrameCallback) {
+            video.requestVideoFrameCallback(updateFrameTelemetry);
+          } else {
+            animationFrameRef.current = requestAnimationFrame(updateFrameTelemetry);
+          }
+        }
+      };
+
+      if (videoRef.current) {
+        if ('requestVideoFrameCallback' in HTMLVideoElement.prototype && videoRef.current.requestVideoFrameCallback) {
+          videoRef.current.requestVideoFrameCallback(updateFrameTelemetry);
+        } else {
+          animationFrameRef.current = requestAnimationFrame(updateFrameTelemetry);
+        }
       }
     } catch (err) {
       setWebcamLoading(false);
+      setWebcamActive(false);
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setWebcamError('Camera permission denied by browser. Please grant permission in browser settings.');
+        setWebcamError('Camera permission denied by user. Allow camera access in browser settings.');
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        setWebcamError('No physical camera device detected on this system.');
+        setWebcamError('No camera hardware found on this system.');
       } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-        setWebcamError('Camera hardware is currently in use by another application or DirectShow bridge.');
+        setWebcamError('Camera hardware is currently in use by another application.');
       } else {
-        setWebcamError(`Camera error: ${err.message || err.name}`);
+        setWebcamError(err.message || 'Failed to start camera hardware.');
       }
     }
-  }, [stopWebcam]);
-
-  // Frame advance counter using requestVideoFrameCallback or requestAnimationFrame
-  const startFrameCounter = useCallback(() => {
-    frameCounterRef.current = { count: 0, lastTime: performance.now(), currentFps: 0 };
-
-    const updateFrameTelemetry = () => {
-      const video = videoRef.current;
-      if (!video || video.paused || video.ended) return;
-
-      frameCounterRef.current.count += 1;
-      const now = performance.now();
-      const elapsed = now - frameCounterRef.current.lastTime;
-
-      if (elapsed >= 1000) {
-        const calculatedFps = Math.round((frameCounterRef.current.count * 1000) / elapsed);
-        frameCounterRef.current.currentFps = calculatedFps;
-        frameCounterRef.current.count = 0;
-        frameCounterRef.current.lastTime = now;
-
-        setStreamStats({
-          fps: calculatedFps,
-          frameCount: frameCounterRef.current.count,
-          resolution: video.videoWidth && video.videoHeight ? `${video.videoWidth}x${video.videoHeight}` : '1280x720',
-        });
-      }
-
-      if ('requestVideoFrameCallback' in HTMLVideoElement.prototype && video.requestVideoFrameCallback) {
-        video.requestVideoFrameCallback(updateFrameTelemetry);
-      } else {
-        animationFrameRef.current = requestAnimationFrame(updateFrameTelemetry);
-      }
-    };
-
-    if (videoRef.current) {
-      if ('requestVideoFrameCallback' in HTMLVideoElement.prototype && videoRef.current.requestVideoFrameCallback) {
-        videoRef.current.requestVideoFrameCallback(updateFrameTelemetry);
-      } else {
-        animationFrameRef.current = requestAnimationFrame(updateFrameTelemetry);
-      }
-    }
-  }, []);
+  }, [stopWebcam, selectedDeviceId]);
 
   // Cleanup on unmount or source change
   useEffect(() => {
@@ -239,7 +233,6 @@ export function CameraLivePlayer({
     let dy = 1.6;
     let frameNum = 0;
     let lastTime = performance.now();
-    let measuredFps = 30;
 
     const renderTestPattern = () => {
       const canvas = canvasRef.current;
@@ -270,7 +263,7 @@ export function CameraLivePlayer({
         ctx.stroke();
       }
 
-      // Moving target box simulation (YOLO Detection)
+      // Moving target box simulation (Calibration Target)
       targetX += dx;
       targetY += dy;
       if (targetX < 40 || targetX > w - 160) dx = -dx;
@@ -286,7 +279,7 @@ export function CameraLivePlayer({
       ctx.fillRect(targetX, targetY - 20, 120, 20);
       ctx.fillStyle = '#040711';
       ctx.font = 'bold 11px monospace';
-      ctx.fillText('TARGET [PERSON] 94%', targetX + 4, targetY - 6);
+      ctx.fillText('TARGET [CALIBRATION]', targetX + 4, targetY - 6);
 
       // Center crosshair
       ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
@@ -315,7 +308,6 @@ export function CameraLivePlayer({
       frameNum += 1;
       const now = performance.now();
       if (now - lastTime >= 1000) {
-        measuredFps = Math.round((frameNum * 1000) / (now - lastTime));
         setStreamStats({
           fps: 30,
           frameCount: frameNum,
@@ -337,10 +329,28 @@ export function CameraLivePlayer({
   // Action Handlers: Zoom, Pan, Snapshot, Fullscreen
   // ---------------------------------------------------------------------------
   const handleZoomIn = () => setZoom((z) => Math.min(z + 0.25, 3));
-  const handleZoomOut = () => setZoom((z) => Math.max(z - 0.25, 1));
+  const handleZoomOut = () => {
+    setZoom((z) => {
+      const next = Math.max(z - 0.25, 1);
+      if (next === 1) setPan({ x: 0, y: 0 });
+      return next;
+    });
+  };
   const handleResetPan = () => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
+  };
+
+  const handlePtz = (direction) => {
+    const step = 25;
+    if (direction === 'up') setPan((p) => ({ ...p, y: p.y + step }));
+    if (direction === 'down') setPan((p) => ({ ...p, y: p.y - step }));
+    if (direction === 'left') setPan((p) => ({ ...p, x: p.x + step }));
+    if (direction === 'right') setPan((p) => ({ ...p, x: p.x - step }));
+    if (direction === 'center') {
+      setPan({ x: 0, y: 0 });
+      setZoom(1);
+    }
   };
 
   const handleToggleFullscreen = () => {
@@ -355,43 +365,31 @@ export function CameraLivePlayer({
   const handleCaptureSnapshot = async () => {
     setSnapshotLoading(true);
     try {
-      let snapshotDataUrl = null;
-
-      if (sourceMode === 'browser' && videoRef.current) {
-        const video = videoRef.current;
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth || 1280;
-        canvas.height = video.videoHeight || 720;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        snapshotDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-      } else if (sourceMode === 'test_pattern' && canvasRef.current) {
-        snapshotDataUrl = canvasRef.current.toDataURL('image/jpeg', 0.92);
-      } else {
-        // Mode B: Server API capture
-        try {
-          const res = await cameraService.captureSnapshot(cameraId);
-          if (res?.snapshot_url) {
-            snapshotDataUrl = res.snapshot_url;
-          }
-        } catch (e) {
-          snapshotDataUrl = cameraService.getSnapshotUrl(cameraId);
+      if (sourceMode === 'edge') {
+        const res = await cameraService.captureSnapshot(cameraId);
+        if (onSnapshotTaken) {
+          onSnapshotTaken(res);
         }
-      }
-
-      if (snapshotDataUrl) {
-        // Offer download link
-        const a = document.createElement('a');
-        a.href = snapshotDataUrl;
-        a.download = `DeepVision_Snapshot_CAM0${cameraId}_${Date.now()}.jpg`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+      } else if (sourceMode === 'browser' && videoRef.current) {
+        const video = videoRef.current;
+        const offscreen = document.createElement('canvas');
+        offscreen.width = video.videoWidth || 1280;
+        offscreen.height = video.videoHeight || 720;
+        const ctx = offscreen.getContext('2d');
+        ctx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
+        const snapshotDataUrl = offscreen.toDataURL('image/jpeg', 0.85);
 
         if (onSnapshotTaken) {
           onSnapshotTaken(snapshotDataUrl);
         }
+      } else if (sourceMode === 'test_pattern' && canvasRef.current) {
+        const snapshotDataUrl = canvasRef.current.toDataURL('image/jpeg', 0.85);
+        if (onSnapshotTaken) {
+          onSnapshotTaken(snapshotDataUrl);
+        }
       }
+    } catch (_) {
+      // ignore
     } finally {
       setSnapshotLoading(false);
     }
@@ -402,6 +400,26 @@ export function CameraLivePlayer({
     isOriginalMode ? 'raw' : 'tracking'
   );
 
+  const displayFps =
+    sourceMode === 'browser' && webcamActive
+      ? streamStats.fps
+      : sourceMode === 'test_pattern'
+      ? 30
+      : typeof stats?.fps === 'number' && stats.fps > 0
+      ? stats.fps
+      : camera?.status === 'online'
+      ? 24
+      : 0;
+
+  const displayBitrate = displayFps > 0 ? `${Math.round(displayFps * 18)} kb/s` : '0 kb/s';
+
+  const isLive =
+    sourceMode === 'browser'
+      ? webcamActive
+      : sourceMode === 'test_pattern'
+      ? true
+      : camera?.status === 'online' && !edgeGatewayError;
+
   return (
     <div
       ref={containerRef}
@@ -410,11 +428,11 @@ export function CameraLivePlayer({
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
-        gap: '12px',
+        gap: '10px',
         background: 'var(--bg-surface, #0f172a)',
         border: '1px solid var(--border-color)',
-        borderRadius: '6px',
-        padding: compact ? '8px' : '14px',
+        borderRadius: '4px',
+        padding: compact ? '8px' : '12px',
         boxSizing: 'border-box',
       }}
     >
@@ -426,13 +444,58 @@ export function CameraLivePlayer({
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
-          gap: '10px',
+          gap: '8px',
           paddingBottom: '8px',
           borderBottom: '1px solid var(--border-color)',
         }}
       >
         {/* Source Mode Tabs */}
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(0,0,0,0.3)', padding: '3px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            background: 'rgba(0,0,0,0.3)',
+            padding: '3px',
+            borderRadius: '4px',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          <button
+            type="button"
+            id="btn-source-edge"
+            onClick={() => {
+              stopWebcam();
+              setSourceMode('edge');
+              setEdgeGatewayError(false);
+            }}
+            style={{
+              background: sourceMode === 'edge' ? 'var(--color-primary)' : 'transparent',
+              color: sourceMode === 'edge' ? '#ffffff' : 'var(--text-secondary)',
+              border: 'none',
+              padding: '4px 10px',
+              borderRadius: '4px',
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span>Surveillance Stream (YOLO11n)</span>
+            {sourceMode === 'edge' && (
+              <span
+                style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  backgroundColor: !edgeGatewayError ? '#10b981' : '#f59e0b',
+                }}
+              />
+            )}
+          </button>
+
           <button
             type="button"
             id="btn-source-browser"
@@ -445,7 +508,7 @@ export function CameraLivePlayer({
               color: sourceMode === 'browser' ? '#ffffff' : 'var(--text-secondary)',
               border: 'none',
               padding: '4px 10px',
-              borderRadius: '3px',
+              borderRadius: '4px',
               fontSize: '0.74rem',
               fontWeight: 700,
               cursor: 'pointer',
@@ -462,27 +525,6 @@ export function CameraLivePlayer({
 
           <button
             type="button"
-            id="btn-source-edge"
-            onClick={() => {
-              stopWebcam();
-              setSourceMode('edge');
-            }}
-            style={{
-              background: sourceMode === 'edge' ? 'var(--color-primary)' : 'transparent',
-              color: sourceMode === 'edge' ? '#ffffff' : 'var(--text-secondary)',
-              border: 'none',
-              padding: '4px 10px',
-              borderRadius: '3px',
-              fontSize: '0.74rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            Edge Gateway
-          </button>
-
-          <button
-            type="button"
             id="btn-source-test"
             onClick={() => {
               stopWebcam();
@@ -493,7 +535,7 @@ export function CameraLivePlayer({
               color: sourceMode === 'test_pattern' ? '#ffffff' : 'var(--text-secondary)',
               border: 'none',
               padding: '4px 10px',
-              borderRadius: '3px',
+              borderRadius: '4px',
               fontSize: '0.74rem',
               fontWeight: 700,
               cursor: 'pointer',
@@ -512,39 +554,11 @@ export function CameraLivePlayer({
               gap: '6px',
               padding: '3px 8px',
               borderRadius: '4px',
-              background:
-                sourceMode === 'browser'
-                  ? webcamActive
-                    ? 'rgba(16, 185, 129, 0.15)'
-                    : 'rgba(239, 68, 68, 0.15)'
-                  : sourceMode === 'test_pattern'
-                  ? 'rgba(59, 130, 246, 0.15)'
-                  : camera?.status === 'online'
-                  ? 'rgba(16, 185, 129, 0.15)'
-                  : 'rgba(239, 68, 68, 0.15)',
-              border: `1px solid ${
-                sourceMode === 'browser'
-                  ? webcamActive
-                    ? '#10b981'
-                    : '#ef4444'
-                  : sourceMode === 'test_pattern'
-                  ? '#3b82f6'
-                  : camera?.status === 'online'
-                  ? '#10b981'
-                  : '#ef4444'
-              }`,
+              background: isLive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+              border: `1px solid ${isLive ? '#10b981' : '#f59e0b'}`,
               fontSize: '0.72rem',
               fontWeight: 700,
-              color:
-                sourceMode === 'browser'
-                  ? webcamActive
-                    ? '#10b981'
-                    : '#ef4444'
-                  : sourceMode === 'test_pattern'
-                  ? '#3b82f6'
-                  : camera?.status === 'online'
-                  ? '#10b981'
-                  : '#ef4444',
+              color: isLive ? '#10b981' : '#f59e0b',
             }}
           >
             <span
@@ -552,16 +566,8 @@ export function CameraLivePlayer({
                 width: '6px',
                 height: '6px',
                 borderRadius: '50%',
-                backgroundColor:
-                  sourceMode === 'browser'
-                    ? webcamActive
-                      ? '#10b981'
-                      : '#ef4444'
-                    : sourceMode === 'test_pattern'
-                    ? '#3b82f6'
-                    : camera?.status === 'online'
-                    ? '#10b981'
-                    : '#ef4444',
+                backgroundColor: isLive ? '#10b981' : '#f59e0b',
+                animation: isLive ? 'pulse-dot 1.2s infinite' : undefined,
               }}
             />
             <span>
@@ -571,15 +577,15 @@ export function CameraLivePlayer({
                   : 'WEBCAM STANDBY'
                 : sourceMode === 'test_pattern'
                 ? 'CALIBRATION PATTERN'
-                : camera?.status === 'online'
-                ? 'GATEWAY ONLINE'
-                : 'GATEWAY STANDBY'}
+                : !edgeGatewayError && camera?.status === 'online'
+                ? 'SURVEILLANCE LIVE'
+                : 'SURVEILLANCE STANDBY'}
             </span>
           </div>
 
           <span
             style={{
-              fontFamily: 'var(--font-mono)',
+              fontFamily: 'var(--font-mono, monospace)',
               fontSize: '0.72rem',
               color: 'var(--text-muted)',
               background: 'rgba(0,0,0,0.3)',
@@ -588,18 +594,15 @@ export function CameraLivePlayer({
               border: '1px solid var(--border-color)',
             }}
           >
-            {sourceMode === 'browser' && webcamActive
-              ? `${streamStats.fps} FPS // ${streamStats.resolution}`
-              : sourceMode === 'test_pattern'
-              ? '30 FPS // 1280x720'
-              : 'MJPEG // 24 FPS'}
+            {displayFps > 0 ? `${displayFps} FPS // ${displayBitrate}` : 'STANDBY // 0 kb/s'}
           </span>
         </div>
       </div>
 
       {/* 2. Main Live Video Monitor Canvas */}
       <div
-        className="camera-monitor-frame"
+        className="camera-monitor-frame live-monitor glassy-frame"
+        id="videoViewerContainer"
         style={{
           position: 'relative',
           width: '100%',
@@ -613,6 +616,90 @@ export function CameraLivePlayer({
           justifyContent: 'center',
         }}
       >
+        {/* MODE B (Default): Edge Surveillance Gateway (OpenCV / YOLO11n + ByteTrack stream) */}
+        {sourceMode === 'edge' && (
+          <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+            <img
+              key={edgeReloadKey}
+              ref={streamImgRef}
+              id="camera-live-stream"
+              src={edgeStreamUrl}
+              data-camera-id={cameraId}
+              data-active-mode={isOriginalMode ? 'raw' : 'tracking'}
+              alt={`${cameraName} Live Surveillance Stream`}
+              className="liveview-stream-img"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
+                transition: 'transform 150ms ease-out',
+                display: 'block',
+              }}
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = `${cameraService.getSnapshotUrl(cameraId)}?t=${Date.now()}`;
+                setEdgeGatewayError(true);
+              }}
+              onLoad={() => setEdgeGatewayError(false)}
+            />
+
+            {edgeGatewayError && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '1.5rem',
+                  textAlign: 'center',
+                  background: 'rgba(11, 15, 25, 0.88)',
+                  color: '#ffffff',
+                  zIndex: 8,
+                }}
+              >
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="1.5" style={{ marginBottom: '0.75rem' }}>
+                  <path d="M 23 7 l -7 5 7 5 V 7 z" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                  <line x1="1" y1="1" x2="23" y2="23" stroke="#ef4444" strokeWidth="2" />
+                </svg>
+                <div style={{ fontSize: '0.96rem', fontWeight: 700, marginBottom: '0.25rem' }}>
+                  Surveillance Engine Ingestion Standby
+                </div>
+                <div style={{ fontSize: '0.8rem', color: '#94a3b8', maxWidth: '400px', marginBottom: '1.25rem' }}>
+                  DirectShow / RTSP source standby. YOLO11n neural tracker ready. Connect camera hardware or activate local browser camera below.
+                </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEdgeGatewayError(false);
+                      setEdgeReloadKey(Date.now());
+                    }}
+                    className="btn btn-secondary btn-sm"
+                    style={{ borderRadius: '4px' }}
+                  >
+                    Retry Connection
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSourceMode('browser');
+                      startWebcam();
+                    }}
+                    className="btn btn-primary btn-sm"
+                    style={{ borderRadius: '4px' }}
+                  >
+                    Use Browser Camera
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* MODE A: Browser Webcam Video Element */}
         {sourceMode === 'browser' && (
           <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -632,7 +719,6 @@ export function CameraLivePlayer({
               }}
             />
 
-            {/* Standby / Initial Prompt */}
             {!webcamActive && (
               <div
                 style={{
@@ -652,7 +738,7 @@ export function CameraLivePlayer({
                   style={{
                     width: '48px',
                     height: '48px',
-                    borderRadius: '50%',
+                    borderRadius: '4px',
                     background: 'rgba(37, 99, 235, 0.15)',
                     border: '1px solid rgba(37, 99, 235, 0.4)',
                     display: 'flex',
@@ -698,7 +784,7 @@ export function CameraLivePlayer({
                     onClick={() => startWebcam(selectedDeviceId)}
                     disabled={webcamLoading}
                     className="btn btn-primary btn-sm"
-                    style={{ padding: '8px 18px', fontWeight: 700 }}
+                    style={{ padding: '8px 18px', fontWeight: 700, borderRadius: '4px' }}
                   >
                     {webcamLoading ? 'Accessing Camera Hardware...' : 'Activate Camera'}
                   </button>
@@ -707,13 +793,13 @@ export function CameraLivePlayer({
                     type="button"
                     onClick={() => setSourceMode('test_pattern')}
                     className="btn btn-secondary btn-sm"
-                    style={{ padding: '8px 18px' }}
+                    style={{ padding: '8px 18px', borderRadius: '4px' }}
                   >
                     Run Test Pattern
                   </button>
                 </div>
 
-                {/* Device Selector Dropdown if multiple devices found */}
+                {/* Device Selector Dropdown */}
                 {videoDevices.length > 1 && (
                   <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Device:</span>
@@ -745,81 +831,6 @@ export function CameraLivePlayer({
           </div>
         )}
 
-        {/* MODE B: Edge Surveillance Gateway (DirectShow Bridge / OpenCV stream) */}
-        {sourceMode === 'edge' && (
-          <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-            <img
-              key={edgeReloadKey}
-              id="camera-live-stream"
-              src={edgeStreamUrl}
-              data-camera-id={cameraId}
-              alt={`${cameraName} Live Stream`}
-              className="liveview-stream-img"
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
-                transition: 'transform 150ms ease-out',
-                display: edgeGatewayError ? 'none' : 'block',
-              }}
-              onError={() => setEdgeGatewayError(true)}
-              onLoad={() => setEdgeGatewayError(false)}
-            />
-
-            {edgeGatewayError && (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '1.5rem',
-                  textAlign: 'center',
-                  background: 'rgba(11, 15, 25, 0.94)',
-                  color: '#ffffff',
-                }}
-              >
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="1.5" style={{ marginBottom: '0.75rem' }}>
-                  <path d="M 23 7 l -7 5 7 5 V 7 z" />
-                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                  <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444" strokeWidth="2" />
-                </svg>
-                <div style={{ fontSize: '0.96rem', fontWeight: 700, marginBottom: '0.25rem' }}>
-                  Edge Surveillance Gateway Standby
-                </div>
-                <div style={{ fontSize: '0.8rem', color: '#94a3b8', maxWidth: '400px', marginBottom: '1.25rem' }}>
-                  The local DirectShow / RTSP host bridge on 127.0.0.1:8554 is private and not exposed to cloud serverless origins.
-                </div>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEdgeGatewayError(false);
-                      setEdgeReloadKey(Date.now());
-                    }}
-                    className="btn btn-secondary btn-sm"
-                  >
-                    Retry Connection
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSourceMode('browser');
-                      startWebcam();
-                    }}
-                    className="btn btn-primary btn-sm"
-                  >
-                    Use Browser Camera
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* MODE C: Synthetic SOC Calibration Test Pattern */}
         {sourceMode === 'test_pattern' && (
           <canvas
@@ -837,7 +848,10 @@ export function CameraLivePlayer({
           />
         )}
 
-        {/* Floating Top HUD Status Strip */}
+        {/* -------------------------------------------------------------
+            FLOATING HUD OVERLAYS (REFERENCE IMAGE 1 DIRECTION)
+            ------------------------------------------------------------- */}
+        {/* Top Floating Status Strip */}
         <div
           style={{
             position: 'absolute',
@@ -851,39 +865,276 @@ export function CameraLivePlayer({
             zIndex: 10,
           }}
         >
-          {/* Channel Name */}
+          {/* Top-Left: Live indicator with Bitrate/FPS */}
           <div
+            className="hud-pill-top-left"
+            style={{
+              pointerEvents: 'auto',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: 'rgba(15, 23, 42, 0.85)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              padding: '5px 12px',
+              borderRadius: '4px',
+              color: '#ffffff',
+              fontSize: '0.75rem',
+            }}
+          >
+            <span
+              style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                backgroundColor: isLive ? '#10b981' : '#f59e0b',
+                animation: isLive ? 'pulse-dot 1.2s infinite' : undefined,
+              }}
+            />
+            <span style={{ fontWeight: 700 }}>{isLive ? 'LIVE' : 'STANDBY'}</span>
+            <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.72rem' }}>{displayBitrate}</span>
+            <span style={{ color: isLive ? '#10b981' : 'rgba(255,255,255,0.7)', fontWeight: 700, fontSize: '0.72rem' }}>
+              {displayFps} FPS
+            </span>
+          </div>
+
+          {/* Top-Center: Channel Name */}
+          <div
+            className="hud-pill-top-center"
             style={{
               pointerEvents: 'auto',
               background: 'rgba(15, 23, 42, 0.85)',
               border: '1px solid rgba(255, 255, 255, 0.15)',
-              padding: '4px 10px',
+              padding: '5px 12px',
               borderRadius: '4px',
               color: '#ffffff',
-              fontSize: '0.74rem',
+              fontSize: '0.75rem',
               fontWeight: 700,
-              fontFamily: 'var(--font-mono)',
+              fontFamily: 'var(--font-mono, monospace)',
             }}
           >
             CH 0{cameraId}: {cameraName} &bull; {cameraLocation}
           </div>
 
-          {/* Clock Strip */}
+          {/* Top-Right: Clock & Reset Zoom */}
           <div
+            className="hud-pill-top-right"
             style={{
               pointerEvents: 'auto',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
               background: 'rgba(15, 23, 42, 0.85)',
               border: '1px solid rgba(255, 255, 255, 0.15)',
-              padding: '4px 10px',
+              padding: '5px 10px',
               borderRadius: '4px',
               color: '#f8fafc',
               fontSize: '0.74rem',
               fontWeight: 600,
-              fontFamily: 'var(--font-mono)',
+              fontFamily: 'var(--font-mono, monospace)',
             }}
           >
-            {clockStr}
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+            </svg>
+            <span>{clockStr}</span>
+            {zoom > 1 && (
+              <button
+                type="button"
+                onClick={handleResetPan}
+                style={{
+                  background: 'rgba(255,255,255,0.15)',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontSize: '0.7rem',
+                  fontWeight: 700,
+                  padding: '2px 6px',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                }}
+                title="Reset zoom to 1X"
+              >
+                1X
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleToggleFullscreen}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#ffffff',
+                cursor: 'pointer',
+                padding: '2px',
+                display: 'flex',
+                alignItems: 'center',
+              }}
+              title="Toggle Fullscreen"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <polyline points="9 21 3 21 3 15"></polyline>
+                <line x1="21" y1="3" x2="14" y2="10"></line>
+                <line x1="3" y1="21" x2="10" y2="14"></line>
+              </svg>
+            </button>
           </div>
+        </div>
+
+        {/* Bottom-Left: Zoom In/Out Pill */}
+        <div
+          className="hud-zoom-pill"
+          style={{
+            position: 'absolute',
+            bottom: '14px',
+            left: '14px',
+            zIndex: 15,
+            display: 'inline-flex',
+            alignItems: 'center',
+            background: 'rgba(15, 23, 42, 0.85)',
+            border: '1px solid rgba(255, 255, 255, 0.16)',
+            borderRadius: '4px',
+            padding: '3px 6px',
+            gap: '4px',
+          }}
+        >
+          <button
+            type="button"
+            className="hud-zoom-btn"
+            onClick={handleZoomOut}
+            title="Zoom Out"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#ffffff',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '1rem',
+              width: '24px',
+              height: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '4px',
+            }}
+          >
+            &minus;
+          </button>
+          <span
+            className="hud-zoom-indicator"
+            style={{
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              color: '#ffffff',
+              padding: '0 6px',
+              fontFamily: 'var(--font-mono, monospace)',
+            }}
+          >
+            {zoom.toFixed(1)}X
+          </span>
+          <button
+            type="button"
+            className="hud-zoom-btn"
+            onClick={handleZoomIn}
+            title="Zoom In"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#ffffff',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '1rem',
+              width: '24px',
+              height: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '4px',
+            }}
+          >
+            &#43;
+          </button>
+        </div>
+
+        {/* Bottom-Right: Circular PTZ Controller D-pad */}
+        <div
+          className="hud-ptz-dial"
+          title="PTZ Directional Control"
+          style={{
+            position: 'absolute',
+            bottom: '14px',
+            right: '14px',
+            zIndex: 15,
+            width: '94px',
+            height: '94px',
+            borderRadius: '4px',
+            background: 'rgba(15, 23, 42, 0.85)',
+            border: '1px solid rgba(255, 255, 255, 0.16)',
+            display: 'grid',
+            gridTemplateAreas:
+              '".    up    ." "left center right" ".    down  ."',
+            alignItems: 'center',
+            justifyItems: 'center',
+            padding: '4px',
+            boxSizing: 'border-box',
+          }}
+        >
+          <button
+            type="button"
+            className="ptz-btn ptz-up"
+            onClick={() => handlePtz('up')}
+            title="Tilt Up"
+            style={{ gridArea: 'up', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', borderRadius: '4px', padding: '2px' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="12 4 4 18 20 18"></polygon>
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="ptz-btn ptz-left"
+            onClick={() => handlePtz('left')}
+            title="Pan Left"
+            style={{ gridArea: 'left', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', borderRadius: '4px', padding: '2px' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="4 12 18 4 18 20"></polygon>
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="ptz-btn ptz-center"
+            onClick={() => handlePtz('center')}
+            title="Center Reset Position"
+            style={{ gridArea: 'center', width: '12px', height: '12px', borderRadius: '50%', background: 'rgba(255,255,255,0.4)', border: 'none', cursor: 'pointer' }}
+          />
+          <button
+            type="button"
+            className="ptz-btn ptz-right"
+            onClick={() => handlePtz('right')}
+            title="Pan Right"
+            style={{ gridArea: 'right', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', borderRadius: '4px', padding: '2px' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="20 12 6 4 6 20"></polygon>
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="ptz-btn ptz-down"
+            onClick={() => handlePtz('down')}
+            title="Tilt Down"
+            style={{ gridArea: 'down', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', borderRadius: '4px', padding: '2px' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="12 20 4 6 20 6"></polygon>
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -895,11 +1146,11 @@ export function CameraLivePlayer({
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
-          gap: '10px',
-          paddingTop: '6px',
+          gap: '8px',
+          paddingTop: '4px',
         }}
       >
-        {/* Left: AI Mode Toggle & Stop/Start */}
+        {/* Left: Feed Mode Switcher & Snapshot */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {sourceMode === 'browser' && webcamActive && (
             <button
@@ -907,7 +1158,7 @@ export function CameraLivePlayer({
               id="btn-stop-webcam"
               onClick={stopWebcam}
               className="btn btn-secondary btn-sm"
-              style={{ padding: '5px 12px', fontSize: '0.78rem', color: '#ef4444' }}
+              style={{ padding: '5px 12px', fontSize: '0.78rem', color: '#ef4444', borderRadius: '4px' }}
             >
               Stop Camera
             </button>
@@ -928,6 +1179,7 @@ export function CameraLivePlayer({
                 fontSize: '0.78rem',
                 color: !isOriginalMode ? '#10b981' : undefined,
                 fontWeight: 600,
+                borderRadius: '4px',
               }}
             >
               Mode: {!isOriginalMode ? 'YOLO AI Tracking' : 'Original Raw'}
@@ -941,7 +1193,7 @@ export function CameraLivePlayer({
             onClick={handleCaptureSnapshot}
             disabled={snapshotLoading}
             className="btn btn-secondary btn-sm"
-            style={{ padding: '5px 12px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+            style={{ padding: '5px 12px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '4px' }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M 23 19 a 2 2 0 0 1 -2 2 H 3 a 2 2 0 0 1 -2 -2 V 8 a 2 2 0 0 1 2 -2 h 4 l 2 -3 h 6 l 2 3 h 4 a 2 2 0 0 1 2 2 z" />
@@ -951,13 +1203,13 @@ export function CameraLivePlayer({
           </button>
         </div>
 
-        {/* Right: PTZ Zoom & Fullscreen */}
+        {/* Right: Quick actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <button
             type="button"
             onClick={handleZoomIn}
             className="btn btn-secondary btn-sm"
-            style={{ padding: '5px 10px', fontSize: '0.75rem' }}
+            style={{ padding: '5px 10px', fontSize: '0.75rem', borderRadius: '4px' }}
             title="Digital Zoom In"
           >
             + Zoom
@@ -966,26 +1218,16 @@ export function CameraLivePlayer({
             type="button"
             onClick={handleZoomOut}
             className="btn btn-secondary btn-sm"
-            style={{ padding: '5px 10px', fontSize: '0.75rem' }}
+            style={{ padding: '5px 10px', fontSize: '0.75rem', borderRadius: '4px' }}
             title="Digital Zoom Out"
           >
             - Zoom
           </button>
-          {zoom > 1 && (
-            <button
-              type="button"
-              onClick={handleResetPan}
-              className="btn btn-secondary btn-sm"
-              style={{ padding: '5px 10px', fontSize: '0.75rem' }}
-            >
-              Reset ({zoom.toFixed(1)}x)
-            </button>
-          )}
           <button
             type="button"
             onClick={handleToggleFullscreen}
             className="btn btn-secondary btn-sm"
-            style={{ padding: '5px 10px', fontSize: '0.75rem' }}
+            style={{ padding: '5px 10px', fontSize: '0.75rem', borderRadius: '4px' }}
             title="Toggle Fullscreen"
           >
             {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
