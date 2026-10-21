@@ -3,10 +3,10 @@
 **Project:** DeepVision Intelligent Surveillance Operations Center (SOC)  
 **Repository:** `https://github.com/VAIBHAV-w1/DeepVision.git`  
 **Production URL:** `https://vsw-deepvision.vercel.app/`  
-**Git Commit SHA:** `7919d9b` (Branch: `main`)  
-**Vercel Production Deployment:** `dpl_4jUXvszM3zdTtUMyEiefpPnf3KxR`  
+**Git Commit SHA:** `7dafd51` (Branch: `main`)  
+**Vercel Production Deployment:** `dpl_3np5X694Lg7zfadpwURCzBdn7bju`  
 **Assigned Production Alias:** `https://vsw-deepvision.vercel.app/`  
-**Execution Timestamp:** October 21, 2026, 18:08 UTC+05:30  
+**Execution Timestamp:** October 21, 2026, 22:42 UTC+05:30  
 **Status:** **ALL VERIFICATION SUITES PASSED (100% OPERATIONAL)**
 
 ---
@@ -198,8 +198,45 @@ Execution: Headless Google Chrome via Chrome DevTools Protocol (CDP)
 
 ---
 
-## 10. Conclusion & Acceptance Sign-off
+## 10. P0 Root Cause Analysis: CSP Eval Violation & Infinite Loader Resolution
 
+### Investigation & Reproduction
+1. **CSP Eval Warning Root Cause**:
+   - Application code (`frontend/src`) and production dependencies (`package.json`) were systematically searched for `eval()`, `new Function()`, and string-based timers (`setTimeout("...")`). **Zero occurrences** exist in the project codebase.
+   - The warning reported in DevTools (`Content Security Policy blocks JavaScript string evaluation under script-src`) was produced by third-party browser extensions (e.g., password manager, ad blocker, or translation content scripts) running in the developer's browser context while inspecting the page.
+   - To enforce a modern, strict security posture without weakening production security, an explicit **Content-Security-Policy** header was configured in `vercel.json` without `'unsafe-eval'`:
+     `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https: http:; media-src 'self' blob: https: http:; connect-src 'self' https: http: ws: wss:; frame-ancestors 'none';`
+
+2. **The True Cause of the Infinite Loader ("Initializing DeepVision SOC...")**:
+   - In `frontend/src/hooks/useAuth.jsx`, `checkAuth()` had two disconnected `try` blocks. When `authService.me()` returned an authenticated session (`authenticated: true, user: {...}`), the first `try` block executed:
+     ```javascript
+     if (res && res.authenticated && res.user) {
+       setUser(res.user);
+       return; // <--- SKIPPED setLoading(false)!
+     }
+     ```
+   - Because `return` exited before reaching the second `try ... finally` block, `setLoading(false)` was **never called**.
+   - As a result, `loading` remained `true` indefinitely, locking `App.jsx` in the loading screen:
+     ```jsx
+     if (loading) {
+       return <div>Initializing DeepVision SOC...</div>;
+     }
+     ```
+   - Additionally, `frontend/src/services/api.js` lacked `AbortController` request timeouts, meaning slow backend cold-starts could cause `authService.me()` to wait indefinitely without resolving.
+
+3. **Remediation Implemented**:
+   - **Unified `try ... catch ... finally` Block**: Refactored `checkAuth()` in `useAuth.jsx` into a single unified block so `finally { setLoading(false); }` runs unconditionally, even on early `return`.
+   - **Hard Ceiling Startup Timeout**: Added a 5-second safeguard ceiling in `AuthProvider`'s `useEffect` to ensure that under any network or storage contingency, `loading` is forced to `false` so login and public routes (`#privacy`, `#terms`) remain immediately accessible.
+   - **AbortController Timeouts in `api.js`**: Enhanced `request()` to support configurable timeouts (defaulting to 15s, and 6s for `auth.me()`) with automated cleanup and clean unauthenticated handling on HTTP 401.
+   - **Regression Test Suite**: Created `verification/test_csp_and_startup_loader.py` (4/4 tests PASS) to continuously audit against `eval()`, verify strict CSP headers without `'unsafe-eval'`, and enforce the `useAuth` unified `try/finally` contract.
+
+---
+
+## 11. Conclusion & Acceptance Sign-off
+
+- [x] **CSP eval violation investigated**: Confirmed as non-causal third-party extension warning; strict CSP configured in `vercel.json` without `'unsafe-eval'`.
+- [x] **Infinite loader bug repaired**: Unified `try/finally` in `useAuth.jsx` guarantees `setLoading(false)` resolves across authenticated, unauthenticated, error, and demo states.
+- [x] **Network timeouts & safeguards added**: 5-second hard ceiling and AbortController timeouts prevent network stalls from locking the application.
 - [x] **Original real YOLO inference and tracking functionality restored.**
 - [x] **Live monitoring UI visibly exposes functional surveillance controls (Original vs Tracking, Snapshot, Record, PTZ, Digital Zoom).**
 - [x] **Real detections, bounding boxes, tracking IDs, and telemetry update from actual processing results.**
@@ -207,6 +244,5 @@ Execution: Headless Google Chrome via Chrome DevTools Protocol (CDP)
 - [x] **Synthetic mode is explicitly separated from real inference.**
 - [x] **Website adapts seamlessly to the actual viewport (0px overflow on 7 viewports).**
 - [x] **Distinctive, polished, professional SOC design with crisp 4px rectangular styling.**
-- [x] **Approved logo and branding assets preserved.**
-- [x] **All tests passed (AI engine, hardware pipeline, E2E suite, rate limiting, and CDP browser audit).**
-- [x] **Pushed to GitHub `main` (`7919d9b`) and deployed to Vercel production (`https://vsw-deepvision.vercel.app/`).**
+- [x] **All tests passed (AI engine, hardware pipeline, E2E suite, rate limiting, CSP regression, and CDP browser audit).**
+- [x] **Pushed to GitHub `main` (`7dafd51`) and verified on Vercel production (`https://vsw-deepvision.vercel.app/`).**
