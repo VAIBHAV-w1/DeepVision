@@ -371,7 +371,7 @@
   font-size: 0.70rem;
   font-weight: 800;
   padding: 0.2rem 0.55rem;
-  border-radius: var(--radius-full, 9999px);
+  border-radius: 4px;
   letter-spacing: 0.04em;
   flex-shrink: 0;
 }
@@ -390,7 +390,7 @@
   font-size: 0.75rem;
   font-weight: 700;
   padding: 0.2rem 0.65rem;
-  border-radius: var(--radius-full, 9999px);
+  border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   white-space: nowrap;
   overflow: hidden;
@@ -405,7 +405,7 @@
   font-size: 0.72rem;
   font-weight: 600;
   padding: 0.2rem 0.65rem;
-  border-radius: var(--radius-full, 9999px);
+  border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   flex-shrink: 0;
   backdrop-filter: blur(4px);
