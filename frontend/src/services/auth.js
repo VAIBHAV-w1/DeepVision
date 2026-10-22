@@ -10,6 +10,7 @@ export const authService = {
   forgotPassword: (email) => api.auth.forgotPassword(email),
   verifyResetOtp: (email, otp) => api.auth.verifyResetOtp(email, otp),
   resetPassword: (emailOrData, otp, newPassword, confirmPassword) => api.auth.resetPassword(emailOrData, otp, newPassword, confirmPassword),
+  demoLogin: () => api.auth.demoLogin(),
   logout: () => api.auth.logout(),
 };
 

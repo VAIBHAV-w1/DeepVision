@@ -11,6 +11,7 @@ export function CameraPreview({ cameraId, onNavigate }) {
     mode,
     isRecording,
     stats,
+    error,
     toggleMode,
     startRecording,
     stopRecording,
@@ -19,6 +20,10 @@ export function CameraPreview({ cameraId, onNavigate }) {
   const [recordingLoading, setRecordingLoading] = useState(false);
   const monitorRef = useRef(null);
   const { addToast } = useToast();
+
+  const handleSwitchMode = (newMode) => {
+    toggleMode(newMode);
+  };
 
   // Fullscreen toggle
   const handleToggleFullscreen = () => {

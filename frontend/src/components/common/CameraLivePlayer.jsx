@@ -34,6 +34,7 @@ export function CameraLivePlayer({
 
   // Mode B: Edge Gateway State
   const [edgeGatewayError, setEdgeGatewayError] = useState(false);
+  const [hasDecodedFrames, setHasDecodedFrames] = useState(false);
   const [edgeReloadKey, setEdgeReloadKey] = useState(Date.now());
 
   // Interactive Controls
@@ -212,6 +213,29 @@ export function CameraLivePlayer({
       stopWebcam();
     };
   }, [stopWebcam]);
+
+  // Synchronize active webcam stream to video element whenever source mode or webcamActive changes
+  useEffect(() => {
+    if (sourceMode === 'browser' && streamRef.current && videoRef.current) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+      }
+      videoRef.current.play().catch(() => {});
+    }
+  }, [sourceMode, webcamActive]);
+
+  // Periodic active frame verification for edge stream (clears error overlay once frames decode)
+  useEffect(() => {
+    if (sourceMode !== 'edge') return;
+    const interval = setInterval(() => {
+      const img = streamImgRef.current;
+      if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setHasDecodedFrames(true);
+        setEdgeGatewayError(false);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [sourceMode, edgeReloadKey]);
 
   // Handle autoStartWebcam
   useEffect(() => {
@@ -637,14 +661,21 @@ export function CameraLivePlayer({
                 display: 'block',
               }}
               onError={(e) => {
-                e.currentTarget.onerror = null;
-                e.currentTarget.src = `${cameraService.getSnapshotUrl(cameraId)}?t=${Date.now()}`;
-                setEdgeGatewayError(true);
+                const img = e.currentTarget;
+                if (!img.dataset.retried) {
+                  img.dataset.retried = 'true';
+                  img.src = `${cameraService.getSnapshotUrl(cameraId)}?t=${Date.now()}`;
+                } else {
+                  setEdgeGatewayError(true);
+                }
               }}
-              onLoad={() => setEdgeGatewayError(false)}
+              onLoad={() => {
+                setHasDecodedFrames(true);
+                setEdgeGatewayError(false);
+              }}
             />
 
-            {edgeGatewayError && (
+            {edgeGatewayError && !hasDecodedFrames && (
               <div
                 style={{
                   position: 'absolute',
@@ -704,11 +735,20 @@ export function CameraLivePlayer({
         {sourceMode === 'browser' && (
           <div style={{ width: '100%', height: '100%', position: 'relative' }}>
             <video
-              ref={videoRef}
+              ref={(el) => {
+                videoRef.current = el;
+                if (el && streamRef.current && el.srcObject !== streamRef.current) {
+                  el.srcObject = streamRef.current;
+                  el.play().catch(() => {});
+                }
+              }}
               id="camera-webcam-stream"
               autoPlay
               playsInline
               muted
+              onLoadedMetadata={(e) => {
+                e.currentTarget.play().catch(() => {});
+              }}
               style={{
                 width: '100%',
                 height: '100%',
@@ -718,6 +758,46 @@ export function CameraLivePlayer({
                 display: webcamActive ? 'block' : 'none',
               }}
             />
+
+            {/* Live Reticle & Detection HUD for Browser Mode */}
+            {webcamActive && (
+              <div
+                className="webcam-hud-overlay"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  pointerEvents: 'none',
+                  overflow: 'hidden',
+                }}
+              >
+                {/* Center Targeting Reticle */}
+                <svg
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: '120px',
+                    height: '120px',
+                    opacity: 0.65,
+                  }}
+                  viewBox="0 0 100 100"
+                >
+                  <circle cx="50" cy="50" r="36" fill="none" stroke="#10b981" strokeWidth="1" strokeDasharray="4 4" />
+                  <line x1="50" y1="10" x2="50" y2="30" stroke="#10b981" strokeWidth="1.5" />
+                  <line x1="50" y1="70" x2="50" y2="90" stroke="#10b981" strokeWidth="1.5" />
+                  <line x1="10" y1="50" x2="30" y2="50" stroke="#10b981" strokeWidth="1.5" />
+                  <line x1="70" y1="50" x2="90" y2="50" stroke="#10b981" strokeWidth="1.5" />
+                  <circle cx="50" cy="50" r="3" fill="#10b981" />
+                </svg>
+
+                {/* Corner HUD Brackets */}
+                <div style={{ position: 'absolute', top: 16, left: 16, width: 20, height: 20, borderTop: '2px solid #10b981', borderLeft: '2px solid #10b981' }} />
+                <div style={{ position: 'absolute', top: 16, right: 16, width: 20, height: 20, borderTop: '2px solid #10b981', borderRight: '2px solid #10b981' }} />
+                <div style={{ position: 'absolute', bottom: 16, left: 16, width: 20, height: 20, borderBottom: '2px solid #10b981', borderLeft: '2px solid #10b981' }} />
+                <div style={{ position: 'absolute', bottom: 16, right: 16, width: 20, height: 20, borderBottom: '2px solid #10b981', borderRight: '2px solid #10b981' }} />
+              </div>
+            )}
 
             {!webcamActive && (
               <div

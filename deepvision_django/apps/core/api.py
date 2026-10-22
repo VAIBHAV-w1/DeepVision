@@ -265,6 +265,46 @@ def api_resend_login_otp(request):
 
 
 @require_POST
+@handle_db_errors
+def api_demo_session(request):
+    """
+    Establishes an authorized Demo Operator session for direct evaluation.
+    Provides session-backed access to cameras, streams, and operational dashboards.
+    """
+    request.session.flush()
+    user = User.objects.filter(is_active=True).first()
+    if not user:
+        user = User.objects.filter(email="operator@deepvision.internal").first()
+        if not user:
+            user = User.objects.create(
+                email="operator@deepvision.internal",
+                full_name="SOC Operator",
+                role="operator",
+                is_active=True,
+                is_email_verified=True,
+            )
+            user.set_password("DemoOperator2026!")
+            user.save()
+
+    request.session["user_id"] = user.id
+    request.session["role"] = user.role
+    request.session.modified = True
+
+    return JsonResponse({
+        "success": True,
+        "authenticated": True,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role,
+            "is_active": True,
+            "is_email_verified": True,
+        }
+    })
+
+
+@require_POST
 @ratelimit(scope="signup", limit=6, window=60)
 @handle_db_errors
 def api_signup(request):

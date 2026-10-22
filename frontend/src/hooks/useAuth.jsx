@@ -84,7 +84,7 @@ export function AuthProvider({ children }) {
     return res;
   };
 
-  const loginAsDemo = () => {
+  const loginAsDemo = async () => {
     const demoUser = {
       id: 9999,
       username: 'soc_operator_demo',
@@ -96,10 +96,15 @@ export function AuthProvider({ children }) {
     };
     try {
       localStorage.setItem('deepvision_demo_session', 'true');
-    } catch (e) {
-      // ignore
-    }
+    } catch (_) {}
     setUser(demoUser);
+    try {
+      const res = await authService.demoLogin();
+      if (res && res.user) {
+        setUser(res.user);
+        return res.user;
+      }
+    } catch (_) {}
     return demoUser;
   };
 

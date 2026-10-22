@@ -57,6 +57,7 @@ urlpatterns = [
     path('api/auth/forgot-password/', api_views.api_forgot_password, name='api_forgot_password'),
     path('api/auth/verify-reset-otp/', api_views.api_verify_reset_otp, name='api_verify_reset_otp'),
     path('api/auth/reset-password/', api_views.api_reset_password, name='api_reset_password'),
+    path('api/auth/demo-session/', api_views.api_demo_session, name='api_demo_session'),
     path('api/auth/logout/', api_views.api_logout, name='api_logout'),
 
     # Legacy HTML Auth compatibility routes (fallback)

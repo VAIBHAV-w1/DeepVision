@@ -188,7 +188,7 @@ def get_camera_snapshot(camera_id: int, user_id: int) -> Optional[bytes]:
     if bridge_url:
         try:
             req = urllib.request.Request(f"{bridge_url}/cameras/{camera_id}/snapshot/")
-            with urllib.request.urlopen(req, timeout=4.0) as resp:
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
                 if resp.status == 200:
                     return resp.read()
         except urllib.error.HTTPError as he:

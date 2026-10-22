@@ -134,6 +134,7 @@ export const api = {
       }
       return request('/api/auth/reset-password/', { method: 'POST', body: payload });
     },
+    demoLogin: () => request('/api/auth/demo-session/', { method: 'POST' }),
     logout: () => request('/api/auth/logout/', { method: 'POST' }),
   },
 

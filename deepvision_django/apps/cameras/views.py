@@ -302,6 +302,9 @@ def camera_snapshot_view(request, camera_id):
             "message": f"Snapshot #{evidence.id} captured and saved to Evidence Vault."
         })
 
+    if camera.status == "offline":
+        return HttpResponse(_get_offline_snapshot_bytes(), content_type="image/jpeg")
+
     jpeg_bytes = get_camera_snapshot(camera.id, camera.user_id)
     if jpeg_bytes:
         return HttpResponse(jpeg_bytes, content_type="image/jpeg")
