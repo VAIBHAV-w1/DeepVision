@@ -140,3 +140,4 @@ The following exact versions were verified in the production container and local
 > 3. **Supabase PostgreSQL Connectivity:** For production data on Render, configure `USE_POSTGRES=True` and `DATABASE_URL=postgresql://...`.
 > 4. **SMTP Service:** As required by verification standards, email delivery remains marked as **NOT VERIFIED** until an authorized recipient receives an actual production test email.
 > 5. **Live Physical Cameras:** RTSP and physical camera streaming on cloud hosting require reachable public or VPN endpoints; local webcams (`/dev/video0`) operate on local hosts.
+
