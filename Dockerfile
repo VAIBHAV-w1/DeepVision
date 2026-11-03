@@ -45,9 +45,11 @@ WORKDIR /app
 # Install PyTorch CPU-only build matching verified native baseline
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-# Install remaining Python requirements
+# Install remaining Python requirements and enforce single headless OpenCV
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip uninstall -y opencv-python && \
+    pip install --no-cache-dir opencv-python-headless>=4.8.0
 
 # Copy backend application source and launch utilities
 COPY manage.py sitecustomize.py start_deepvision.py .env.example ./

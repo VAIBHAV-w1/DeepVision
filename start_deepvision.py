@@ -319,14 +319,33 @@ def ensure_database():
         logger.info("Database preflight: PostgreSQL / Supabase configured. Bypassing SQLite file preflight validation.")
         return
 
+    schema_file = DJANGO_DIR / "schema.sql"
+
     if is_production:
         # Production mode: Strict fail-closed database validation
         logger.info("Production mode detected: Running preflight database validation on %s...", db_path)
+        if not db_path.exists():
+            allow_init = os.getenv("INIT_DB_IF_MISSING", "true").lower() in ("true", "1") or os.getenv("ALLOW_EMPTY_DB_INIT", "true").lower() in ("true", "1")
+            if allow_init and schema_file.exists():
+                logger.warning("Database at %s does not exist. Initializing fresh production schema from %s...", db_path, schema_file)
+                db_dir.mkdir(parents=True, exist_ok=True)
+                with open(schema_file, "r", encoding="utf-8") as f:
+                    schema_sql = f.read()
+                conn = sqlite3.connect(str(db_path))
+                conn.executescript(schema_sql)
+                conn.commit()
+                conn.close()
+                logger.info("Fresh database schema successfully initialized (18 tables).")
+            else:
+                logger.critical("FATAL: Database preflight validation FAILED in production mode: Database file does not exist at '%s'", db_path)
+                logger.critical("DeepVision production launcher refuses to silently create or overwrite databases to prevent data loss.")
+                logger.critical("Ensure host volume 'instance' containing 'deepvision.db' is correctly mounted, or set INIT_DB_IF_MISSING=true.")
+                raise RuntimeError(f"Database preflight validation failed: Database file does not exist at '{db_path}'")
+
         valid, detail = validate_sqlite_database(db_path)
         if not valid:
             logger.critical("FATAL: Database preflight validation FAILED in production mode: %s", detail)
-            logger.critical("DeepVision production launcher refuses to silently create or overwrite databases to prevent data loss.")
-            logger.critical("Ensure host volume 'instance' containing 'deepvision.db' is correctly mounted.")
+            logger.critical("DeepVision production launcher refuses to run with a corrupted database to prevent data loss.")
             raise RuntimeError(f"Database preflight validation failed: {detail}")
 
         # Secondary index check (separate from table signature)

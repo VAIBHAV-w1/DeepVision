@@ -11,7 +11,7 @@ jobs:
   validate-and-test:
     name: Lint, Build, and Regression Test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Code
@@ -23,12 +23,6 @@ jobs:
           node-version: 20
           cache: 'npm'
           cache-dependency-path: 'frontend/package-lock.json'
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
 
       - name: Install Frontend Dependencies
         run: |
@@ -44,14 +38,43 @@ jobs:
         run: |
           npm --prefix frontend run build
 
-      - name: Install Core Python Test Dependencies
+      - name: Build Frontend (Django Static Target)
+        run: |
+          npm --prefix frontend run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies (CPU-only PyTorch & Single OpenCV)
         run: |
           python -m pip install --upgrade pip
-          pip install requests torch torchvision ultralytics opencv-python-headless numpy django
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+          pip uninstall -y opencv-python || true
+          pip install --no-cache-dir opencv-python-headless>=4.8.0
 
       - name: Verify CSP & Infinite Loader Guard
         run: |
           python verification/test_csp_and_startup_loader.py
+
+      - name: Build Application Docker Image
+        run: |
+          docker build -t deepvision:ci .
+
+      - name: Start Docker Container & Await Health Check
+        run: |
+          docker run -d --name deepvision-service -p 8000:8000 \
+            -e DJANGO_SECRET_KEY=ci_test_secret_key_12345678901234567890 \
+            -e DJANGO_DEBUG=False \
+            -e DJANGO_ALLOWED_HOSTS=* \
+            -e INIT_DB_IF_MISSING=true \
+            deepvision:ci
+          echo "Waiting for container health check on http://127.0.0.1:8000/api/health/..."
+          timeout 60 bash -c 'until curl -sf http://127.0.0.1:8000/api/health/; do sleep 2; done'
+          echo "Container is online and healthy!"
 
       - name: Verify Full System E2E Suite
         run: |
@@ -60,3 +83,39 @@ jobs:
       - name: Verify YOLO11n & ByteTrack Engine
         run: |
           python verification/test_yolo_and_tracker.py
+
+      - name: Verify Secret Safety Scan
+        run: |
+          python -c "
+          import re, subprocess, sys
+          sensitive_patterns = [
+              re.compile(r'-----BEGIN (?:RSA |EC )?PRIVATE KEY-----'),
+              re.compile(r'postgres://[^:]+:[^@]+@'),
+              re.compile(r'postgresql://[^:]+:[^@]+@'),
+              re.compile(r'smtp_password\s*=\s*[\'\"][^\'\"]{8,}[\'\"]', re.IGNORECASE)
+          ]
+          files = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
+          leaks = []
+          for f in files:
+              if f.endswith(('.py', '.js', '.jsx', '.json', '.html', '.yml', '.yaml')):
+                  if 'test_e2e_full_system.py' in f:
+                      continue
+                  try:
+                      with open(f, 'r', encoding='utf-8', errors='ignore') as content:
+                          text = content.read()
+                      for p in sensitive_patterns:
+                          if p.search(text):
+                              leaks.append((f, p.pattern))
+                  except Exception:
+                      pass
+          if leaks:
+              print(f'CRITICAL: Found secrets in repository: {leaks}')
+              sys.exit(1)
+          print('Secret scan clean: 0 credentials leaked.')
+          "
+
+      - name: Stop and Cleanup Docker Container
+        if: always()
+        run: |
+          docker stop deepvision-service || true
+          docker rm deepvision-service || true

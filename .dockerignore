@@ -32,7 +32,9 @@ models/*
 
 # Local backups and scratch scripts
 backups/
+backup/
 scratch/
+
 
 # Python cache & virtual environments
 __pycache__/
