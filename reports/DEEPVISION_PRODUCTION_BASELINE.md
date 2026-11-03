@@ -150,3 +150,4 @@ The frontend adheres strictly to the **5 primary navigation destinations** requi
 - **Secret Zero Exposure:** No database passwords, Django SECRET_KEY, SMTP passwords, or Supabase service-role keys are exposed in frontend bundles or client-accessible variables.
 - **Repository Cleanliness:** `.env`, `instance/deepvision.db`, and local video clips are in `.gitignore`.
 - **CSRF & CORS:** Origin allowlists strictly restricted to production domains and authenticated sessions.
+
