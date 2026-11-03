@@ -137,6 +137,8 @@ def run_tests():
 
     # 6. Resend Signup OTP
     try:
+        user_db.email_otp_sent_at = timezone.now() - timedelta(seconds=75)
+        user_db.save(update_fields=["email_otp_sent_at"])
         r_resend = client.post(f"{BASE_URL}/api/auth/resend-otp/", json={"email": test_email}, headers=headers)
         user_db.refresh_from_db()
         if r_resend.status_code == 200 and r_resend.json().get("success") and user_db.email_otp_expires_at > timezone.now():
@@ -235,6 +237,8 @@ def run_tests():
     # 14. Resend Login OTP
     login_otp = ""
     try:
+        user_db.email_otp_sent_at = timezone.now() - timedelta(seconds=75)
+        user_db.save(update_fields=["email_otp_sent_at"])
         # Resend a fresh login OTP
         r_resend_login = client.post(f"{BASE_URL}/api/auth/resend-login-otp/", json={"email": test_email}, headers=headers)
         user_db.refresh_from_db()

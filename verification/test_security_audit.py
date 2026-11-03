@@ -12,8 +12,12 @@ import urllib.error
 import json
 import http.cookiejar
 import sys, os
-
-sys.path.insert(0, "D:/DeepVision/deepvision_django")
+from pathlib import Path
+if Path("/app/deepvision_django").exists():
+    sys.path.insert(0, "/app/deepvision_django")
+else:
+    ROOT_DIR = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(ROOT_DIR / "deepvision_django"))
 os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings"
 import django; django.setup()
 from django.contrib.sessions.backends.signed_cookies import SessionStore

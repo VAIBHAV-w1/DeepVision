@@ -5,9 +5,18 @@
 export function formatDate(isoString, options = {}) {
   if (!isoString) return '-';
   try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return isoString;
-    const formatted = d.toLocaleString('en-IN', {
+    let cleanStr = String(isoString).trim();
+    if (cleanStr.includes(' ') && !cleanStr.includes('T')) {
+      cleanStr = cleanStr.replace(' ', 'T');
+    }
+    if (!cleanStr.endsWith('Z') && !cleanStr.includes('+') && !cleanStr.slice(10).includes('-')) {
+      cleanStr = cleanStr + 'Z';
+    }
+    const d = new Date(cleanStr);
+    if (isNaN(d.getTime())) return String(isoString);
+    const selectedLanguage = typeof localStorage !== 'undefined' ? localStorage.getItem('deepvision_lang') || 'en' : 'en';
+    const locale = selectedLanguage === 'hi' ? 'hi-IN' : selectedLanguage === 'kn' ? 'kn-IN' : 'en-IN';
+    const formatted = d.toLocaleString(locale, {
       timeZone: 'Asia/Kolkata',
       year: 'numeric',
       month: 'short',
@@ -20,14 +29,21 @@ export function formatDate(isoString, options = {}) {
     });
     return `${formatted} IST`;
   } catch {
-    return isoString;
+    return String(isoString);
   }
 }
 
 export function formatRelativeTime(isoString) {
   if (!isoString) return '-';
   try {
-    const d = new Date(isoString);
+    let cleanStr = String(isoString).trim();
+    if (cleanStr.includes(' ') && !cleanStr.includes('T')) {
+      cleanStr = cleanStr.replace(' ', 'T');
+    }
+    if (!cleanStr.endsWith('Z') && !cleanStr.includes('+') && !cleanStr.slice(10).includes('-')) {
+      cleanStr = cleanStr + 'Z';
+    }
+    const d = new Date(cleanStr);
     const now = new Date();
     const diffSec = Math.floor((now - d) / 1000);
     if (diffSec < 10) return 'just now';
@@ -40,7 +56,7 @@ export function formatRelativeTime(isoString) {
     if (diffDays < 7) return `${diffDays}d ago`;
     return formatDate(isoString);
   } catch {
-    return isoString;
+    return String(isoString);
   }
 }
 

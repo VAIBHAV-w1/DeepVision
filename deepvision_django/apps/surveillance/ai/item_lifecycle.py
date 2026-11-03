@@ -9,8 +9,9 @@ class ItemLifecycleManager:
     Concealment: CONCEALED_ITEM_SUSPECTED (e.g. item placed in bag)
     Unattended: ABANDONED
     """
-    def __init__(self, association_distance_threshold=120.0):
+    def __init__(self, association_distance_threshold=120.0, enable_unvalidated_retail_alerts=False):
         self.association_distance_threshold = association_distance_threshold
+        self.enable_unvalidated_retail_alerts = bool(enable_unvalidated_retail_alerts)
         # Stores last active local bbox mapping for items
         self.item_last_boxes = {}
         # Stores disappeared items to check for concealment: item_id -> disappearance_time
@@ -313,10 +314,10 @@ class ItemLifecycleManager:
                                 
                                 # Evidence-Based Smart Severity Alert levels
                                 # High Severity conditions:
-                                # 1. Person Re-ID is CONFIRMED or PROBABLE (not UNCERTAIN)
+                                # 1. Person identity must be independently confirmed.
                                 # 2. Item confidence >= 0.50
-                                reid_status = p_state.get("reid_status", "CONFIRMED")
-                                is_high_confidence = (reid_status in ("CONFIRMED", "PROBABLE")) and (g_item["confidence"] >= 0.50)
+                                reid_status = p_state.get("reid_status", "UNCERTAIN")
+                                is_high_confidence = reid_status == "CONFIRMED" and g_item["confidence"] >= 0.50
                                 
                                 severity = "high" if is_high_confidence else "medium"
                                 alert_type = "suspicious_unpaid_item_removal" if is_high_confidence else "suspicious_exit_review_required"
@@ -343,7 +344,9 @@ class ItemLifecycleManager:
                                 )
 
     def _create_db_alert(self, event_type, title, message, camera_id, timestamp, item_id, person_id, confidence, severity="low"):
-        """Helper to create persistent alerts in DB for tracking and theft anomalies."""
+        """Helper to create persistent alerts in DB only when retail heuristic alerts are explicitly enabled."""
+        if not getattr(self, "enable_unvalidated_retail_alerts", False):
+            return
         try:
             from apps.alerts.models import Alert
             from apps.cameras.models import Camera

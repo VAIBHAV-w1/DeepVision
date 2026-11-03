@@ -1,6 +1,11 @@
 import math
 from .zones import RestrictedZone
 
+_SECURITY_INTRUDER_CLASSES = frozenset({
+    "person", "car", "truck", "bus", "motorcycle", "bicycle"
+})
+
+
 class AnomalyDetector:
     """
     Modular, rule-based anomaly detection engine that Consumes tracking and
@@ -9,12 +14,13 @@ class AnomalyDetector:
     """
     def __init__(self, config=None):
         self.config = config or {}
-        
+
         # State stores - stream-scoped and transient
         self.cooldowns = {}                 # maps (track_id, event_type) -> last_triggered_time (float)
         self.restricted_zone_states = {}    # maps track_id -> set of zone IDs they were inside in the previous frame
-        self.fast_movement_timers = {}      # maps track_id -> first_seen_time (float)
-        
+        self.fast_movement_timers = {}      # maps track_id -> {"start": float, "last_fast": float}
+        self.rapid_movement_timers = {}     # maps track_id -> {"start": float, "last_rapid": float}
+
         # Maps object_track_id -> dict state for abandoned objects:
         # {
         #   "associated_person_track_id": int,
@@ -36,7 +42,7 @@ class AnomalyDetector:
                 RestrictedZone("restricted_1", "Restricted Zone 1", 400, 50, 600, 250, enabled=True)
             ]
         else:
-            # Instantiate RestrictedZone objects if dicts are passed
+            # Instantiate RestrictedZone objects if dicts or models are passed
             instantiated_zones = []
             for z in zones:
                 if isinstance(z, dict):
@@ -45,8 +51,20 @@ class AnomalyDetector:
                             z["id"], z["name"], z["x1"], z["y1"], z["x2"], z["y2"], z.get("enabled", True)
                         )
                     )
-                else:
+                elif hasattr(z, 'is_point_inside'):
                     instantiated_zones.append(z)
+                else:
+                    instantiated_zones.append(
+                        RestrictedZone(
+                            getattr(z, 'id', 1),
+                            getattr(z, 'name', 'Restricted Zone'),
+                            getattr(z, 'x1', 0),
+                            getattr(z, 'y1', 0),
+                            getattr(z, 'x2', 100),
+                            getattr(z, 'y2', 100),
+                            getattr(z, 'enabled', True)
+                        )
+                    )
             zones = instantiated_zones
 
         events = []
@@ -63,8 +81,11 @@ class AnomalyDetector:
             center_x = obj["center_x"]
             center_y = obj["center_y"]
             behavior = obj["behavior"]
-            speed = obj["speed"]
-            stationary_duration = obj["stationary_duration"]
+            speed = float(obj.get("speed", 0.0) or 0.0)
+            window_speed = float(obj.get("window_speed", speed) or speed)
+            window_displacement = float(obj.get("window_displacement", 0.0) or 0.0)
+            direction_reversals = int(obj.get("direction_reversals", 0) or 0)
+            stationary_duration = float(obj.get("stationary_duration", 0.0) or 0.0)
 
             # ----------------------------------------------------
             # RULE A: LOITERING
@@ -83,80 +104,151 @@ class AnomalyDetector:
                     events.append(event)
 
             # ----------------------------------------------------
-            # RULE B: RESTRICTED AREA ENTRY
+            # RULE B: RESTRICTED AREA ENTRY (VALID SECURITY INTRUDERS ONLY)
             # ----------------------------------------------------
             current_inside_zones = set()
-            active_zones = zones if self.config.get("RESTRICTED_ENTRY_ENABLED", True) else []
+            active_zones = zones if (self.config.get("RESTRICTED_ENTRY_ENABLED", True) and cls_name in _SECURITY_INTRUDER_CLASSES) else []
             for zone in active_zones:
+                zone_id = getattr(zone, 'id', None)
+                zone_name = getattr(zone, 'name', 'Restricted Area')
+                zone_camera_id = getattr(zone, 'camera_id', None)
+                zone_user_id = getattr(zone, 'user_id', None)
                 if zone.is_point_inside(center_x, center_y):
-                    current_inside_zones.add(zone.id)
-                    
+                    current_inside_zones.add(zone_id)
+
                     # Transition: OUTSIDE -> INSIDE
                     prev_inside_zones = self.restricted_zone_states.get(track_id, set())
-                    if zone.id not in prev_inside_zones:
+                    if zone_id not in prev_inside_zones:
                         event = self._create_event(
                             event_type="restricted_area_entry",
                             severity="high",
                             track_id=track_id,
                             class_name=cls_name,
                             confidence=conf,
-                            message=f"Restricted area entry detected.",
+                            message=f"Restricted area entry detected in {zone_name}.",
                             timestamp=timestamp,
-                            bypass_cooldown=True
+                            bypass_cooldown=False
                         )
                         if event:
+                            if zone_camera_id is not None:
+                                event["camera_id"] = zone_camera_id
+                            if zone_user_id is not None:
+                                event["user_id"] = zone_user_id
+                            event["zone_id"] = zone_id
+                            event["zone_name"] = zone_name
                             events.append(event)
-                            
+
             # Save zone status for the next frame
             self.restricted_zone_states[track_id] = current_inside_zones
 
             # ----------------------------------------------------
-            # RULE C: UNUSUAL MOVEMENT (FAST RUNNING PERSISTED)
+            # RULE C: UNUSUAL MOVEMENT (ERRATIC REVERSALS OR SUSTAINED FAST MOTION)
             # ----------------------------------------------------
-            if self.config.get("UNUSUAL_MOVEMENT_ENABLED", True) and behavior == "moving_fast":
-                if track_id not in self.fast_movement_timers:
-                    self.fast_movement_timers[track_id] = timestamp
+            if self.config.get("UNUSUAL_MOVEMENT_ENABLED", True) and cls_name in _SECURITY_INTRUDER_CLASSES:
+                speed_fast_thresh = float(self.config.get("SPEED_FAST_THRESHOLD", 150.0))
+                reversal_thresh = int(self.config.get("UNUSUAL_REVERSAL_THRESHOLD", 2))
+                is_erratic = (direction_reversals >= reversal_thresh and max(speed, window_speed) >= 60.0)
+                is_sustained_fast = (
+                    (behavior == "moving_fast" or window_speed >= speed_fast_thresh)
+                    and (window_displacement >= 55.0 or speed >= speed_fast_thresh)
+                )
+
+                if is_erratic:
+                    event = self._create_event(
+                        event_type="unusual_movement",
+                        severity="medium",
+                        track_id=track_id,
+                        class_name=cls_name,
+                        confidence=conf,
+                        message=f"Erratic movement pattern detected ({direction_reversals} rapid direction reversals).",
+                        timestamp=timestamp
+                    )
+                    if event:
+                        events.append(event)
+                elif is_sustained_fast:
+                    tmr = self.fast_movement_timers.get(track_id)
+                    if tmr is None:
+                        self.fast_movement_timers[track_id] = {"start": timestamp, "last_fast": timestamp}
+                    else:
+                        tmr["last_fast"] = timestamp
+                        duration = timestamp - tmr["start"]
+                        fast_thresh = float(self.config.get("UNUSUAL_MOVEMENT_PERSISTENCE_SECONDS", 1.5))
+                        if duration >= fast_thresh:
+                            event = self._create_event(
+                                event_type="unusual_movement",
+                                severity="medium",
+                                track_id=track_id,
+                                class_name=cls_name,
+                                confidence=conf,
+                                message=f"Unusual sustained fast movement pattern detected ({max(speed, window_speed):.0f} px/s).",
+                                timestamp=timestamp
+                            )
+                            if event:
+                                events.append(event)
                 else:
-                    duration = timestamp - self.fast_movement_timers[track_id]
-                    fast_thresh = self.config.get("UNUSUAL_MOVEMENT_PERSISTENCE_SECONDS", 2)
-                    if duration >= fast_thresh:
-                        event = self._create_event(
-                            event_type="unusual_movement",
-                            severity="medium",
-                            track_id=track_id,
-                            class_name=cls_name,
-                            confidence=conf,
-                            message="Unusual movement pattern detected.",
-                            timestamp=timestamp
-                        )
-                        if event:
-                            events.append(event)
+                    tmr = self.fast_movement_timers.get(track_id)
+                    if tmr is not None and (timestamp - tmr["last_fast"] > 0.45):
+                        self.fast_movement_timers.pop(track_id, None)
             else:
                 self.fast_movement_timers.pop(track_id, None)
 
             # ----------------------------------------------------
+            # RULE C2: RAPID MOVEMENT (HIGH-VELOCITY DASH / SPRINT)
+            # ----------------------------------------------------
+            if self.config.get("RAPID_MOVEMENT_ENABLED", True) and cls_name in _SECURITY_INTRUDER_CLASSES:
+                rapid_speed_thresh = float(self.config.get("RAPID_MOVEMENT_SPEED_THRESHOLD", 240.0))
+                rapid_disp_thresh = float(self.config.get("RAPID_MOVEMENT_MIN_DISPLACEMENT", 110.0))
+                rapid_persist_sec = float(self.config.get("RAPID_MOVEMENT_PERSISTENCE_SECONDS", 0.45))
+                peak_vel = max(speed, window_speed)
+                is_rapid = (peak_vel >= rapid_speed_thresh and window_displacement >= rapid_disp_thresh)
+
+                if is_rapid:
+                    rtmr = self.rapid_movement_timers.get(track_id)
+                    if rtmr is None:
+                        self.rapid_movement_timers[track_id] = {"start": timestamp, "last_rapid": timestamp}
+                    else:
+                        rtmr["last_rapid"] = timestamp
+                        if (timestamp - rtmr["start"]) >= rapid_persist_sec:
+                            event = self._create_event(
+                                event_type="rapid_movement",
+                                severity="high",
+                                track_id=track_id,
+                                class_name=cls_name,
+                                confidence=conf,
+                                message=f"Rapid high-velocity movement detected ({peak_vel:.0f} px/s across {window_displacement:.0f} px).",
+                                timestamp=timestamp
+                            )
+                            if event:
+                                events.append(event)
+                else:
+                    rtmr = self.rapid_movement_timers.get(track_id)
+                    if rtmr is not None and (timestamp - rtmr["last_rapid"] > 0.35):
+                        self.rapid_movement_timers.pop(track_id, None)
+            else:
+                self.rapid_movement_timers.pop(track_id, None)
+
+            # ----------------------------------------------------
             # RULE D: ABANDONED OBJECT DETECTION
             # ----------------------------------------------------
-            supported_movable_objects = {"backpack", "handbag", "suitcase"}
+            supported_movable_objects = {"backpack", "handbag", "suitcase", "laptop"}
             if self.config.get("ABANDONED_OBJECT_ENABLED", True) and cls_name in supported_movable_objects:
-                # The object itself must be approximately stationary
-                is_stationary = (behavior == "stationary" or stationary_duration > 0.0)
-                
+                # Eligible when stationary OR newly placed / low drift speed (fixes frame-1 association where stationary_duration == 0.0)
+                is_stationary = (behavior == "stationary" or stationary_duration > 0.0 or speed <= 30.0)
+
                 if is_stationary:
                     if track_id not in self.abandoned_objects:
                         # Find nearest person for initial association
                         nearest_person_id = None
                         min_dist = float("inf")
-                        assoc_dist_thresh = self.config.get("PERSON_OBJECT_ASSOCIATION_DISTANCE", 120)
+                        assoc_dist_thresh = float(self.config.get("PERSON_OBJECT_ASSOCIATION_DISTANCE", 140.0))
 
                         for p_id, p_obj in persons.items():
                             d = math.sqrt((center_x - p_obj["center_x"]) ** 2 + (center_y - p_obj["center_y"]) ** 2)
                             if d <= assoc_dist_thresh and d < min_dist:
                                 min_dist = d
-                                  # Corrected indent level to align inside if block
                                 nearest_person_id = p_id
 
-                        # Only initialize state if we previously found/associated a person track ID
+                        # Only initialize state if we associated an owner/carrier person track ID
                         if nearest_person_id is not None:
                             self.abandoned_objects[track_id] = {
                                 "associated_person_track_id": nearest_person_id,
@@ -168,39 +260,36 @@ class AnomalyDetector:
                     else:
                         obj_state = self.abandoned_objects[track_id]
                         obj_state["last_seen_time"] = timestamp
-                        
-                        # Verify if object has drifted significantly from its original placement position
+
+                        # Verify if object has drifted significantly from its placed position
                         last_pos = obj_state["last_object_position"]
                         drift = math.sqrt((center_x - last_pos[0]) ** 2 + (center_y - last_pos[1]) ** 2)
-                        drift_thresh = self.config.get("STATIONARY_DISTANCE_THRESHOLD", 15.0)
+                        drift_thresh = float(self.config.get("STATIONARY_DISTANCE_THRESHOLD", 20.0))
 
                         if drift > drift_thresh:
-                            # Object has moved, reset stationary start time and update last position
+                            # Object moved — reset stationary timer and placement position
                             obj_state["stationary_start_time"] = timestamp
                             obj_state["last_object_position"] = (center_x, center_y)
                             obj_state["last_nearby_person_time"] = timestamp
                         else:
-                            # Evaluate associated person location
+                            # Check whether the associated owner (or any attending person within threshold) is still nearby
                             assoc_p_id = obj_state["associated_person_track_id"]
+                            p_dist_thresh = float(self.config.get("ABANDONED_OBJECT_DISTANCE_THRESHOLD", 120.0))
                             person_nearby = False
 
                             if assoc_p_id in persons:
                                 p_obj = persons[assoc_p_id]
                                 p_dist = math.sqrt((center_x - p_obj["center_x"]) ** 2 + (center_y - p_obj["center_y"]) ** 2)
-                                p_dist_thresh = self.config.get("ABANDONED_OBJECT_DISTANCE_THRESHOLD", 100)
                                 if p_dist <= p_dist_thresh:
                                     person_nearby = True
 
                             if person_nearby:
-                                # Associated person is still nearby, update last_nearby_person_time
                                 obj_state["last_nearby_person_time"] = timestamp
                             else:
-                                # Associated person is far or missing from scene
                                 unattended_duration = timestamp - obj_state["last_nearby_person_time"]
                                 stationary_duration_total = timestamp - obj_state["stationary_start_time"]
-                                time_thresh = self.config.get("ABANDONED_OBJECT_TIME_THRESHOLD", 10)
+                                time_thresh = float(self.config.get("ABANDONED_OBJECT_TIME_THRESHOLD", 10.0))
 
-                                # Condition must persist for time threshold and object must be stationary for time threshold
                                 if unattended_duration >= time_thresh and stationary_duration_total >= time_thresh:
                                     event = self._create_event(
                                         event_type="abandoned_object",
@@ -208,13 +297,12 @@ class AnomalyDetector:
                                         track_id=track_id,
                                         class_name=cls_name,
                                         confidence=conf,
-                                        message="Potentially unattended object detected.",
+                                        message=f"Potentially unattended {cls_name} left stationary for {unattended_duration:.1f}s.",
                                         timestamp=timestamp
                                     )
                                     if event:
                                         events.append(event)
                 else:
-                    # Object is no longer stationary, delete its abandoned object state association
                     self.abandoned_objects.pop(track_id, None)
 
             # ----------------------------------------------------
@@ -263,7 +351,7 @@ class AnomalyDetector:
         """
         cooldown_key = (track_id, event_type)
         cooldown_period = self.config.get("ANOMALY_EVENT_COOLDOWN_SECONDS", 30)
-        
+
         last_triggered = self.cooldowns.get(cooldown_key)
         if not bypass_cooldown and last_triggered is not None and (timestamp - last_triggered < cooldown_period):
             return None
@@ -290,10 +378,13 @@ class AnomalyDetector:
             if tid not in active_track_ids:
                 self.restricted_zone_states.pop(tid, None)
 
-        # Clean stale fast movement timers
+        # Clean stale fast and rapid movement timers
         for tid in list(self.fast_movement_timers.keys()):
             if tid not in active_track_ids:
                 self.fast_movement_timers.pop(tid, None)
+        for tid in list(self.rapid_movement_timers.keys()):
+            if tid not in active_track_ids:
+                self.rapid_movement_timers.pop(tid, None)
 
         # Clean stale abandoned objects state
         for tid in list(self.abandoned_objects.keys()):

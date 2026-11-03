@@ -6,15 +6,19 @@ except (ImportError, Exception):
     np = None
 import time
 import math
+import uuid
 from threading import Lock
 
 class GlobalIdentityRegistry:
     """
-    Thread-safe registry for mapping camera-local tracking IDs to persistent
-    global identities (PERSON-xxx and ITEM-xxx) across multiple cameras.
+    Thread-safe, process-local registry for mapping camera-local tracking IDs
+    to cross-camera identity candidates. IDs include a run namespace so they
+    do not collide after a process restart. Identity continuity is heuristic
+    and is not persisted across restarts.
     """
     def __init__(self):
         self.lock = Lock()
+        self.run_namespace = uuid.uuid4().hex
         
         # Local mapping state: (camera_id, local_track_id) -> global_id (str)
         self.local_to_global = {}
@@ -87,7 +91,7 @@ class GlobalIdentityRegistry:
 
     def get_global_person_id(self, camera_id, local_track_id, crop=None, timestamp=None):
         """
-        Retrieves or generates a persistent global PERSON ID, performing Re-ID.
+        Reuses or generates a process-scoped PERSON candidate ID.
         """
         if timestamp is None:
             timestamp = time.time()
@@ -104,7 +108,7 @@ class GlobalIdentityRegistry:
                     self.global_persons[g_id]["last_local_track_id"] = local_track_id
                     if crop is not None:
                         self.global_persons[g_id]["histogram"] = self.calculate_hsv_histogram(crop)
-                return g_id, self.global_persons.get(g_id, {}).get("reid_status", "CONFIRMED")
+                return g_id, self.global_persons.get(g_id, {}).get("reid_status", "UNCERTAIN")
 
             # Calculate histogram of new crop
             new_hist = self.calculate_hsv_histogram(crop) if crop is not None else None
@@ -126,20 +130,17 @@ class GlobalIdentityRegistry:
                         best_score = similarity
                         best_match = candidate
 
-            # Re-ID Match thresholds
-            # CONFIRMED: >= 0.82
-            # PROBABLE: >= 0.70
-            # UNCERTAIN: >= 0.55
-            reid_status = "CONFIRMED"
-            reid_confidence = 1.0
+            # Re-ID match thresholds for color similarity are heuristic only.
+            # No histogram score is sufficient to confirm a person's identity.
+            # HSV histogram similarity is a heuristic, not identity proof.
+            reid_status = "UNCERTAIN"
+            reid_confidence = 0.0
             matched_g_id = None
 
             if best_match is not None and best_score >= 0.55:
                 matched_g_id = best_match["global_id"]
                 reid_confidence = best_score
-                if best_score >= 0.82:
-                    reid_status = "CONFIRMED"
-                elif best_score >= 0.70:
+                if best_score >= 0.70:
                     reid_status = "PROBABLE"
                 else:
                     reid_status = "UNCERTAIN"
@@ -176,7 +177,7 @@ class GlobalIdentityRegistry:
 
             # 3. Create a new global PERSON ID
             self.person_counter += 1
-            new_g_id = f"PERSON-{self.person_counter:03d}"
+            new_g_id = f"PERSON-{self.person_counter:03d}-{self.run_namespace}"
             
             self.local_to_global[key] = new_g_id
             self.global_persons[new_g_id] = {
@@ -185,11 +186,11 @@ class GlobalIdentityRegistry:
                 "last_camera_id": camera_id,
                 "last_local_track_id": local_track_id,
                 "histogram": new_hist,
-                "reid_status": "CONFIRMED", # Fresh track is confirmed by default
-                "reid_confidence": 1.0,
+                "reid_status": "UNCERTAIN",
+                "reid_confidence": 0.0,
                 "carried_items": set()
             }
-            return new_g_id, "CONFIRMED"
+            return new_g_id, "UNCERTAIN"
 
     def resolve_person(self, camera_id, local_track_id, crop=None, timestamp=None):
         """Authoritative resolver mapping to get_global_person_id with structured Re-ID certainty."""
@@ -231,7 +232,7 @@ class GlobalIdentityRegistry:
             
             # 3. Create a new global ITEM ID
             self.item_counter += 1
-            new_g_id = f"ITEM-{self.item_counter:03d}"
+            new_g_id = f"ITEM-{self.item_counter:03d}-{self.run_namespace}"
             
             self.local_to_global[key] = new_g_id
             self.global_items[new_g_id] = {
@@ -284,6 +285,17 @@ class GlobalIdentityRegistry:
                     })
                     
                     # Clean up carried items local mapping references if person leaves
+
+    def reconcile_camera_tracks(self, camera_id, active_track_ids, last_seen_by_track, timestamp=None, grace_seconds=2.0):
+        """Expire camera-local identity mappings after a sustained track disappearance."""
+        now = time.time() if timestamp is None else timestamp
+        active_ids = {int(track_id) for track_id in active_track_ids}
+        for track_id in active_ids:
+            last_seen_by_track[track_id] = now
+        for track_id, last_seen in list(last_seen_by_track.items()):
+            if track_id not in active_ids and now - last_seen >= grace_seconds:
+                self.handle_lost_track(camera_id, track_id, now)
+                last_seen_by_track.pop(track_id, None)
 
     # Alias for API compatibility
     mark_person_lost = handle_lost_track

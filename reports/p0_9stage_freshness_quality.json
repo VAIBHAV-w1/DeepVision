@@ -1,0 +1,131 @@
+{
+  "suite": "P0_9STAGE_VIDEO_FRESHNESS_AND_QUALITY",
+  "timestamp": "2026-11-01T08:31:13Z",
+  "camera_tested": {
+    "id": 4,
+    "name": "Webcam 0",
+    "physical_source": "dshow://0"
+  },
+  "stages": {
+    "1_camera_acquisition": {
+      "count": 120,
+      "p50_ms": 32.322,
+      "p95_ms": 70.829,
+      "p99_ms": 107.849,
+      "max_ms": 139.457,
+      "mean_ms": 36.441,
+      "fps": 29.8
+    },
+    "2_frame_handoff": {
+      "count": 120,
+      "p50_ms": 3.304,
+      "p95_ms": 7.555,
+      "p99_ms": 18.005,
+      "max_ms": 28.139,
+      "mean_ms": 4.197,
+      "fps": 29.8
+    },
+    "3_preprocessing": {
+      "count": 0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0,
+      "max_ms": 0.0,
+      "mean_ms": 0.0,
+      "fps": 0.2
+    },
+    "4_inference": {
+      "count": 0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0,
+      "max_ms": 0.0,
+      "mean_ms": 0.0,
+      "fps": 0.2
+    },
+    "5_tracking": {
+      "count": 0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0,
+      "max_ms": 0.0,
+      "mean_ms": 0.0,
+      "fps": 0.2
+    },
+    "6_encoding": {
+      "count": 120,
+      "p50_ms": 6.22,
+      "p95_ms": 8.86,
+      "p99_ms": 11.66,
+      "max_ms": 19.412,
+      "mean_ms": 6.579,
+      "fps": 24.38
+    },
+    "7_http_transport": {
+      "count": 120,
+      "p50_ms": 36.82,
+      "p95_ms": 80.353,
+      "p99_ms": 121.832,
+      "max_ms": 149.286,
+      "mean_ms": 41.644,
+      "fps": 24.38
+    },
+    "8_browser_arrival": {
+      "count": 101,
+      "p50_ms": 34.8,
+      "p95_ms": 114.2,
+      "p99_ms": 145.5,
+      "max_ms": 185.7,
+      "mean_ms": 41.877,
+      "fps": 23.65,
+      "inter_frame_interval_p50_ms": 35.05
+    },
+    "9_actual_display": {
+      "count": 85,
+      "p50_ms": 33.4,
+      "p95_ms": 116.6,
+      "p99_ms": 202.604,
+      "max_ms": 216.8,
+      "mean_ms": 49.411,
+      "fps": 20.24,
+      "distinct_frames_painted": 86
+    }
+  },
+  "visual_quality": {
+    "frames_inspected": 120,
+    "resolutions_observed": [
+      "1280x720"
+    ],
+    "correct_resolution_1280x720": true,
+    "native_aspect_ratio": 1.7778,
+    "correct_native_aspect_ratio_16_9": true,
+    "mean_jpeg_frame_size_kb": 100.35,
+    "sharpness_laplacian_variance_mean": 41.77,
+    "sharpness_sobel_gradient_mean": 17.35,
+    "jpeg_8x8_blockiness_ratio_mean": 1.3192,
+    "low_compression_artifacts": true,
+    "frozen_frame_pairs": 0,
+    "stale_frames_over_1000ms_or_out_of_order": 0,
+    "active_overlay_tracks_sampled": 0,
+    "invalid_overlay_boxes": 0,
+    "end_to_end_capture_to_http_client": {
+      "count": 120,
+      "p50_ms": 46.852,
+      "p95_ms": 91.647,
+      "p99_ms": 134.863,
+      "max_ms": 159.954,
+      "mean_ms": 52.566,
+      "fps": 24.38
+    },
+    "browser_dom_verification": {
+      "natural_width": 1280,
+      "natural_height": 720,
+      "rendered_width": 1017,
+      "rendered_height": 571.19,
+      "rendered_aspect_ratio": 1.7805,
+      "rendered_16_9_accurate": true,
+      "overlay_canvas_present": true,
+      "overlay_alignment_delta_px": 0
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "timestamp": 1793451246.0541246,
+  "camera_capture": {
+    "device_index": 0,
+    "resolution": "1280x720",
+    "sample_count": 50,
+    "mean_grab_ms": 0.01,
+    "mean_retrieve_ms": 60.58,
+    "mean_full_read_ms": 60.59,
+    "p95_full_read_ms": 78.08,
+    "mean_interval_ms": 62.66,
+    "measured_capture_fps": 16.0
+  },
+  "ai_benchmarks": {
+    "yolo_resolutions": {
+      "640": {
+        "imgsz": 640,
+        "mean_inference_ms": 72.15,
+        "p95_inference_ms": 96.57,
+        "inference_fps": 13.9,
+        "ultralytics_preprocess_ms": 1.52,
+        "ultralytics_inference_ms": 64.18,
+        "ultralytics_postprocess_ms": 0.95
+      },
+      "512": {
+        "imgsz": 512,
+        "mean_inference_ms": 56.23,
+        "p95_inference_ms": 177.25,
+        "inference_fps": 17.8,
+        "ultralytics_preprocess_ms": 1.87,
+        "ultralytics_inference_ms": 68.53,
+        "ultralytics_postprocess_ms": 1.09
+      },
+      "480": {
+        "imgsz": 480,
+        "mean_inference_ms": 53.68,
+        "p95_inference_ms": 79.51,
+        "inference_fps": 18.6,
+        "ultralytics_preprocess_ms": 1.29,
+        "ultralytics_inference_ms": 38.32,
+        "ultralytics_postprocess_ms": 0.94
+      },
+      "384": {
+        "imgsz": 384,
+        "mean_inference_ms": 34.87,
+        "p95_inference_ms": 42.15,
+        "inference_fps": 28.7,
+        "ultralytics_preprocess_ms": 1.0,
+        "ultralytics_inference_ms": 30.94,
+        "ultralytics_postprocess_ms": 0.83
+      }
+    },
+    "bytetrack": {
+      "mean_total_tracking_ms": 73.76,
+      "p95_total_tracking_ms": 108.19,
+      "tracking_fps": 13.6
+    },
+    "anomaly": {
+      "mean_anomaly_pipeline_ms": 0.037,
+      "p95_anomaly_pipeline_ms": 0.058
+    },
+    "jpeg": {
+      "65": {
+        "quality": 65,
+        "mean_encode_ms": 4.63,
+        "p95_encode_ms": 14.79,
+        "mean_bytes": 52223
+      },
+      "70": {
+        "quality": 70,
+        "mean_encode_ms": 3.56,
+        "p95_encode_ms": 4.05,
+        "mean_bytes": 58781
+      },
+      "75": {
+        "quality": 75,
+        "mean_encode_ms": 4.16,
+        "p95_encode_ms": 4.31,
+        "mean_bytes": 63509
+      },
+      "80": {
+        "quality": 80,
+        "mean_encode_ms": 3.64,
+        "p95_encode_ms": 4.18,
+        "mean_bytes": 73692
+      },
+      "85": {
+        "quality": 85,
+        "mean_encode_ms": 3.38,
+        "p95_encode_ms": 4.14,
+        "mean_bytes": 100325
+      }
+    }
+  }
+}

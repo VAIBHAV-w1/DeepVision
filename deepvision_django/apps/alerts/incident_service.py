@@ -81,6 +81,14 @@ def get_incident_context(alert_id: int, user_id: Optional[int] = None) -> Dict[s
             audio_status = "unavailable"
             audio_reason = "Image keyframe (no audio)"
 
+        # Verify timestamp alignment with alert detection
+        ev_time_diff = 0.0
+        ev_mismatched = False
+        if alert.detected_at and ev.captured_at:
+            ev_time_diff = abs((alert.detected_at - ev.captured_at).total_seconds())
+            if ev_time_diff > 300.0:
+                ev_mismatched = True
+
         ev_data = {
             "id": ev.id,
             "alert_id": alert.id,
@@ -98,6 +106,8 @@ def get_incident_context(alert_id: int, user_id: Optional[int] = None) -> Dict[s
             "has_audio": has_audio,
             "audio_status": audio_status,
             "audio_reason": audio_reason,
+            "timestamp_mismatch": ev_mismatched,
+            "time_diff_seconds": ev_time_diff,
         }
         evidence_items.append(ev_data)
 
@@ -107,27 +117,70 @@ def get_incident_context(alert_id: int, user_id: Optional[int] = None) -> Dict[s
             snapshot_ev = ev_data
 
     # 2. Strictly Scoped Recording (Must belong to this alert & camera)
-    # Never return an unrelated recording or generic latest recording!
+    # Never return an unrelated recording, stale recording, or generic latest recording!
     rec = None
-    if video_file_paths or video_filenames:
-        rec = Recording.objects.filter(camera_id=alert.camera_id).filter(
-            Q(file_path__icontains=f"alert_{alert.id}_") |
-            Q(file_path__in=video_file_paths) |
-            Q(filename__in=video_filenames)
-        ).first()
+    clean_video_paths = [p for p in video_file_paths if p and str(p).strip()]
+    clean_video_names = [n for n in video_filenames if n and str(n).strip()]
 
-    # If no anomaly-clip recording row, check for exact continuous segment on THIS camera covering detected_at
+    # First attempt: Match explicit anomaly clip by exact alert ID token (e.g. alert_6119_clip)
+    # or by exact filepath/filename from scoped evidence items.
+    # Note: We match f"alert_{alert.id}_clip." to avoid partial numeric prefixes (e.g. alert_61_ matching alert_6118_).
+    rec_query = Q()
+    if clean_video_paths:
+        rec_query |= Q(file_path__in=clean_video_paths)
+    if clean_video_names:
+        rec_query |= Q(filename__in=clean_video_names)
+    rec_query |= (
+        Q(filename__icontains=f"alert_{alert.id}_clip.") |
+        Q(file_path__icontains=f"alert_{alert.id}_clip.")
+    )
+
+    candidate_anomalies = Recording.objects.filter(camera_id=alert.camera_id).filter(rec_query)
+    for cand in candidate_anomalies:
+        # Time-sanity check: recording must be within 300 seconds of alert detection
+        if alert.detected_at and cand.started_at:
+            if abs((alert.detected_at - cand.started_at).total_seconds()) <= 300.0:
+                rec = cand
+                break
+        else:
+            rec = cand
+            break
+
+    # Second attempt: Check for exact continuous segment on THIS camera tightly wrapping detected_at
+    # CRITICAL DATA-INTEGRITY RULE: Only attach continuous segments that tightly wrap the alert
+    # (within 60 seconds of detected_at, with maximum duration <= 300s).
+    # NEVER fall back to broad, unclosed, multi-day, or historical recordings.
     if not rec and alert.detected_at:
-        rec = Recording.objects.filter(
+        candidate_recs = Recording.objects.filter(
             camera_id=alert.camera_id,
             started_at__lte=alert.detected_at,
             ended_at__gte=alert.detected_at,
-        ).first()
+            duration_seconds__lte=300.0,
+        ).order_by('-started_at')
+        
+        for cand in candidate_recs:
+            if cand.started_at and abs((alert.detected_at - cand.started_at).total_seconds()) <= 60.0:
+                rec = cand
+                break
 
     recording_data = None
     if rec:
+        # Double check: if recording timestamp is > 300 seconds away from alert, reject it
+        if alert.detected_at and rec.started_at and abs((alert.detected_at - rec.started_at).total_seconds()) > 300.0:
+            rec = None
         rec_resolved = safe_resolve_recording(rec.file_path)
         rec_audio = inspect_media_audio(str(rec_resolved)) if rec_resolved else {"has_audio": False, "status": "unavailable"}
+        
+        # Verify timestamp alignment between alert detection and recording start
+        time_diff_sec = 0.0
+        is_mismatched = False
+        mismatch_warning = None
+        if alert.detected_at and rec.started_at:
+            time_diff_sec = abs((alert.detected_at - rec.started_at).total_seconds())
+            if time_diff_sec > 120.0:
+                is_mismatched = True
+                mismatch_warning = f"Recording started {int(time_diff_sec)}s away from incident detection time."
+
         recording_data = {
             "id": rec.id,
             "alert_id": alert.id,
@@ -145,6 +198,9 @@ def get_incident_context(alert_id: int, user_id: Optional[int] = None) -> Dict[s
             "has_audio": rec_audio.get("has_audio", False),
             "audio_status": rec_audio.get("status", "unavailable"),
             "audio_reason": rec_audio.get("reason", "DirectShow video-only stream"),
+            "timestamp_mismatch": is_mismatched,
+            "time_diff_seconds": time_diff_sec,
+            "mismatch_warning": mismatch_warning,
         }
 
     # 3. Strictly Scoped Incident Case (FK: incident_cases.alert_id == alert.id)

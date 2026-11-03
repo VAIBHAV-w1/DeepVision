@@ -25,7 +25,9 @@ urlpatterns = [
 
     # React SPA Entrypoints (Root & Page Routes)
     path('', core_views.react_app_view, name='root'),
+    path('monitor/', core_views.react_app_view, name='monitor'),
     path('dashboard/', core_views.react_app_view, name='dashboard'),
+    path('settings/', core_views.react_app_view, name='settings'),
     path('cameras/', core_views.react_app_view, name='cameras'),
     path('cameras/<int:camera_id>/', core_views.react_app_view, name='camera_detail'),
     path('cameras/<int:camera_id>/preview/', core_views.react_app_view, name='camera_preview'),
@@ -109,6 +111,13 @@ urlpatterns = [
     path('api/cameras/<int:camera_id>/record/stop/', camera_views.camera_record_stop_view, name='api_camera_record_stop_slash'),
     path('api/cameras/<int:camera_id>/warm/', camera_views.camera_warm_view, name='api_camera_warm'),
 
+    # Restricted Anomaly Zones & Detection Settings REST APIs
+    path('api/cameras/<int:camera_id>/zones/', api_views.api_camera_zones, name='api_camera_zones'),
+    path('api/cameras/<int:camera_id>/zones/<int:zone_id>/delete/', api_views.api_camera_zone_delete, name='api_camera_zone_delete'),
+    path('api/cameras/<int:camera_id>/zones/<int:zone_id>/toggle/', api_views.api_camera_zone_toggle, name='api_camera_zone_toggle'),
+    path('api/cameras/<int:camera_id>/rules/', api_views.api_camera_rules, name='api_camera_rules'),
+    path('api/settings/detection/', api_views.api_detection_settings, name='api_detection_settings'),
+
     # Recordings REST APIs & HTTP 206 Partial Playback
     path('api/recordings/', api_views.api_recordings_list, name='api_recordings_list'),
     path('api/recordings/<int:recording_id>/', api_views.api_recording_detail, name='api_recording_detail'),
@@ -145,7 +154,8 @@ urlpatterns = [
     path('notifications/<int:notification_id>/read/', notification_views.mark_notification_read_view, name='notification_read'),
     path('notifications/read-all/', notification_views.mark_all_notifications_read_view, name='notifications_read_all'),
 
-    # Assistant & Health Endpoints
+    # Assistant, Audit Logs & Health Endpoints
+    path('api/audit-logs/', api_views.api_audit_logs, name='api_audit_logs'),
     path('api/assistant/chat/', core_views.assistant_chat_view, name='assistant_chat'),
     path('api/assistant/chat', core_views.assistant_chat_view, name='assistant_chat_no_slash'),
     path('health/', core_views.health_check_view, name='health'),

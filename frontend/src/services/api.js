@@ -105,14 +105,20 @@ async function request(endpoint, options = {}) {
 }
 
 export const api = {
+  system: {
+    health: () => request('/api/health/', { timeout: 5000 }),
+  },
+
   // Authentication
   auth: {
     me: (options = {}) => request('/api/auth/me/', { timeout: 6000, ...options }),
     csrf: () => request('/api/auth/csrf/'),
     login: (email, password) => request('/api/auth/login/', { method: 'POST', body: { email, password } }),
+    verifyLoginOtp: (email, otp) => request('/api/auth/verify-login-otp/', { method: 'POST', body: { email, otp } }),
+    resendLoginOtp: (email) => request('/api/auth/resend-login-otp/', { method: 'POST', body: { email } }),
     signup: (data) => request('/api/auth/signup/', { method: 'POST', body: data }),
-    verifyOtp: (email, otp) => request('/api/auth/verify-otp/', { method: 'POST', body: { email, otp } }),
-    resendOtp: (email) => request('/api/auth/resend-otp/', { method: 'POST', body: { email } }),
+    verifyOtp: (email, otp) => request('/api/auth/verify-otp/', { method: 'POST', body: { email, otp, purpose: 'signup' } }),
+    resendOtp: (email) => request('/api/auth/resend-otp/', { method: 'POST', body: { email, purpose: 'signup' } }),
     forgotPassword: (email) => request('/api/auth/forgot-password/', { method: 'POST', body: { email } }),
     verifyResetOtp: (email, otp) => request('/api/auth/verify-reset-otp/', { method: 'POST', body: { email, otp } }),
     resetPassword: (emailOrData, otp, newPassword, confirmPassword) => {
@@ -150,6 +156,9 @@ export const api = {
       return request(`/api/cameras/${q ? '?' + q : ''}`);
     },
     get: (id) => request(`/api/cameras/${id}/`),
+    create: (data) => request('/api/cameras/', { method: 'POST', body: data }),
+    update: (id, data) => request(`/api/cameras/${id}/`, { method: 'PUT', body: data }),
+    remove: (id) => request(`/api/cameras/${id}/`, { method: 'DELETE' }),
     getStats: (id) => request(`/api/cameras/${id}/stats/`),
     getStatus: (id) => request(`/api/cameras/${id}/status/`),
     startRecording: (id) => request(`/api/cameras/${id}/record/start/`, { method: 'POST' }),
@@ -163,6 +172,15 @@ export const api = {
     getTrackingStreamUrl: (id) => `${API_BASE_URL}/api/cameras/${id}/stream/tracking/`,
     getSnapshotUrl: (id) => `${API_BASE_URL}/api/cameras/${id}/snapshot/`,
     captureSnapshot: (id) => request(`/api/cameras/${id}/snapshot/`, { method: 'POST' }),
+    // Detection Rules, Presets & Security Zones
+    getRules: (id) => request(`/api/cameras/${id}/rules/`),
+    saveRules: (id, data) => request(`/api/cameras/${id}/rules/`, { method: 'POST', body: data }),
+    applyPreset: (id, presetKey) => request(`/api/cameras/${id}/rules/preset/`, { method: 'POST', body: { preset: presetKey } }),
+    getPresets: () => request('/api/presets/'),
+    getZones: (id) => request(`/api/cameras/${id}/zones/`),
+    createZone: (id, zoneData) => request(`/api/cameras/${id}/zones/`, { method: 'POST', body: zoneData }),
+    deleteZone: (camId, zoneId) => request(`/api/cameras/${camId}/zones/${zoneId}/delete/`, { method: 'POST' }),
+    toggleZone: (camId, zoneId) => request(`/api/cameras/${camId}/zones/${zoneId}/toggle/`, { method: 'POST' }),
   },
 
   // Recordings
@@ -224,7 +242,15 @@ export const api = {
     },
     unreadCount: () => request('/api/notifications/unread-count/'),
     markRead: (id) => request(`/notifications/${id}/read/`, { method: 'POST' }),
+    markAsRead: (id) => request(`/notifications/${id}/read/`, { method: 'POST' }),
     markAllRead: () => request('/notifications/read-all/', { method: 'POST' }),
+    markAllAsRead: () => request('/notifications/read-all/', { method: 'POST' }),
+  },
+
+  // Detection & System Settings
+  settings: {
+    getDetection: () => request('/api/settings/detection/'),
+    saveDetection: (data) => request('/api/settings/detection/', { method: 'POST', body: data }),
   },
 
   // DeepVision Assistant

@@ -3,11 +3,11 @@ import { api } from '../services/api';
 import AuthLayout from '../layouts/AuthLayout';
 import { useToast } from '../components/common/Toast';
 
-export function VerifyEmail({ email, onVerified, onNavigate }) {
+export function VerifyEmail({ email, onVerified, onNavigate, deliveryWarning = false }) {
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
-  const [cooldown, setCooldown] = useState(60);
+  const [cooldown, setCooldown] = useState(deliveryWarning ? 0 : 60);
   const [error, setError] = useState(null);
   const inputRefs = useRef([]);
   const { addToast } = useToast();
@@ -112,6 +112,12 @@ export function VerifyEmail({ email, onVerified, onNavigate }) {
           </strong>
         </p>
       </div>
+
+      {deliveryWarning && (
+        <div className="auth-alert-banner alert-warning" role="status" style={{ marginBottom: '1rem' }}>
+          Account created, but the verification email was not delivered. Check your address and try again.
+        </div>
+      )}
 
       {error && (
         <div className="auth-alert-banner alert-danger" style={{ marginBottom: '1.25rem' }}>

@@ -19,6 +19,7 @@ from django.db.models import Q
 from apps.accounts.decorators import login_required
 from apps.alerts.models import Alert, IncidentCase, IncidentNote
 from apps.cameras.models import Camera
+from apps.core.audit import log_audit
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ def alerts_list_view(request):
 
     # Metrics (unfiltered user totals)
     user_all_alerts = Alert.objects.filter(user_id=user_id)
+
     total_count = user_all_alerts.count()
     new_count = user_all_alerts.filter(status='new').count()
     active_high_count = user_all_alerts.filter(status='new', severity__in=['high', 'critical']).count()
@@ -75,7 +77,8 @@ def alerts_list_view(request):
     paginator = Paginator(alerts_qs, 20)
     page_obj = paginator.get_page(page_number)
 
-    user_cameras = Camera.objects.filter(user_id=user_id).order_by('name')
+    from apps.cameras.views import get_accessible_cameras_qs
+    user_cameras = get_accessible_cameras_qs(request.user).order_by('name')
 
     return render(request, 'pages/alerts/index.html', {
         'page_obj': page_obj,
@@ -134,6 +137,13 @@ def alert_acknowledge_view(request, alert_id):
         alert.save(update_fields=['status', 'acknowledged_at'])
         msg = f"Alert #{alert.id} acknowledged."
         messages.success(request, msg)
+        log_audit(
+            request,
+            action="ALERT_ACKNOWLEDGED",
+            resource_type="alert",
+            resource_id=alert.id,
+            description=f"Acknowledged alert #{alert.id} ({alert.event_type}).",
+        )
         logger.info(f"[ALERTS] User {request.user.id} acknowledged alert {alert_id}.")
     else:
         msg = f"Alert #{alert.id} cannot be acknowledged from status '{alert.status}'."
@@ -158,6 +168,13 @@ def alert_resolve_view(request, alert_id):
         alert.save(update_fields=['status', 'resolved_at'])
         msg = f"Alert #{alert.id} marked as resolved."
         messages.success(request, msg)
+        log_audit(
+            request,
+            action="ALERT_RESOLVED",
+            resource_type="alert",
+            resource_id=alert.id,
+            description=f"Resolved alert #{alert.id} ({alert.event_type}).",
+        )
         logger.info(f"[ALERTS] User {request.user.id} resolved alert {alert_id}.")
     else:
         msg = f"Alert #{alert.id} is already in status '{alert.status}'."

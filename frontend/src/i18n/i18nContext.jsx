@@ -57,6 +57,18 @@ export function LanguageProvider({ children }) {
     }
   }, []);
 
+  useEffect(() => {
+    window.__setDeepVisionLanguage = setLanguage;
+    const handleLangEvent = (e) => {
+      if (e.detail?.code) setLanguage(e.detail.code);
+    };
+    window.addEventListener('deepvision:set-language', handleLangEvent);
+    return () => {
+      delete window.__setDeepVisionLanguage;
+      window.removeEventListener('deepvision:set-language', handleLangEvent);
+    };
+  }, [setLanguage]);
+
   /**
    * Safe string translation helper with fallback chain:
    * 1. translations[language][key]

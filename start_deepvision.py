@@ -313,6 +313,12 @@ def ensure_database():
 
     is_production = is_production_environment()
 
+    # Check if PostgreSQL / Supabase is configured
+    use_postgres = os.getenv("USE_POSTGRES", "").lower() in ("true", "1") or bool(os.getenv("DATABASE_URL", "").startswith("postgres")) or bool(os.getenv("SUPABASE_DB_URL", "").startswith("postgres"))
+    if use_postgres:
+        logger.info("Database preflight: PostgreSQL / Supabase configured. Bypassing SQLite file preflight validation.")
+        return
+
     if is_production:
         # Production mode: Strict fail-closed database validation
         logger.info("Production mode detected: Running preflight database validation on %s...", db_path)
@@ -443,9 +449,10 @@ def main():
         # Ensure database schema exists before launching Django
         ensure_database()
 
-        # Start Django Application (configurable via DEEPVISION_HOST and DEEPVISION_PORT)
-        host = os.getenv("DEEPVISION_HOST", "127.0.0.1")
-        port = int(os.getenv("DEEPVISION_PORT", "8000"))
+        # Start Django Application (configurable via DEEPVISION_HOST and DEEPVISION_PORT / PORT)
+        default_host = "0.0.0.0" if (is_production_environment() or sys.platform != "win32") else "127.0.0.1"
+        host = os.getenv("DEEPVISION_HOST", default_host)
+        port = int(os.getenv("PORT") or os.getenv("DEEPVISION_PORT", "8000"))
         bind_addr = f"{host}:{port}"
 
         if is_port_open(host, port):

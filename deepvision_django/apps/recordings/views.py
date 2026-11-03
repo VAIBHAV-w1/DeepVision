@@ -35,10 +35,12 @@ def _format_size(size_bytes: int) -> str:
 @login_required
 def recordings_list_view(request):
     """
-    Renders the central Recordings library for the authenticated user.
+    Renders the central Recordings library for the authenticated user and accessible cameras.
     """
     user_id = request.user.id
+    from apps.cameras.views import get_accessible_cameras_qs
     recordings_qs = Recording.objects.filter(user_id=user_id).select_related('camera')
+    user_cameras = get_accessible_cameras_qs(request.user).order_by('name')
 
     camera_id = request.GET.get('camera_id', '').strip() or request.GET.get('camera', '').strip()
     if camera_id and camera_id.isdigit():
@@ -70,8 +72,6 @@ def recordings_list_view(request):
             'formatted_size': _format_size(r.file_size),
         })
 
-    user_cameras = Camera.objects.filter(user_id=user_id).order_by('name')
-
     return render(request, 'pages/recordings/index.html', {
         'items': items,
         'recordings': recordings,
@@ -93,8 +93,12 @@ def recording_detail_view(request, recording_id):
     """
     Shows detail page for an existing recording with synchronized security events.
     """
-    recording = get_object_or_404(Recording.objects.select_related('camera'), id=recording_id, user_id=request.user.id)
-    
+    recording = get_object_or_404(
+        Recording.objects.select_related('camera'),
+        id=recording_id,
+        user_id=request.user.id,
+    )
+
     full_path = safe_resolve_recording(recording.file_path)
     file_exists = full_path is not None
 
@@ -102,9 +106,9 @@ def recording_detail_view(request, recording_id):
     timeline_events = []
     if recording.started_at:
         events_qs = Alert.objects.filter(
-            user_id=request.user.id,
             camera_id=recording.camera_id,
-            detected_at__gte=recording.started_at
+            user_id=request.user.id,
+            detected_at__gte=recording.started_at,
         )
         if recording.ended_at:
             events_qs = events_qs.filter(detected_at__lte=recording.ended_at)

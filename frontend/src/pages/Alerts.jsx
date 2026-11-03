@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../services/api';
 import { formatDate } from '../utils/formatters';
 import { useToast } from '../components/common/Toast';
+import { useTranslation } from '../i18n/i18nContext';
 import { IncidentHeader } from '../components/incident/IncidentHeader';
 import { IncidentMedia } from '../components/incident/IncidentMedia';
 import { IncidentAnalysis } from '../components/incident/IncidentAnalysis';
@@ -12,6 +13,7 @@ import { IncidentCase } from '../components/incident/IncidentCase';
 import { IncidentNotifications } from '../components/incident/IncidentNotifications';
 
 export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVideo, initialHasCase }) {
+  const { t } = useTranslation();
   // Inbox state
   const [alerts, setAlerts] = useState([]);
   const [cameras, setCameras] = useState([]);
@@ -85,7 +87,38 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
     fetchAlerts();
   }, [fetchAlerts]);
 
-  // Fetch single incident workspace detail when activeAlertId is set
+  // Reusable loader for single incident workspace detail
+  const loadIncidentDetail = useCallback(async (id, { silent = false } = {}) => {
+    if (!id) {
+      activeRequestRef.current++;
+      setActiveIncidentData(null);
+      setIncidentLoading(false);
+      return;
+    }
+
+    const reqId = ++activeRequestRef.current;
+    if (!silent) {
+      setIncidentLoading(true);
+    }
+
+    try {
+      const data = await api.alerts.get(id);
+      if (reqId === activeRequestRef.current && data && data.alert) {
+        setActiveIncidentData(data);
+      }
+    } catch (err) {
+      if (reqId === activeRequestRef.current) {
+        console.warn(`Failed to load incident detail for alert ${id}:`, err);
+        addToast('Failed to load incident detail', 'error');
+      }
+    } finally {
+      if (reqId === activeRequestRef.current) {
+        setIncidentLoading(false);
+      }
+    }
+  }, [addToast]);
+
+  // Fetch single incident workspace detail when activeAlertId changes
   useEffect(() => {
     if (!activeAlertId) {
       activeRequestRef.current++;
@@ -93,37 +126,9 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
       setIncidentLoading(false);
       return;
     }
-
-    let isMounted = true;
-    const reqId = ++activeRequestRef.current;
     setActiveIncidentData(null);
-    setIncidentLoading(true);
-
-    api.alerts.get(activeAlertId)
-      .then((data) => {
-        if (!isMounted) return;
-        if (reqId === activeRequestRef.current && data && data.alert) {
-          setActiveIncidentData(data);
-        }
-      })
-      .catch((err) => {
-        if (!isMounted) return;
-        if (reqId === activeRequestRef.current) {
-          console.warn(`Failed to load incident detail for alert ${activeAlertId}:`, err);
-          addToast('Failed to load incident detail', 'error');
-        }
-      })
-      .finally(() => {
-        if (!isMounted) return;
-        if (reqId === activeRequestRef.current) {
-          setIncidentLoading(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [activeAlertId]);
+    loadIncidentDetail(activeAlertId);
+  }, [activeAlertId, loadIncidentDetail]);
 
   // Acknowledge handler
   const handleAcknowledge = async (id) => {
@@ -132,8 +137,8 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
       if (res && (res.success || res.status === 'ok')) {
         addToast('Alert acknowledged', 'success');
         fetchAlerts();
-        if (activeAlertId === id) {
-          loadIncidentDetail(id);
+        if (Number(activeAlertId) === Number(id)) {
+          loadIncidentDetail(id, { silent: true });
         }
       } else {
         addToast(res?.message || res?.error || 'Failed to acknowledge alert', 'error');
@@ -150,8 +155,8 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
       if (res && (res.success || res.status === 'ok')) {
         addToast('Incident resolved successfully', 'success');
         fetchAlerts();
-        if (activeAlertId === id) {
-          loadIncidentDetail(id);
+        if (Number(activeAlertId) === Number(id)) {
+          loadIncidentDetail(id, { silent: true });
         }
       } else {
         addToast(res?.message || res?.error || 'Failed to resolve incident', 'error');
@@ -168,7 +173,7 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
       const res = await api.alerts.addNote(activeAlertId, noteText);
       if (res && res.success) {
         addToast('Investigator note attached', 'success');
-        loadIncidentDetail(activeAlertId);
+        loadIncidentDetail(activeAlertId, { silent: true });
       } else {
         addToast(res?.error || 'Failed to add note', 'error');
       }
@@ -183,8 +188,8 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
     try {
       const res = await api.alerts.createCase(activeAlertId);
       if (res && res.success) {
-        addToast(`Case ${res.case.case_number} registered`, 'success');
-        loadIncidentDetail(activeAlertId);
+        addToast(`Case ${res.case?.case_number || ''} registered`.trim(), 'success');
+        loadIncidentDetail(activeAlertId, { silent: true });
         fetchAlerts();
       } else {
         addToast(res?.error || 'Failed to create case', 'error');
@@ -251,7 +256,7 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
         {/* 1. INCIDENT HEADER */}
         <IncidentHeader
           alert={alert}
-          onBack={() => setActiveAlertId(null)}
+          onBack={() => onNavigate ? onNavigate('notifications', { tab: 'incidents' }) : setActiveAlertId(null)}
           onAcknowledge={handleAcknowledge}
           onResolve={handleResolve}
           onNavigate={onNavigate}
@@ -307,16 +312,13 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
   // =========================================================================
   return (
     <div className="alerts-page-container">
-      {/* Editorial Hero Header */}
-      <div className="hero-editorial-wrap">
-        <div className="editorial-badge-pill">
-          <span>Incident Operations Workspace</span>
-        </div>
-        <h1 className="editorial-hero-title" style={{ fontSize: 'clamp(2.2rem, 4vw, 3.25rem)', marginBottom: '0.5rem' }}>
-          Unified Incident Forensics
+      {/* Compact Operational Header */}
+      <div className="hero-editorial-wrap" style={{ marginBottom: '1rem' }}>
+        <h1 className="editorial-hero-title" style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 4px 0', color: 'var(--text-main)' }}>
+          {t('alerts.title', 'Security Alerts & Events')}
         </h1>
-        <p className="editorial-hero-subtitle" style={{ marginBottom: '2rem' }}>
-          Real-time security anomaly inbox, evidence media verification, and incident case operations.
+        <p className="editorial-hero-subtitle" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0 }}>
+          {t('alerts.subtitle', 'Real-time security anomaly inbox, evidence media verification, and incident case operations.')}
         </p>
       </div>
 

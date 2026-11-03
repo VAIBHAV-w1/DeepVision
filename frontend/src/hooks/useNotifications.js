@@ -34,7 +34,12 @@ export function useNotifications() {
   useEffect(() => {
     fetchUnreadCount();
     const timer = setInterval(fetchUnreadCount, 10000);
-    return () => clearInterval(timer);
+    const handleSync = () => fetchUnreadCount();
+    window.addEventListener('notifications:updated', handleSync);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('notifications:updated', handleSync);
+    };
   }, [fetchUnreadCount]);
 
   const markRead = async (id) => {

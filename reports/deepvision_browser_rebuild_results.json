@@ -1,0 +1,189 @@
+{
+  "timestamp": "2026-10-27T17:53:07.555Z",
+  "total": 30,
+  "passed": 30,
+  "failed": 0,
+  "pass_rate": "100%",
+  "tests": [
+    {
+      "id": "BRW-01",
+      "title": "Chrome Launch & CDP Connection",
+      "status": "PASS",
+      "details": "Connected to Chrome CDP on port 9225"
+    },
+    {
+      "id": "BRW-02",
+      "title": "Login Page & Redesigned Brand Identity",
+      "status": "PASS",
+      "details": "Title: \"DeepVision : Intelligent Surveillance SOC\", Redesigned SVG Logo present: true"
+    },
+    {
+      "id": "BRW-03",
+      "title": "Login Tri-Lingual Hindi",
+      "status": "PASS",
+      "details": "Rendered Hindi translations on login form"
+    },
+    {
+      "id": "BRW-04",
+      "title": "Login Tri-Lingual Kannada",
+      "status": "PASS",
+      "details": "Rendered Kannada translations on login form"
+    },
+    {
+      "id": "BRW-05",
+      "title": "Surveillance Unified Primary Workspace",
+      "status": "PASS",
+      "details": "Surveillance Container: true, RAW: true, Tracking: true, Camera Panel: true"
+    },
+    {
+      "id": "BRW-06",
+      "title": "Surveillance Detection & Tracking Mode Switch",
+      "status": "PASS",
+      "details": "Successfully switched to DETECTION & TRACKING mode"
+    },
+    {
+      "id": "BRW-07",
+      "title": "Surveillance Manage Cameras Section",
+      "status": "PASS",
+      "details": "Manage Section: true, Camera Cards: 10, Add Btn: true"
+    },
+    {
+      "id": "BRW-08",
+      "title": "Action: Open in Live View Seamless Transition",
+      "status": "PASS",
+      "details": "Successfully switched from Manage tab back to Live View on selected camera"
+    },
+    {
+      "id": "BRW-09",
+      "title": "Legacy Route Redirection (#monitor -> #surveillance)",
+      "status": "PASS",
+      "details": "Canonical Hash: \"#surveillance\""
+    },
+    {
+      "id": "BRW-10",
+      "title": "Legacy Route Redirection (#cameras -> #surveillance?tab=manage)",
+      "status": "PASS",
+      "details": "Canonical Hash: \"#surveillance?tab=manage\""
+    },
+    {
+      "id": "BRW-11",
+      "title": "Security Center Parent Workspace",
+      "status": "PASS",
+      "details": "Header: true, Tab count: 5"
+    },
+    {
+      "id": "BRW-12",
+      "title": "Security Center - Alerts Section",
+      "status": "PASS",
+      "details": "Alerts section loaded within Security Center"
+    },
+    {
+      "id": "BRW-13",
+      "title": "Security Center - Recordings Section",
+      "status": "PASS",
+      "details": "Recordings section loaded within Security Center"
+    },
+    {
+      "id": "BRW-14",
+      "title": "Security Center - Evidence Vault Section",
+      "status": "PASS",
+      "details": "Evidence section loaded within Security Center"
+    },
+    {
+      "id": "BRW-15",
+      "title": "Security Center - Incident Cases Section",
+      "status": "PASS",
+      "details": "Incident cases section loaded within Security Center"
+    },
+    {
+      "id": "BRW-16",
+      "title": "Security Center - Notifications Section",
+      "status": "PASS",
+      "details": "Notifications section loaded within Security Center"
+    },
+    {
+      "id": "BRW-17",
+      "title": "Legacy Route Redirection (#alerts -> #security-center?tab=alerts)",
+      "status": "PASS",
+      "details": "Canonical Hash: \"#security-center?tab=alerts\""
+    },
+    {
+      "id": "BRW-18",
+      "title": "Legacy Route Redirection (#recordings -> #security-center?tab=recordings)",
+      "status": "PASS",
+      "details": "Canonical Hash: \"#security-center?tab=recordings\""
+    },
+    {
+      "id": "BRW-19",
+      "title": "Settings 7 Human-Readable Sections",
+      "status": "PASS",
+      "details": "Container: true, Preferences: true, Language: true"
+    },
+    {
+      "id": "BRW-20",
+      "title": "Help Workspace & Operator Invariants",
+      "status": "PASS",
+      "details": "Guidance badge: true, Diagnostic link: true"
+    },
+    {
+      "id": "BRW-21",
+      "title": "Surveillance Workspace Tri-Lingual Hindi",
+      "status": "PASS",
+      "details": "Rendered Hindi translations in Surveillance workspace"
+    },
+    {
+      "id": "BRW-22",
+      "title": "Surveillance Workspace Tri-Lingual Kannada",
+      "status": "PASS",
+      "details": "Rendered Kannada translations in Surveillance workspace"
+    },
+    {
+      "id": "BRW-23",
+      "title": "Viewport Ergonomics 1920x1080 (Desktop FHD)",
+      "status": "PASS",
+      "details": "Width: 1920px, Content: 1905px, Overflow: false"
+    },
+    {
+      "id": "BRW-24",
+      "title": "Viewport Ergonomics 1600x900 (HD+ Desktop)",
+      "status": "PASS",
+      "details": "Width: 1600px, Content: 1585px, Overflow: false"
+    },
+    {
+      "id": "BRW-25",
+      "title": "Viewport Ergonomics 1366x768 (Standard Laptop)",
+      "status": "PASS",
+      "details": "Width: 1366px, Content: 1351px, Overflow: false"
+    },
+    {
+      "id": "BRW-26",
+      "title": "Viewport Ergonomics 1024x768 (Tablet Landscape)",
+      "status": "PASS",
+      "details": "Width: 1024px, Content: 1009px, Overflow: false"
+    },
+    {
+      "id": "BRW-27",
+      "title": "Viewport Ergonomics 768x1024 (Tablet Portrait)",
+      "status": "PASS",
+      "details": "Width: 768px, Content: 753px, Overflow: false"
+    },
+    {
+      "id": "BRW-28",
+      "title": "Viewport Ergonomics 390x844 (Mobile iPhone 14)",
+      "status": "PASS",
+      "details": "Width: 390px, Content: 390px, Overflow: false"
+    },
+    {
+      "id": "BRW-29",
+      "title": "Viewport Ergonomics 375x812 (Mobile Compact)",
+      "status": "PASS",
+      "details": "Width: 375px, Content: 375px, Overflow: false"
+    },
+    {
+      "id": "BRW-30",
+      "title": "Console Error & Exception Audit",
+      "status": "PASS",
+      "details": "Console Errors: 0, Exceptions: 0"
+    }
+  ]
+}

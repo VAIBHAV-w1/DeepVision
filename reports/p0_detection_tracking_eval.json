@@ -1,0 +1,1236 @@
+{
+  "suite": "P0_DETECTION_AND_TRACKING_EVALUATION",
+  "timestamp": "2026-11-03T06:28:36Z",
+  "dataset": {
+    "path": "verification/eval_dataset/ground_truth.json",
+    "static_frames_count": 12,
+    "total_ground_truth_boxes": 33,
+    "tracking_sequences_count": 3,
+    "total_sequence_frames": 180
+  },
+  "class_mapping": {
+    "total_classes": 80,
+    "valid": true,
+    "verified_classes": {
+      "0": {
+        "expected": "person",
+        "actual": "person",
+        "matches": true
+      },
+      "24": {
+        "expected": "backpack",
+        "actual": "backpack",
+        "matches": true
+      },
+      "26": {
+        "expected": "handbag",
+        "actual": "handbag",
+        "matches": true
+      },
+      "28": {
+        "expected": "suitcase",
+        "actual": "suitcase",
+        "matches": true
+      },
+      "39": {
+        "expected": "bottle",
+        "actual": "bottle",
+        "matches": true
+      },
+      "41": {
+        "expected": "cup",
+        "actual": "cup",
+        "matches": true
+      },
+      "45": {
+        "expected": "bowl",
+        "actual": "bowl",
+        "matches": true
+      },
+      "56": {
+        "expected": "chair",
+        "actual": "chair",
+        "matches": true
+      },
+      "62": {
+        "expected": "tv",
+        "actual": "tv",
+        "matches": true
+      },
+      "63": {
+        "expected": "laptop",
+        "actual": "laptop",
+        "matches": true
+      },
+      "67": {
+        "expected": "cell phone",
+        "actual": "cell phone",
+        "matches": true
+      }
+    }
+  },
+  "performance": {
+    "cold_start_ms": 16257.26,
+    "average_steady_state_latency_ms": 1404.91,
+    "p95_steady_state_latency_ms": 5349.97,
+    "achieved_fps": 0.71,
+    "device": "CPU"
+  },
+  "production_calibrated_strict_coco": {
+    "iou_match_threshold": 0.45,
+    "allow_bag_cup_alias": false,
+    "overall": {
+      "tp": 22,
+      "fp": 6,
+      "fn": 11,
+      "precision": 0.7857,
+      "recall": 0.6667,
+      "f1": 0.7213,
+      "mean_bbox_iou": 0.886
+    },
+    "per_class": {
+      "backpack": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 3,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "mean_bbox_iou": 0.0
+      },
+      "bottle": {
+        "tp": 4,
+        "fp": 0,
+        "fn": 4,
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1": 0.6667,
+        "mean_bbox_iou": 0.8882
+      },
+      "bowl": {
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "mean_bbox_iou": 0.8676
+      },
+      "cell phone": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 3,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "mean_bbox_iou": 0.0
+      },
+      "chair": {
+        "tp": 0,
+        "fp": 3,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "mean_bbox_iou": 0.0
+      },
+      "cup": {
+        "tp": 0,
+        "fp": 1,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "mean_bbox_iou": 0.0
+      },
+      "handbag": {
+        "tp": 0,
+        "fp": 2,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "mean_bbox_iou": 0.0
+      },
+      "laptop": {
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "mean_bbox_iou": 0.6504
+      },
+      "person": {
+        "tp": 15,
+        "fp": 0,
+        "fn": 1,
+        "precision": 1.0,
+        "recall": 0.9375,
+        "f1": 0.9677,
+        "mean_bbox_iou": 0.9035
+      }
+    },
+    "person_detection": {
+      "tp": 15,
+      "fp": 0,
+      "fn": 1,
+      "precision": 1.0,
+      "recall": 0.9375,
+      "f1": 0.9677,
+      "mean_bbox_iou": 0.9035
+    },
+    "common_object_detection": {
+      "tp": 7,
+      "fp": 6,
+      "fn": 10,
+      "precision": 0.5385,
+      "recall": 0.4118,
+      "f1": 0.4667,
+      "mean_bbox_iou": 0.8484
+    },
+    "small_object_detection": {
+      "tp": 9,
+      "fn": 3,
+      "total_gt": 12,
+      "recall": 0.75
+    },
+    "partially_occluded_detection": {
+      "tp": 11,
+      "fn": 3,
+      "total_gt": 14,
+      "recall": 0.7857
+    },
+    "multiple_moving_objects": {
+      "tp": 6,
+      "fn": 0,
+      "total_gt": 6,
+      "recall": 1.0
+    },
+    "dog_false_positives": 0,
+    "false_positives": [
+      {
+        "frame_id": "frame_01",
+        "predicted_class": "chair",
+        "confidence": 0.7088,
+        "pred_bbox": [
+          945,
+          388,
+          1279,
+          711
+        ],
+        "max_gt_overlap_iou": 0.826,
+        "overlapping_gt_class": "cell phone"
+      },
+      {
+        "frame_id": "frame_05",
+        "predicted_class": "cup",
+        "confidence": 0.2174,
+        "pred_bbox": [
+          153,
+          155,
+          261,
+          228
+        ],
+        "max_gt_overlap_iou": 0.889,
+        "overlapping_gt_class": "bowl"
+      },
+      {
+        "frame_id": "frame_07",
+        "predicted_class": "chair",
+        "confidence": 0.4246,
+        "pred_bbox": [
+          1173,
+          627,
+          1279,
+          718
+        ],
+        "max_gt_overlap_iou": 0.117,
+        "overlapping_gt_class": null
+      },
+      {
+        "frame_id": "frame_09",
+        "predicted_class": "handbag",
+        "confidence": 0.3386,
+        "pred_bbox": [
+          321,
+          11,
+          636,
+          486
+        ],
+        "max_gt_overlap_iou": 0.9,
+        "overlapping_gt_class": "backpack"
+      },
+      {
+        "frame_id": "frame_12",
+        "predicted_class": "chair",
+        "confidence": 0.5502,
+        "pred_bbox": [
+          979,
+          543,
+          1199,
+          717
+        ],
+        "max_gt_overlap_iou": 0.03,
+        "overlapping_gt_class": null
+      },
+      {
+        "frame_id": "frame_12",
+        "predicted_class": "handbag",
+        "confidence": 0.3852,
+        "pred_bbox": [
+          177,
+          5,
+          573,
+          375
+        ],
+        "max_gt_overlap_iou": 0.63,
+        "overlapping_gt_class": "backpack"
+      }
+    ],
+    "false_negatives": [
+      {
+        "frame_id": "frame_01",
+        "class_name": "cell phone",
+        "gt_bbox": [
+          930,
+          425,
+          1280,
+          720
+        ],
+        "small": false,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_02",
+        "class_name": "cell phone",
+        "gt_bbox": [
+          815,
+          510,
+          1165,
+          720
+        ],
+        "small": false,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_04",
+        "class_name": "cell phone",
+        "gt_bbox": [
+          875,
+          395,
+          1175,
+          720
+        ],
+        "small": false,
+        "occluded": true
+      },
+      {
+        "frame_id": "frame_05",
+        "class_name": "person",
+        "gt_bbox": [
+          0,
+          115,
+          1155,
+          720
+        ],
+        "small": false,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_06",
+        "class_name": "bottle",
+        "gt_bbox": [
+          5,
+          40,
+          92,
+          200
+        ],
+        "small": true,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_09",
+        "class_name": "backpack",
+        "gt_bbox": [
+          320,
+          45,
+          635,
+          475
+        ],
+        "small": false,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_10",
+        "class_name": "bottle",
+        "gt_bbox": [
+          855,
+          265,
+          1090,
+          675
+        ],
+        "small": false,
+        "occluded": true
+      },
+      {
+        "frame_id": "frame_10",
+        "class_name": "bottle",
+        "gt_bbox": [
+          115,
+          468,
+          152,
+          528
+        ],
+        "small": true,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_11",
+        "class_name": "bottle",
+        "gt_bbox": [
+          115,
+          468,
+          152,
+          528
+        ],
+        "small": true,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_12",
+        "class_name": "backpack",
+        "gt_bbox": [
+          175,
+          0,
+          430,
+          375
+        ],
+        "small": false,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_12",
+        "class_name": "backpack",
+        "gt_bbox": [
+          405,
+          0,
+          570,
+          345
+        ],
+        "small": false,
+        "occluded": true
+      }
+    ],
+    "per_frame": [
+      {
+        "frame_id": "frame_01",
+        "gt_count": 2,
+        "pred_count": 2,
+        "tp": 1,
+        "fp": 1,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_02",
+        "gt_count": 2,
+        "pred_count": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_03",
+        "gt_count": 1,
+        "pred_count": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0
+      },
+      {
+        "frame_id": "frame_04",
+        "gt_count": 2,
+        "pred_count": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_05",
+        "gt_count": 4,
+        "pred_count": 4,
+        "tp": 3,
+        "fp": 1,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_06",
+        "gt_count": 5,
+        "pred_count": 4,
+        "tp": 4,
+        "fp": 0,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_07",
+        "gt_count": 3,
+        "pred_count": 4,
+        "tp": 3,
+        "fp": 1,
+        "fn": 0
+      },
+      {
+        "frame_id": "frame_08",
+        "gt_count": 3,
+        "pred_count": 3,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0
+      },
+      {
+        "frame_id": "frame_09",
+        "gt_count": 2,
+        "pred_count": 2,
+        "tp": 1,
+        "fp": 1,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_10",
+        "gt_count": 3,
+        "pred_count": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 2
+      },
+      {
+        "frame_id": "frame_11",
+        "gt_count": 3,
+        "pred_count": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_12",
+        "gt_count": 3,
+        "pred_count": 3,
+        "tp": 1,
+        "fp": 2,
+        "fn": 2
+      }
+    ]
+  },
+  "production_calibrated_aliased": {
+    "iou_match_threshold": 0.45,
+    "allow_bag_cup_alias": true,
+    "overall": {
+      "tp": 24,
+      "fp": 4,
+      "fn": 9,
+      "precision": 0.8571,
+      "recall": 0.7273,
+      "f1": 0.7869,
+      "mean_bbox_iou": 0.8764
+    },
+    "per_class": {
+      "backpack": {
+        "tp": 2,
+        "fp": 0,
+        "fn": 1,
+        "precision": 1.0,
+        "recall": 0.6667,
+        "f1": 0.8,
+        "mean_bbox_iou": 0.765
+      },
+      "bottle": {
+        "tp": 4,
+        "fp": 0,
+        "fn": 4,
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1": 0.6667,
+        "mean_bbox_iou": 0.8882
+      },
+      "bowl": {
+        "tp": 2,
+        "fp": 1,
+        "fn": 0,
+        "precision": 0.6667,
+        "recall": 1.0,
+        "f1": 0.8,
+        "mean_bbox_iou": 0.8733
+      },
+      "cell phone": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 3,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "mean_bbox_iou": 0.0
+      },
+      "chair": {
+        "tp": 0,
+        "fp": 3,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "mean_bbox_iou": 0.0
+      },
+      "cup": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "mean_bbox_iou": 0.0
+      },
+      "handbag": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "mean_bbox_iou": 0.0
+      },
+      "laptop": {
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "mean_bbox_iou": 0.6504
+      },
+      "person": {
+        "tp": 15,
+        "fp": 0,
+        "fn": 1,
+        "precision": 1.0,
+        "recall": 0.9375,
+        "f1": 0.9677,
+        "mean_bbox_iou": 0.9035
+      }
+    },
+    "person_detection": {
+      "tp": 15,
+      "fp": 0,
+      "fn": 1,
+      "precision": 1.0,
+      "recall": 0.9375,
+      "f1": 0.9677,
+      "mean_bbox_iou": 0.9035
+    },
+    "common_object_detection": {
+      "tp": 9,
+      "fp": 4,
+      "fn": 8,
+      "precision": 0.6923,
+      "recall": 0.5294,
+      "f1": 0.6,
+      "mean_bbox_iou": 0.8311
+    },
+    "small_object_detection": {
+      "tp": 9,
+      "fn": 3,
+      "total_gt": 12,
+      "recall": 0.75
+    },
+    "partially_occluded_detection": {
+      "tp": 11,
+      "fn": 3,
+      "total_gt": 14,
+      "recall": 0.7857
+    },
+    "multiple_moving_objects": {
+      "tp": 6,
+      "fn": 0,
+      "total_gt": 6,
+      "recall": 1.0
+    },
+    "dog_false_positives": 0,
+    "false_positives": [
+      {
+        "frame_id": "frame_01",
+        "predicted_class": "chair",
+        "confidence": 0.7088,
+        "pred_bbox": [
+          945,
+          388,
+          1279,
+          711
+        ],
+        "max_gt_overlap_iou": 0.826,
+        "overlapping_gt_class": "cell phone"
+      },
+      {
+        "frame_id": "frame_05",
+        "predicted_class": "bowl",
+        "confidence": 0.3063,
+        "pred_bbox": [
+          153,
+          155,
+          261,
+          229
+        ],
+        "max_gt_overlap_iou": 0.878,
+        "overlapping_gt_class": "bowl"
+      },
+      {
+        "frame_id": "frame_07",
+        "predicted_class": "chair",
+        "confidence": 0.4246,
+        "pred_bbox": [
+          1173,
+          627,
+          1279,
+          718
+        ],
+        "max_gt_overlap_iou": 0.117,
+        "overlapping_gt_class": null
+      },
+      {
+        "frame_id": "frame_12",
+        "predicted_class": "chair",
+        "confidence": 0.5502,
+        "pred_bbox": [
+          979,
+          543,
+          1199,
+          717
+        ],
+        "max_gt_overlap_iou": 0.03,
+        "overlapping_gt_class": null
+      }
+    ],
+    "false_negatives": [
+      {
+        "frame_id": "frame_01",
+        "class_name": "cell phone",
+        "gt_bbox": [
+          930,
+          425,
+          1280,
+          720
+        ],
+        "small": false,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_02",
+        "class_name": "cell phone",
+        "gt_bbox": [
+          815,
+          510,
+          1165,
+          720
+        ],
+        "small": false,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_04",
+        "class_name": "cell phone",
+        "gt_bbox": [
+          875,
+          395,
+          1175,
+          720
+        ],
+        "small": false,
+        "occluded": true
+      },
+      {
+        "frame_id": "frame_05",
+        "class_name": "person",
+        "gt_bbox": [
+          0,
+          115,
+          1155,
+          720
+        ],
+        "small": false,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_06",
+        "class_name": "bottle",
+        "gt_bbox": [
+          5,
+          40,
+          92,
+          200
+        ],
+        "small": true,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_10",
+        "class_name": "bottle",
+        "gt_bbox": [
+          855,
+          265,
+          1090,
+          675
+        ],
+        "small": false,
+        "occluded": true
+      },
+      {
+        "frame_id": "frame_10",
+        "class_name": "bottle",
+        "gt_bbox": [
+          115,
+          468,
+          152,
+          528
+        ],
+        "small": true,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_11",
+        "class_name": "bottle",
+        "gt_bbox": [
+          115,
+          468,
+          152,
+          528
+        ],
+        "small": true,
+        "occluded": false
+      },
+      {
+        "frame_id": "frame_12",
+        "class_name": "backpack",
+        "gt_bbox": [
+          405,
+          0,
+          570,
+          345
+        ],
+        "small": false,
+        "occluded": true
+      }
+    ],
+    "per_frame": [
+      {
+        "frame_id": "frame_01",
+        "gt_count": 2,
+        "pred_count": 2,
+        "tp": 1,
+        "fp": 1,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_02",
+        "gt_count": 2,
+        "pred_count": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_03",
+        "gt_count": 1,
+        "pred_count": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0
+      },
+      {
+        "frame_id": "frame_04",
+        "gt_count": 2,
+        "pred_count": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_05",
+        "gt_count": 4,
+        "pred_count": 4,
+        "tp": 3,
+        "fp": 1,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_06",
+        "gt_count": 5,
+        "pred_count": 4,
+        "tp": 4,
+        "fp": 0,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_07",
+        "gt_count": 3,
+        "pred_count": 4,
+        "tp": 3,
+        "fp": 1,
+        "fn": 0
+      },
+      {
+        "frame_id": "frame_08",
+        "gt_count": 3,
+        "pred_count": 3,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0
+      },
+      {
+        "frame_id": "frame_09",
+        "gt_count": 2,
+        "pred_count": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0
+      },
+      {
+        "frame_id": "frame_10",
+        "gt_count": 3,
+        "pred_count": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 2
+      },
+      {
+        "frame_id": "frame_11",
+        "gt_count": 3,
+        "pred_count": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 1
+      },
+      {
+        "frame_id": "frame_12",
+        "gt_count": 3,
+        "pred_count": 3,
+        "tp": 2,
+        "fp": 1,
+        "fn": 1
+      }
+    ]
+  },
+  "production_calibrated_iou50": {
+    "tp": 24,
+    "fp": 4,
+    "fn": 9,
+    "precision": 0.8571,
+    "recall": 0.7273,
+    "f1": 0.7869,
+    "mean_bbox_iou": 0.8764
+  },
+  "confidence_threshold_sweep": {
+    "0.20": {
+      "overall": {
+        "tp": 23,
+        "fp": 11,
+        "fn": 10,
+        "precision": 0.6765,
+        "recall": 0.697,
+        "f1": 0.6866,
+        "mean_bbox_iou": 0.872
+      },
+      "person_detection": {
+        "tp": 16,
+        "fp": 2,
+        "fn": 0,
+        "precision": 0.8889,
+        "recall": 1.0,
+        "f1": 0.9412,
+        "mean_bbox_iou": 0.8847
+      },
+      "common_object_detection": {
+        "tp": 7,
+        "fp": 9,
+        "fn": 10,
+        "precision": 0.4375,
+        "recall": 0.4118,
+        "f1": 0.4242,
+        "mean_bbox_iou": 0.843
+      },
+      "small_object_recall": 0.75,
+      "occluded_object_recall": 0.7857
+    },
+    "0.25": {
+      "overall": {
+        "tp": 23,
+        "fp": 10,
+        "fn": 10,
+        "precision": 0.697,
+        "recall": 0.697,
+        "f1": 0.697,
+        "mean_bbox_iou": 0.872
+      },
+      "person_detection": {
+        "tp": 16,
+        "fp": 2,
+        "fn": 0,
+        "precision": 0.8889,
+        "recall": 1.0,
+        "f1": 0.9412,
+        "mean_bbox_iou": 0.8847
+      },
+      "common_object_detection": {
+        "tp": 7,
+        "fp": 8,
+        "fn": 10,
+        "precision": 0.4667,
+        "recall": 0.4118,
+        "f1": 0.4375,
+        "mean_bbox_iou": 0.843
+      },
+      "small_object_recall": 0.75,
+      "occluded_object_recall": 0.7857
+    },
+    "0.35": {
+      "overall": {
+        "tp": 19,
+        "fp": 4,
+        "fn": 14,
+        "precision": 0.8261,
+        "recall": 0.5758,
+        "f1": 0.6786,
+        "mean_bbox_iou": 0.8854
+      },
+      "person_detection": {
+        "tp": 16,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "mean_bbox_iou": 0.8847
+      },
+      "common_object_detection": {
+        "tp": 3,
+        "fp": 4,
+        "fn": 14,
+        "precision": 0.4286,
+        "recall": 0.1765,
+        "f1": 0.25,
+        "mean_bbox_iou": 0.8894
+      },
+      "small_object_recall": 0.4167,
+      "occluded_object_recall": 0.7143
+    },
+    "0.45": {
+      "overall": {
+        "tp": 16,
+        "fp": 2,
+        "fn": 17,
+        "precision": 0.8889,
+        "recall": 0.4848,
+        "f1": 0.6275,
+        "mean_bbox_iou": 0.8995
+      },
+      "person_detection": {
+        "tp": 15,
+        "fp": 0,
+        "fn": 1,
+        "precision": 1.0,
+        "recall": 0.9375,
+        "f1": 0.9677,
+        "mean_bbox_iou": 0.9028
+      },
+      "common_object_detection": {
+        "tp": 1,
+        "fp": 2,
+        "fn": 16,
+        "precision": 0.3333,
+        "recall": 0.0588,
+        "f1": 0.1,
+        "mean_bbox_iou": 0.8504
+      },
+      "small_object_recall": 0.25,
+      "occluded_object_recall": 0.5714
+    },
+    "0.55": {
+      "overall": {
+        "tp": 14,
+        "fp": 2,
+        "fn": 19,
+        "precision": 0.875,
+        "recall": 0.4242,
+        "f1": 0.5714,
+        "mean_bbox_iou": 0.9012
+      },
+      "person_detection": {
+        "tp": 14,
+        "fp": 0,
+        "fn": 2,
+        "precision": 1.0,
+        "recall": 0.875,
+        "f1": 0.9333,
+        "mean_bbox_iou": 0.9012
+      },
+      "common_object_detection": {
+        "tp": 0,
+        "fp": 2,
+        "fn": 17,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "mean_bbox_iou": 0.0
+      },
+      "small_object_recall": 0.1667,
+      "occluded_object_recall": 0.4286
+    }
+  },
+  "bytetrack_evaluation": {
+    "overall_id_stability_ratio": 1.0,
+    "total_tracked_target_observations": 299,
+    "total_id_switches": 0,
+    "total_fragmentations": 1,
+    "total_duplicate_track_frames": 0,
+    "total_out_of_bounds_boxes": 0,
+    "trajectory_metrics": {
+      "mean_step_displacement_px": 5.987,
+      "p95_step_displacement_px": 19.362,
+      "max_step_jump_px": 110.005,
+      "out_of_bounds_coordinates": 0
+    },
+    "occlusion_recovery_test": {
+      "occluded_frames": 8,
+      "pre_occlusion_track_id": 2,
+      "phantom_tracks_during_blackout": 0,
+      "post_occlusion_track_id": 2,
+      "recovered_same_id": true
+    },
+    "lost_track_handling_test": {
+      "absent_frames": 105,
+      "track_buffer_configured": 75,
+      "initial_track_id": 2,
+      "phantom_emissions_while_lost": 0,
+      "reentry_track_id_after_expiry": 3,
+      "expired_and_reallocated_cleanly": true
+    },
+    "sequences": [
+      {
+        "sequence_id": "seq_01_cam4_motion",
+        "frames_evaluated": 60,
+        "duplicate_track_frames": 0,
+        "out_of_bounds_boxes": 0,
+        "targets": [
+          {
+            "gt_id": "person_1",
+            "class_name": "person",
+            "frames_total": 60,
+            "frames_tracked": 60,
+            "coverage_ratio": 1.0,
+            "primary_track_id": 2,
+            "unique_track_ids": [
+              2
+            ],
+            "id_stability_ratio": 1.0,
+            "id_switches": 0,
+            "fragmentations": 0
+          },
+          {
+            "gt_id": "phone_1",
+            "class_name": "cell phone",
+            "frames_total": 60,
+            "frames_tracked": 0,
+            "coverage_ratio": 0.0,
+            "primary_track_id": null,
+            "unique_track_ids": [],
+            "id_stability_ratio": 0.0,
+            "id_switches": 0,
+            "fragmentations": 0
+          }
+        ]
+      },
+      {
+        "sequence_id": "seq_02_cam8_multiobj",
+        "frames_evaluated": 60,
+        "duplicate_track_frames": 0,
+        "out_of_bounds_boxes": 0,
+        "targets": [
+          {
+            "gt_id": "person_1",
+            "class_name": "person",
+            "frames_total": 60,
+            "frames_tracked": 53,
+            "coverage_ratio": 0.8833,
+            "primary_track_id": 2,
+            "unique_track_ids": [
+              2
+            ],
+            "id_stability_ratio": 1.0,
+            "id_switches": 0,
+            "fragmentations": 0
+          },
+          {
+            "gt_id": "bottle_left_1",
+            "class_name": "bottle",
+            "frames_total": 60,
+            "frames_tracked": 6,
+            "coverage_ratio": 0.1,
+            "primary_track_id": 10,
+            "unique_track_ids": [
+              10
+            ],
+            "id_stability_ratio": 1.0,
+            "id_switches": 0,
+            "fragmentations": 1
+          }
+        ]
+      },
+      {
+        "sequence_id": "seq_03_cam8_desk",
+        "frames_evaluated": 60,
+        "duplicate_track_frames": 0,
+        "out_of_bounds_boxes": 0,
+        "targets": [
+          {
+            "gt_id": "person_center",
+            "class_name": "person",
+            "frames_total": 60,
+            "frames_tracked": 60,
+            "coverage_ratio": 1.0,
+            "primary_track_id": 1,
+            "unique_track_ids": [
+              1
+            ],
+            "id_stability_ratio": 1.0,
+            "id_switches": 0,
+            "fragmentations": 0
+          },
+          {
+            "gt_id": "person_left",
+            "class_name": "person",
+            "frames_total": 60,
+            "frames_tracked": 60,
+            "coverage_ratio": 1.0,
+            "primary_track_id": 3,
+            "unique_track_ids": [
+              3
+            ],
+            "id_stability_ratio": 1.0,
+            "id_switches": 0,
+            "fragmentations": 0
+          },
+          {
+            "gt_id": "person_right",
+            "class_name": "person",
+            "frames_total": 60,
+            "frames_tracked": 60,
+            "coverage_ratio": 1.0,
+            "primary_track_id": 2,
+            "unique_track_ids": [
+              2
+            ],
+            "id_stability_ratio": 1.0,
+            "id_switches": 0,
+            "fragmentations": 0
+          }
+        ]
+      }
+    ]
+  }
+}

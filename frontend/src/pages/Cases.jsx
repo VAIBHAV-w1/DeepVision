@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { formatDate } from '../utils/formatters';
+import { useTranslation } from '../i18n/i18nContext';
 
 export function Cases({ onNavigate, selectedId, initialAlertId }) {
+  const { t } = useTranslation();
   const [cases, setCases] = useState([]);
   const [status, setStatus] = useState('');
   const [priority, setPriority] = useState('');
@@ -51,15 +53,12 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
   return (
     <div className="cases-page-container">
       {/* Operational Header */}
-      <div className="hero-editorial-wrap" style={{ marginBottom: '1.25rem' }}>
-        <div className="editorial-badge-pill" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#10b981', padding: '4px 12px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', marginBottom: '8px' }}>
-          <span>INCIDENT WORKFLOWS</span>
-        </div>
-        <h1 className="editorial-hero-title" style={{ fontSize: '1.6rem', fontWeight: 700, margin: '2px 0 6px 0', letterSpacing: '-0.02em', color: 'var(--text-main)' }}>
-          Incident Case Management
+      <div className="hero-editorial-wrap" style={{ marginBottom: '1rem' }}>
+        <h1 className="editorial-hero-title" style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 4px 0', color: 'var(--text-main)' }}>
+          {t('cases.title', 'Incident Case Management')}
         </h1>
-        <p className="editorial-hero-subtitle" style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: 0 }}>
-          Organize security incidents, track investigation notes, and review linked evidence.
+        <p className="editorial-hero-subtitle" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0 }}>
+          {t('cases.subtitle', 'Track investigation cases and security escalations')}
         </p>
       </div>
 

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { formatDate } from '../utils/formatters';
+import { useTranslation } from '../i18n/i18nContext';
 
 export function Evidence({ onNavigate, initialCameraId, initialAlertId, selectedId }) {
+  const { t } = useTranslation();
   const [evidenceList, setEvidenceList] = useState([]);
   const [cameras, setCameras] = useState([]);
   const [currentType, setCurrentType] = useState('all');
@@ -51,15 +53,12 @@ export function Evidence({ onNavigate, initialCameraId, initialAlertId, selected
   return (
     <div className="evidence-page-container">
       {/* Operational Header */}
-      <div className="hero-editorial-wrap" style={{ marginBottom: '1.25rem' }}>
-        <div className="editorial-badge-pill" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#10b981', padding: '4px 12px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', marginBottom: '8px' }}>
-          <span>PRESERVED ARTIFACTS</span>
-        </div>
-        <h1 className="editorial-hero-title" style={{ fontSize: '1.6rem', fontWeight: 700, margin: '2px 0 6px 0', letterSpacing: '-0.02em', color: 'var(--text-main)' }}>
-          Evidence Vault
+      <div className="hero-editorial-wrap" style={{ marginBottom: '1rem' }}>
+        <h1 className="editorial-hero-title" style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 4px 0', color: 'var(--text-main)' }}>
+          {t('evidence.title', 'Digital Evidence Vault')}
         </h1>
-        <p className="editorial-hero-subtitle" style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: 0 }}>
-          Review preserved evidence frames and recorded clips associated with security detection events.
+        <p className="editorial-hero-subtitle" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0 }}>
+          {t('evidence.subtitle', 'Saved snapshots and incident video clips for forensic review')}
         </p>
       </div>
 

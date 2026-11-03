@@ -92,9 +92,9 @@ export function Login({ onNavigate, onNeedsVerification }) {
         onNeedsVerification(res.email || email);
       } else if (res && res.success && res.user) {
         await checkAuth();
-        onNavigate('dashboard');
+        onNavigate('surveillance');
       } else {
-        setError(res?.error || 'Invalid email or password.');
+        setError(res?.error || t('auth.signInFailed', 'Sign-in Failed. Check your credentials.'));
       }
     } catch (err) {
       if (err.data && err.data.needs_verification) {
@@ -121,16 +121,16 @@ export function Login({ onNavigate, onNeedsVerification }) {
     try {
       setLoading(true);
       setError(null);
-      const res = await api.auth.verifyOtp(email, otpCode);
+      const res = await api.auth.verifyLoginOtp(email, otpCode);
       if (res && res.success) {
         addToast('Authentication verified. Welcome to DeepVision!', 'success');
         await checkAuth();
-        onNavigate('dashboard');
+        onNavigate('surveillance');
       } else {
-        setError(res?.error || 'Verification failed. Code may be invalid or expired.');
+        setError(res?.error || t('auth.invalidOtp', 'Invalid or expired verification code. Please try again.'));
       }
     } catch (err) {
-      setError(err.message || 'Invalid or expired verification code.');
+      setError(err.message || t('auth.invalidOtp', 'Invalid or expired verification code. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -142,7 +142,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
     try {
       setResending(true);
       setError(null);
-      const res = await api.auth.resendOtp(email);
+      const res = await api.auth.resendLoginOtp(email);
       addToast(res.message || 'A new verification code has been dispatched.', 'info');
       setCooldown(60);
       setDigits(['', '', '', '', '', '']);
@@ -157,19 +157,42 @@ export function Login({ onNavigate, onNeedsVerification }) {
   return (
     <AuthLayout>
       {step === 'credentials' ? (
-        <>
-          <div className="auth-header" style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-            <h2 className="auth-title" style={{ fontSize: '1.55rem', fontWeight: 800, letterSpacing: '-0.025em', color: 'var(--text-main)', marginBottom: '6px' }}>
-              {t('auth.loginTitle', 'Surveillance Operations Center')}
-            </h2>
-            <p className="auth-subtitle" style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: 0 }}>
-              {t('auth.loginSubtitle', 'Hardware Camera Ingestion & Optical AI Control')}
-            </p>
+        <div
+          style={{
+            background: '#0D1527',
+            border: '1px solid #1A253C',
+            borderRadius: '16px',
+            padding: '2.25rem 2rem',
+            boxShadow: '0 16px 40px rgba(0, 0, 0, 0.5)',
+          }}
+        >
+          {/* Top Shield Icon matching Figure 7.1.1 */}
+          <div
+            style={{
+              width: '46px',
+              height: '46px',
+              borderRadius: '12px',
+              background: 'rgba(37, 99, 235, 0.18)',
+              border: '1px solid rgba(56, 189, 248, 0.35)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 1.25rem auto',
+              boxShadow: '0 4px 16px rgba(37, 99, 235, 0.3)',
+            }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" strokeWidth="2.2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
           </div>
 
-          <div style={{ marginBottom: '1.25rem', padding: '8px 12px', background: 'rgba(16, 185, 129, 0.06)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
-            <span style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>Operator Workstation &bull; Two-Factor Authentication</span>
+          <div className="auth-header" style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+            <h2 className="auth-title" style={{ fontSize: '1.6rem', fontWeight: 800, letterSpacing: '-0.025em', color: '#F8FAFC', margin: '0 0 6px 0' }}>
+              {t('auth.welcomeBack', 'Welcome Back')}
+            </h2>
+            <p className="auth-subtitle" style={{ fontSize: '0.86rem', color: '#94A3B8', margin: 0 }}>
+              {t('auth.signInAccount', 'Sign in to your DeepVision account')}
+            </p>
           </div>
 
 
@@ -188,7 +211,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                 id="email"
                 name="email"
                 className="form-control"
-                placeholder="operator@deepvision.local"
+                placeholder="vaibhav@deepvision.ai"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -266,7 +289,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                   checked={remember}
                   onChange={(e) => setRemember(e.target.checked)}
                 />
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Remember this workstation for 30 days</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{t('auth.rememberMe', 'Remember me')}</span>
               </label>
             </div>
 
@@ -274,20 +297,36 @@ export function Login({ onNavigate, onNeedsVerification }) {
             <button
               type="submit"
               disabled={loading}
-              className="btn btn-primary btn-lg"
-              style={{ width: '100%', marginTop: '0.5rem' }}
+              id="btn-login-submit"
+              style={{
+                width: '100%',
+                marginTop: '0.75rem',
+                padding: '11px 20px',
+                borderRadius: '8px',
+                fontSize: '0.92rem',
+                fontWeight: 700,
+                backgroundColor: '#2563EB',
+                color: '#FFFFFF',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+                transition: 'background 0.15s ease',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2563EB'}
             >
-              {loading ? `${t('auth.signIn', 'Sign In')}...` : t('auth.signIn', 'Sign In')}
+              {loading ? `${t('auth.login', 'Login')}...` : t('auth.login', 'Login')}
             </button>
 
-            <div className="auth-footer-text">
-              No account yet?{' '}
+            <div className="auth-footer-text" style={{ marginTop: '1.25rem', textAlign: 'center', fontSize: '0.86rem', color: '#94A3B8' }}>
+              {t('auth.dontHaveAccount', "Don't have an account?")}{' '}
               <a
                 href="#signup"
+                id="link-create-account"
                 onClick={(e) => { e.preventDefault(); onNavigate('signup'); }}
-                style={{ fontWeight: 600 }}
+                style={{ fontWeight: 700, color: '#38BDF8', textDecoration: 'none' }}
               >
-                {t('auth.signUp', 'Create account')}
+                {t('auth.createAccount', 'Create Account')}
               </a>
             </div>
 
@@ -299,9 +338,11 @@ export function Login({ onNavigate, onNeedsVerification }) {
               <button
                 type="button"
                 id="btn-demo-operator-access"
-                onClick={() => {
-                  loginAsDemo();
-                  onNavigate('dashboard');
+                onClick={async () => {
+                  try {
+                    await loginAsDemo();
+                  } catch (_) {}
+                  onNavigate('surveillance');
                 }}
                 className="btn btn-secondary btn-md"
                 style={{
@@ -323,14 +364,14 @@ export function Login({ onNavigate, onNeedsVerification }) {
               </button>
             </div>
           </form>
-        </>
+        </div>
       ) : (
         /* STEP 2: TWO-FACTOR AUTHENTICATION / LOGIN OTP */
         <>
           <div className="auth-header">
-            <h2 className="auth-title">Two-Factor Authentication</h2>
+            <h2 className="auth-title">{t('auth.otpPrompt', 'Enter 6-Digit Code')}</h2>
             <p className="auth-subtitle">
-              Enter Sign-In Code sent to <strong style={{ color: 'var(--text-main)' }}>{email}</strong>
+              {t('auth.otpSubtitle', 'Enter code sent to')} <strong style={{ color: 'var(--text-main)' }}>{email}</strong>
             </p>
           </div>
 
@@ -396,7 +437,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
               className="btn btn-primary btn-lg"
               style={{ width: '100%', marginTop: '0.75rem' }}
             >
-              {loading ? 'Verifying Code...' : 'Verify Sign-In Code'}
+              {loading ? `${t('common.loading', 'Loading...')} ` : t('auth.verifyOtp', 'Verify & Sign In')}
             </button>
 
             {/* Resend & Back controls */}
@@ -415,7 +456,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                   padding: 0,
                 }}
               >
-                {resending ? 'Sending...' : cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend Code'}
+                {resending ? `${t('common.loading', 'Loading...')} ` : cooldown > 0 ? `Resend in ${cooldown}s` : t('auth.resendOtp', 'Resend Code')}
               </button>
             </div>
 

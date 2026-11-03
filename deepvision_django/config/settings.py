@@ -55,6 +55,9 @@ EMAIL_HOST_PASSWORD = os.getenv('MAIL_PASSWORD') or os.getenv('SMTP_PASSWORD', '
 EMAIL_USE_TLS = (os.getenv('MAIL_USE_TLS') or os.getenv('SMTP_USE_TLS', 'True')).lower() == 'true'
 EMAIL_USE_SSL = (os.getenv('MAIL_USE_SSL') or os.getenv('SMTP_USE_SSL', 'False')).lower() == 'true'
 DEFAULT_FROM_EMAIL = os.getenv('MAIL_DEFAULT_SENDER') or os.getenv('SMTP_FROM') or EMAIL_HOST_USER
+EMAIL_TIMEOUT = max(1, _safe_int(os.getenv('MAIL_TIMEOUT') or os.getenv('SMTP_TIMEOUT'), 8))
+if EMAIL_USE_TLS and EMAIL_USE_SSL:
+    raise ImproperlyConfigured('Configure either SMTP TLS or SSL, not both.')
 
 # Application definition - Phase 3 & 4 Web Layer
 INSTALLED_APPS = [
@@ -71,6 +74,8 @@ INSTALLED_APPS = [
     'apps.notifications',
     'apps.ai',
 ]
+
+AUTH_USER_MODEL = 'accounts.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -241,8 +246,9 @@ MEDIA_URL = '/media/'
 
 # Native Django Surveillance Subsystem Configuration
 SURVEILLANCE_ARCHITECTURE = 'native_django'
-YOLO_CONFIDENCE_THRESHOLD = 0.50
-YOLO_INFERENCE_INTERVAL_MS = 150
+YOLO_CONFIDENCE_THRESHOLD = 0.35
+YOLO_INFERENCE_INTERVAL_MS = 60
+YOLO_IMAGE_SIZE = 640
 
 # Logging Configuration
 LOGGING = {

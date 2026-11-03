@@ -1,0 +1,249 @@
+{
+  "timestamp": "2026-10-31T18:29:21.170Z",
+  "summary": {
+    "total": 34,
+    "pass": 28,
+    "fail": 6,
+    "blocked": 0
+  },
+  "results": [
+    {
+      "id": "OTP-01",
+      "title": "Authentication form appearance",
+      "status": "PASS",
+      "duration_ms": 905,
+      "evidence": "Login form rendered: true, Title: \"DeepVision : Intelligent Surveillance SOC\""
+    },
+    {
+      "id": "OTP-02",
+      "title": "Form validation on empty/invalid input",
+      "status": "PASS",
+      "duration_ms": 535,
+      "evidence": "Validation triggered on empty submission: true"
+    },
+    {
+      "id": "OTP-03",
+      "title": "Valid credentials advance to OTP step",
+      "status": "PASS",
+      "duration_ms": 329,
+      "evidence": "Advanced to 6-digit verification code step: true"
+    },
+    {
+      "id": "OTP-04",
+      "title": "Delivery attempt via configured provider",
+      "status": "FAIL",
+      "duration_ms": 1563,
+      "evidence": "Backend OTP persisted with PBKDF2 hash, 0 initial attempts, and sent_at timestamp: 20 objects imported automatically (use -v 2 for details).\r\n\r\n>>> >>> >>> >>> RESULT:False:0:True\r\n>>>"
+    },
+    {
+      "id": "OTP-07",
+      "title": "Incorrect OTP rejection and attempt count",
+      "status": "FAIL",
+      "duration_ms": 1466,
+      "evidence": "Rejected invalid OTP: \"true\", recorded attempts: 0"
+    },
+    {
+      "id": "OTP-08",
+      "title": "Expired OTP rejection",
+      "status": "FAIL",
+      "duration_ms": 8747,
+      "evidence": "Expired OTP strictly rejected: false"
+    },
+    {
+      "id": "OTP-10",
+      "title": "Resend cooldown enforcement & invalidation",
+      "status": "PASS",
+      "duration_ms": 35,
+      "evidence": "Resend endpoint status: 429, payload: {\"success\":false,\"error\":\"Please wait 49 seconds before requesting a new verification code.\",\"cooldown\":49}"
+    },
+    {
+      "id": "OTP-11",
+      "title": "Attempt lockout enforcement (max 5)",
+      "status": "FAIL",
+      "duration_ms": 8660,
+      "evidence": "Lockout message displayed: false"
+    },
+    {
+      "id": "OTP-05",
+      "title": "Valid OTP verification through UI",
+      "status": "FAIL",
+      "duration_ms": 12012,
+      "evidence": "Entered valid 6-digit OTP into browser UI; verified successfully: false"
+    },
+    {
+      "id": "OTP-06",
+      "title": "Session established & authenticated navigation",
+      "status": "FAIL",
+      "duration_ms": 12013,
+      "evidence": "Landed on SOC Monitor / Dashboard after OTP validation: false"
+    },
+    {
+      "id": "OTP-09",
+      "title": "Single-use replay rejection (wiped hash)",
+      "status": "PASS",
+      "duration_ms": 1502,
+      "evidence": "Replay attempt rejected: 20 objects imported automatically (use -v 2 for details).\r\n\r\n>>> >>> >>> >>> >>> REPLAY:False:No verification code exists. Please request a new code.\r\n>>>"
+    },
+    {
+      "id": "OTP-12",
+      "title": "Session preservation across page reload",
+      "status": "PASS",
+      "duration_ms": 840,
+      "evidence": "Reloaded dashboard while authenticated; session intact: true"
+    },
+    {
+      "id": "OTP-13",
+      "title": "CSRF protection on auth endpoints",
+      "status": "PASS",
+      "duration_ms": 65,
+      "evidence": "State-changing OTP request without CSRF returned HTTP 403"
+    },
+    {
+      "id": "OTP-14",
+      "title": "Password reset OTP initiation & enumeration protection",
+      "status": "PASS",
+      "duration_ms": 1525,
+      "evidence": "Reset request returned HTTP 200: \"If an account exists with this email, a reset code has been sent.\""
+    },
+    {
+      "id": "OTP-15",
+      "title": "Zero OTP / credential leakage in console & logs",
+      "status": "PASS",
+      "duration_ms": 0,
+      "evidence": "Console logs audited (0 entries): zero OTP or password values exposed"
+    },
+    {
+      "id": "PAGE-01",
+      "title": "Canonical Monitor workspace & legacy dashboard redirect",
+      "status": "PASS",
+      "duration_ms": 653,
+      "evidence": "Monitor workspace mounted: true, surveillance HUD visible: true"
+    },
+    {
+      "id": "PAGE-02",
+      "title": "Cameras Gallery route & search controls",
+      "status": "PASS",
+      "duration_ms": 9545,
+      "evidence": "Cameras listed: 10, search filter input present: true"
+    },
+    {
+      "id": "PAGE-03",
+      "title": "Live Camera monitoring, player canvas & HUD",
+      "status": "PASS",
+      "duration_ms": 535,
+      "evidence": "Live player mounted: true, HUD telemetry visible: true"
+    },
+    {
+      "id": "PAGE-04",
+      "title": "Recordings Library route & pagination",
+      "status": "PASS",
+      "duration_ms": 615,
+      "evidence": "Recordings rendered: 25, pagination indicator: true"
+    },
+    {
+      "id": "PAGE-05",
+      "title": "Evidence Vault route & snapshot forensic registry",
+      "status": "PASS",
+      "duration_ms": 1036,
+      "evidence": "Evidence records rendered: 0"
+    },
+    {
+      "id": "PAGE-06",
+      "title": "Forensic Incident Cases registry",
+      "status": "PASS",
+      "duration_ms": 629,
+      "evidence": "Cases registry container rendered: true"
+    },
+    {
+      "id": "PAGE-07",
+      "title": "Alerts Management inbox & severity/status filters",
+      "status": "PASS",
+      "duration_ms": 637,
+      "evidence": "Alert items rendered: 15, filter controls present: true"
+    },
+    {
+      "id": "PAGE-08",
+      "title": "Notifications Center route",
+      "status": "PASS",
+      "duration_ms": 627,
+      "evidence": "Notifications view rendered: true"
+    },
+    {
+      "id": "PAGE-09",
+      "title": "Help & Support documentation & isolation audit",
+      "status": "PASS",
+      "duration_ms": 1046,
+      "evidence": "Help rendered: true, alert table leak: false, camera grid leak: false"
+    },
+    {
+      "id": "PAGE-10",
+      "title": "Direct route navigation and reload recovery",
+      "status": "PASS",
+      "duration_ms": 15299,
+      "evidence": "All 4 direct routes tested with hard refresh: true"
+    },
+    {
+      "id": "ISO-01",
+      "title": "Cross-navigation cycle isolation (7 transitions)",
+      "status": "PASS",
+      "duration_ms": 7297,
+      "evidence": "Navigated sequence cleanly; Monitor workspace rendered without retained Help or Alert body content"
+    },
+    {
+      "id": "RESP-01",
+      "title": "Responsive viewport Desktop Full HD (1920x1080)",
+      "status": "PASS",
+      "duration_ms": 1613,
+      "evidence": "Width: 1920px, Height: 1080px, Horizontal Overflow: false, Navigation bar rendered: true"
+    },
+    {
+      "id": "RESP-02",
+      "title": "Responsive viewport Desktop HD+ (1600x900)",
+      "status": "PASS",
+      "duration_ms": 1139,
+      "evidence": "Width: 1600px, Height: 900px, Horizontal Overflow: false, Navigation bar rendered: true"
+    },
+    {
+      "id": "RESP-03",
+      "title": "Responsive viewport Laptop WXGA (1366x768)",
+      "status": "PASS",
+      "duration_ms": 2363,
+      "evidence": "Width: 1366px, Height: 768px, Horizontal Overflow: false, Navigation bar rendered: true"
+    },
+    {
+      "id": "RESP-04",
+      "title": "Responsive viewport Tablet Landscape (1024x768)",
+      "status": "PASS",
+      "duration_ms": 1193,
+      "evidence": "Width: 1024px, Height: 768px, Horizontal Overflow: false, Navigation bar rendered: true"
+    },
+    {
+      "id": "RESP-05",
+      "title": "Responsive viewport Tablet Portrait (768x1024)",
+      "status": "PASS",
+      "duration_ms": 1739,
+      "evidence": "Width: 768px, Height: 1024px, Horizontal Overflow: false, Navigation bar rendered: true"
+    },
+    {
+      "id": "RESP-06",
+      "title": "Responsive viewport Mobile iPhone 14 (390x844)",
+      "status": "PASS",
+      "duration_ms": 2447,
+      "evidence": "Width: 390px, Height: 844px, Horizontal Overflow: false, Navigation bar rendered: true"
+    },
+    {
+      "id": "RESP-07",
+      "title": "Responsive viewport Mobile iPhone X (375x812)",
+      "status": "PASS",
+      "duration_ms": 3059,
+      "evidence": "Width: 375px, Height: 812px, Horizontal Overflow: false, Navigation bar rendered: true"
+    },
+    {
+      "id": "ERR-01",
+      "title": "Browser console & runtime exceptions audit",
+      "status": "PASS",
+      "duration_ms": 0,
+      "evidence": "Captured exceptions: 0, Total console messages logged: 0"
+    }
+  ]
+}

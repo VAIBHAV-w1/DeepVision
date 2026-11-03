@@ -36,11 +36,11 @@ class HttpMjpegCapture:
         self._http_status = None
         self._buffer = bytearray()
         self._last_frame = None
+        self._probed_frame = None
         self._width = 0
         self._height = 0
         self._fps = 25.0
         self.last_error = None
-        self._start_time = time.time()
         self._lock = threading.Lock()
         self._open_stream()
 
@@ -69,6 +69,7 @@ class HttpMjpegCapture:
                 ret, frame = self._read_next_frame()
                 if ret and frame is not None:
                     self._last_frame = frame
+                    self._probed_frame = frame
                     self._height, self._width = frame.shape[:2]
                 else:
                     self.release()
@@ -81,28 +82,29 @@ class HttpMjpegCapture:
     def _read_next_frame(self):
         if not self.response:
             return False, None
-        
-        while time.time() - self._start_time < self.timeout:
+
+        deadline = time.monotonic() + self.timeout
+        while time.monotonic() < deadline:
             a = self._buffer.find(b'\xff\xd8')
             if a != -1:
                 if a > 0:
-                    self._buffer = self._buffer[a:]
-                
+                    del self._buffer[:a]
+
                 next_soi = self._buffer.find(b'\xff\xd8', 2)
                 if next_soi != -1:
-                    frame_data = self._buffer[:next_soi]
-                    self._buffer = self._buffer[next_soi:]
+                    frame_data = bytes(self._buffer[:next_soi])
+                    del self._buffer[:next_soi]
                     b = frame_data.find(b'\xff\xd9')
                     if b != -1:
-                        jpg = frame_data[:b+2]
+                        jpg = frame_data[:b + 2]
                         frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
                         if frame is not None and frame.size > 0:
                             return True, frame
 
                 b = self._buffer.find(b'\xff\xd9')
                 if b != -1:
-                    jpg = self._buffer[:b+2]
-                    self._buffer = self._buffer[b+2:]
+                    jpg = bytes(self._buffer[:b + 2])
+                    del self._buffer[:b + 2]
                     frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
                     if frame is not None and frame.size > 0:
                         return True, frame
@@ -110,8 +112,14 @@ class HttpMjpegCapture:
             try:
                 chunk = self.response.read(8192)
                 if not chunk:
+                    self.last_error = "MJPEG stream reached EOF / closed by remote host"
                     break
                 self._buffer.extend(chunk)
+                # Cap malformed unbounded non-JPEG stream buffer at 4 MB
+                if len(self._buffer) > 4 * 1024 * 1024:
+                    self._buffer.clear()
+                    self.last_error = "MJPEG stream buffer overflow without valid JPEG SOI/EOI markers"
+                    break
             except Exception as e:
                 self.last_error = str(e)
                 break
@@ -129,8 +137,14 @@ class HttpMjpegCapture:
                 self._last_frame = frame
                 self._height, self._width = frame.shape[:2]
                 return True, frame
-            elif self._last_frame is not None:
-                return True, self._last_frame.copy()
+            # Never return stale frozen frames when a network MJPEG stream disconnects or times out
+            self._opened = False
+            if self.response:
+                try:
+                    self.response.close()
+                except Exception:
+                    pass
+                self.response = None
             return False, None
 
     def get(self, prop_id):
@@ -182,23 +196,57 @@ def safe_open_video_capture(capture_source, timeout=None):
         with _hardware_webcam_lock:
             if os.name == "nt" or sys.platform.startswith("win"):
                 try:
-                    cap = cv2.VideoCapture(capture_source, cv2.CAP_DSHOW)
+                    mjpg = cv2.VideoWriter_fourcc(*'MJPG')
+                    try:
+                        cap = cv2.VideoCapture(
+                            capture_source,
+                            cv2.CAP_DSHOW,
+                            [
+                                cv2.CAP_PROP_FOURCC, mjpg,
+                                cv2.CAP_PROP_FRAME_WIDTH, 1280,
+                                cv2.CAP_PROP_FRAME_HEIGHT, 720,
+                                cv2.CAP_PROP_FPS, 30,
+                            ],
+                        )
+                    except TypeError:
+                        cap = cv2.VideoCapture(capture_source, cv2.CAP_DSHOW)
+                        if cap.isOpened():
+                            try:
+                                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                                cap.set(cv2.CAP_PROP_FPS, 30)
+                                cap.set(cv2.CAP_PROP_FOURCC, mjpg)
+                            except Exception:
+                                pass
+
                     if cap.isOpened():
-                        # Set standard 1280x720 HD resolution
+                        # Freshness-first: prevent stale DirectShow queue buffering
                         try:
-                            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                         except Exception:
                             pass
-                        ret, frame = cap.read()
-                        if not (ret and frame is not None and getattr(frame, "size", 0) > 0):
-                            # Fall back to default native resolution
-                            ret, frame = cap.read()
+
+                        # Warm up auto-exposure and discard initial blank DirectShow buffers (up to 10 reads / 0.45s)
+                        ret, frame = False, None
+                        t_warm = time.monotonic()
+                        for _ in range(10):
+                            r, f = cap.read()
+                            if r and f is not None and getattr(f, "size", 0) > 0:
+                                ret, frame = r, f
+                                sample = f[::16, ::16]
+                                if float(sample.mean()) >= 2.0 or float(sample.std()) >= 1.0:
+                                    break
+                            if time.monotonic() - t_warm > 0.45:
+                                break
 
                         if ret and frame is not None and getattr(frame, "size", 0) > 0:
-                            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                            print(f"[CAPTURE] DirectShow camera {capture_source} opened: {actual_w}x{actual_h}.")
+                            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or frame.shape[1]
+                            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or frame.shape[0]
+                            try:
+                                setattr(cap, "_probed_frame", frame)
+                            except Exception:
+                                pass
+                            print(f"[CAPTURE] DirectShow camera {capture_source} opened: {actual_w}x{actual_h} (luma={float(frame[::16, ::16].mean()):.1f}).")
                             return cap
                         else:
                             print(f"[DEBUG] DirectShow opened index {capture_source} but read() failed.")

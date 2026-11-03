@@ -1,0 +1,211 @@
+{
+  "suite": "P1_SECURITY_DETECTIONS_END_TO_END",
+  "timestamp": "2026-11-01T17:13:47Z",
+  "passed": 7,
+  "total": 7,
+  "all_passed": true,
+  "supported_algorithms_scope": [
+    "restricted_area_entry (spatial polygon/rectangle centroid containment)",
+    "loitering (radius-bounded dwell duration >= threshold)",
+    "unusual_movement (rolling-window erratic direction reversals or sustained anomalous speed)",
+    "rapid_movement (rolling-window high-velocity dash >= 240 px/s with >= 110 px net displacement)",
+    "abandoned_object (stationary luggage/laptop associated with person owner then left unattended >= threshold)",
+    "crowding (simultaneous tracked person count >= crowd threshold)"
+  ],
+  "non_claimed_features_disclosure": "Semantic theft recognition and semantic violence/fight recognition are explicitly NOT claimed and unvalidated retail alert spam is disabled by default.",
+  "results": [
+    {
+      "id": "DET-01",
+      "feature": "Restricted-Area Intrusion (E2E + Cooldown)",
+      "status": "PASS",
+      "passed": true,
+      "details": "alert_id=6109, evidence_count=2, notif=4875, case=CASE-20261101-EF24FF, dup_within_30s=0, final=resolved",
+      "chain_evidence": {
+        "alert_id": 6109,
+        "event_type": "restricted_area_entry",
+        "title": "Restricted Area Entry (Person)",
+        "severity": "high",
+        "evidence": [
+          {
+            "id": 7966,
+            "type": "snapshot",
+            "exists_nonempty": true,
+            "bytes": 144230
+          },
+          {
+            "id": 7967,
+            "type": "video",
+            "exists_nonempty": true,
+            "bytes": 2350112
+          }
+        ],
+        "notification_id": 4875,
+        "incident_case_number": "CASE-20261101-EF24FF",
+        "ack_status": "acknowledged",
+        "final_status": "resolved"
+      }
+    },
+    {
+      "id": "DET-02",
+      "feature": "Loitering (>10s E2E + <10s FP Rejection)",
+      "status": "PASS",
+      "passed": true,
+      "details": "alert_id=6110, early_fp=False, evidence_count=2, notif=4876, final=resolved",
+      "chain_evidence": {
+        "alert_id": 6110,
+        "event_type": "loitering",
+        "title": "Loitering Detected (Person)",
+        "severity": "medium",
+        "evidence": [
+          {
+            "id": 7968,
+            "type": "snapshot",
+            "exists_nonempty": true,
+            "bytes": 144230
+          },
+          {
+            "id": 7969,
+            "type": "video",
+            "exists_nonempty": true,
+            "bytes": 2350112
+          }
+        ],
+        "notification_id": 4876,
+        "incident_case_number": null,
+        "ack_status": "acknowledged",
+        "final_status": "resolved"
+      }
+    },
+    {
+      "id": "DET-03",
+      "feature": "Rapid Movement (High-Velocity Dash E2E)",
+      "status": "PASS",
+      "passed": true,
+      "details": "alert_id=6111, msg=Rapid high-velocity movement detected (610 px/s across 396 px)., case=CASE-20261101-D54094, final=resolved",
+      "chain_evidence": {
+        "alert_id": 6111,
+        "event_type": "rapid_movement",
+        "title": "Rapid Movement Detected (Person)",
+        "severity": "high",
+        "evidence": [
+          {
+            "id": 7970,
+            "type": "snapshot",
+            "exists_nonempty": true,
+            "bytes": 142759
+          },
+          {
+            "id": 7971,
+            "type": "video",
+            "exists_nonempty": true,
+            "bytes": 2407705
+          }
+        ],
+        "notification_id": 4877,
+        "incident_case_number": "CASE-20261101-D54094",
+        "ack_status": "acknowledged",
+        "final_status": "resolved"
+      }
+    },
+    {
+      "id": "DET-04",
+      "feature": "Unusual Movement (Erratic Reversals E2E)",
+      "status": "PASS",
+      "passed": true,
+      "details": "alert_id=6112, msg=Erratic movement pattern detected (2 rapid direction reversals)., final=resolved",
+      "chain_evidence": {
+        "alert_id": 6112,
+        "event_type": "unusual_movement",
+        "title": "Unusual Movement Detected (Person)",
+        "severity": "medium",
+        "evidence": [
+          {
+            "id": 7972,
+            "type": "snapshot",
+            "exists_nonempty": true,
+            "bytes": 149095
+          },
+          {
+            "id": 7973,
+            "type": "video",
+            "exists_nonempty": true,
+            "bytes": 2321315
+          }
+        ],
+        "notification_id": 4878,
+        "incident_case_number": null,
+        "ack_status": "acknowledged",
+        "final_status": "resolved"
+      }
+    },
+    {
+      "id": "DET-05",
+      "feature": "Abandoned Object (Real Backpack E2E + Attended FP Rejection)",
+      "status": "PASS",
+      "passed": true,
+      "details": "alert_id=6113, title=Potentially Unattended Object (Backpack), attended_fp=False, final=resolved",
+      "chain_evidence": {
+        "alert_id": 6113,
+        "event_type": "abandoned_object",
+        "title": "Potentially Unattended Object (Backpack)",
+        "severity": "high",
+        "evidence": [
+          {
+            "id": 7974,
+            "type": "snapshot",
+            "exists_nonempty": true,
+            "bytes": 159281
+          },
+          {
+            "id": 7975,
+            "type": "video",
+            "exists_nonempty": true,
+            "bytes": 2660924
+          }
+        ],
+        "notification_id": 4879,
+        "incident_case_number": "CASE-20261101-4D2034",
+        "ack_status": "acknowledged",
+        "final_status": "resolved"
+      }
+    },
+    {
+      "id": "DET-06",
+      "feature": "Crowding (threshold=3 configured; 3 Real Persons E2E + Single-Person FP Rejection)",
+      "status": "PASS",
+      "passed": true,
+      "details": "alert_id=6114, single_person_fp=False, production_default_4_fired_on_3_people=False, msg=High density crowding detected: 3 people in view (threshold: 3)., final=resolved",
+      "chain_evidence": {
+        "alert_id": 6114,
+        "event_type": "crowding",
+        "title": "Crowding / High Density Detected (Person)",
+        "severity": "medium",
+        "evidence": [
+          {
+            "id": 7976,
+            "type": "snapshot",
+            "exists_nonempty": true,
+            "bytes": 138945
+          },
+          {
+            "id": 7977,
+            "type": "video",
+            "exists_nonempty": true,
+            "bytes": 2638833
+          }
+        ],
+        "notification_id": 4880,
+        "incident_case_number": null,
+        "ack_status": "acknowledged",
+        "final_status": "resolved"
+      }
+    },
+    {
+      "id": "DET-07",
+      "feature": "Micro-Jitter False-Positive Rejection",
+      "status": "PASS",
+      "passed": true,
+      "details": "False movement alerts on +-3px 25Hz bbox jitter: 0 ([])"
+    }
+  ]
+}

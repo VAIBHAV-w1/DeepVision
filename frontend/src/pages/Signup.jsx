@@ -53,7 +53,7 @@ export function Signup({ onNavigate, onSignedUp }) {
       });
 
       if (res && res.success) {
-        onSignedUp(email);
+        onSignedUp(email, res.email_sent === false);
       } else {
         setError(res?.error || 'Registration failed.');
       }

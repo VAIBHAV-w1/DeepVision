@@ -9,10 +9,12 @@ import json
 import logging
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import StreamingHttpResponse, HttpResponse, JsonResponse, Http404
+from django.core.exceptions import PermissionDenied
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.cache import never_cache
 
 from apps.accounts.decorators import login_required
+from apps.core.audit import log_audit
 from apps.cameras.models import Camera, CameraGroup, SurveillancePreset
 from apps.ai.engine import (
     stream_camera_frames,
@@ -37,36 +39,41 @@ logger = logging.getLogger(__name__)
 
 def get_accessible_cameras_qs(user):
     """
-    Returns queryset of cameras accessible to user:
-    - Admin/Supervisor: all cameras.
-    - User with assigned cameras: user's cameras.
-    - User without assigned cameras: all online or registered cameras.
+    Returns queryset of active cameras accessible to user:
+    - Admin/Supervisor/Operator: all active SOC cameras.
+    - Standard user: strictly their own personal cameras plus shared facility staff cameras
+      (never another standard user's private cameras).
     """
-    if getattr(user, 'role', '') in ('admin', 'supervisor') or getattr(user, 'is_superuser', False):
-        return Camera.objects.all().order_by('id')
-    qs = Camera.objects.filter(user_id=user.id).order_by('id')
-    if not qs.exists():
-        qs = Camera.objects.filter(status='online').order_by('id')
-        if not qs.exists():
-            qs = Camera.objects.all().order_by('id')
-    return qs
+    from django.db.models import Q
+    base_qs = Camera.objects.filter(is_active=True)
+    is_staff_role = getattr(user, 'role', '') in ('admin', 'supervisor', 'operator') or getattr(user, 'is_superuser', False)
+    if is_staff_role:
+        return base_qs.order_by('id')
+
+    return base_qs.filter(
+        Q(user_id=user.id) | Q(user__role__in=('admin', 'supervisor', 'operator'))
+    ).order_by('id')
 
 
-def get_user_camera_or_404(user, camera_id):
+def get_user_camera_or_404(user, camera_id, require_write=False):
     """
-    Safely resolves camera object with role-based and fallback permissions:
-    1. If user is admin/supervisor (staff), can access any camera.
-    2. If camera is owned by user, access granted.
-    3. If user has no cameras assigned, or camera is an active physical/webcam stream, allow access.
+    Safely resolves camera object with strict RBAC and multi-tenant BOLA/IDOR enforcement:
+    - Write mutations (require_write=True): privileged staff or the personal owner of the camera (403 otherwise).
+    - Read/stream/record access: strictly scoped to get_accessible_cameras_qs(user) (404 otherwise).
     """
-    if getattr(user, 'role', '') in ('admin', 'supervisor') or getattr(user, 'is_superuser', False):
-        return get_object_or_404(Camera, id=camera_id)
-    try:
-        return Camera.objects.get(id=camera_id, user_id=user.id)
-    except Camera.DoesNotExist:
-        if not Camera.objects.filter(user_id=user.id).exists() or Camera.objects.filter(id=camera_id, source_type='webcam').exists():
-            return get_object_or_404(Camera, id=camera_id)
-        raise Http404("Camera not found")
+    is_staff_role = getattr(user, 'role', '') in ('admin', 'supervisor', 'operator') or getattr(user, 'is_superuser', False)
+    camera = get_object_or_404(Camera, id=camera_id)
+
+    if require_write:
+        if camera.user_id == user.id or is_staff_role:
+            return camera
+        raise PermissionDenied("Insufficient privileges to modify this camera or its security zones.")
+
+    if camera.user_id == user.id:
+        return camera
+    if get_accessible_cameras_qs(user).filter(id=camera_id).exists():
+        return camera
+    raise Http404("Camera not found.")
 
 
 @never_cache
@@ -157,6 +164,7 @@ def camera_stream_view(request, camera_id):
     response["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
+    response["X-Accel-Buffering"] = "no"
     return response
 
 
@@ -179,6 +187,7 @@ def camera_stream_tracking_view(request, camera_id):
     response["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
+    response["X-Accel-Buffering"] = "no"
     return response
 
 
@@ -201,6 +210,7 @@ def camera_stream_original_view(request, camera_id):
     response["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
+    response["X-Accel-Buffering"] = "no"
     return response
 
 
@@ -293,6 +303,13 @@ def camera_snapshot_view(request, camera_id):
             logger.error(f"[SNAPSHOT_DB_ERROR] Failed creating Evidence metadata: {e}")
             return JsonResponse({"success": False, "error": f"Database recording failed: {e}"}, status=500)
 
+        log_audit(
+            request,
+            action="MANUAL_SNAPSHOT_CAPTURED",
+            resource_type="evidence",
+            resource_id=evidence.id,
+            description=f"Captured manual snapshot {filename} on camera #{camera.id}.",
+        )
         return JsonResponse({
             "success": True,
             "evidence_id": evidence.id,
@@ -305,9 +322,15 @@ def camera_snapshot_view(request, camera_id):
     if camera.status == "offline":
         return HttpResponse(_get_offline_snapshot_bytes(), content_type="image/jpeg")
 
-    jpeg_bytes = get_camera_snapshot(camera.id, camera.user_id)
+    # Fast preview thumbnail lookup; online local webcams warm capture-only (zero YOLO threads), offline LAN cameras never block
+    allow_sync_start = (camera.source_type in ("webcam", "usb") and camera.status != "offline")
+    jpeg_bytes = get_camera_snapshot(camera.id, camera.user_id, allow_start=allow_sync_start)
     if jpeg_bytes:
         return HttpResponse(jpeg_bytes, content_type="image/jpeg")
+    if camera.source_type in ("webcam", "usb"):
+        import threading
+        from apps.ai.engine import warm_camera_capture_only
+        threading.Thread(target=warm_camera_capture_only, args=(camera.id, camera.user_id), daemon=True).start()
     return HttpResponse(_get_offline_snapshot_bytes(), content_type="image/jpeg")
 
 
@@ -351,12 +374,20 @@ def surveillance_health_api_view(request):
 def camera_record_start_view(request, camera_id):
     """
     Proxies recording start request to canonical surveillance engine.
-    Strictly enforces authorization: only owner or admin can initiate recording.
+    Strictly enforces authorization: any user authorized to access this camera can record.
     """
     camera = get_user_camera_or_404(request.user, camera_id)
-    if getattr(request.user, 'role', '') not in ('admin', 'supervisor') and camera.user_id != request.user.id:
-        return JsonResponse({"status": "error", "message": "Permission denied. Only camera owner or admin can record."}, status=403)
-    result = start_camera_recording(camera.id, camera.user_id)
+    result = start_camera_recording(camera.id, request.user.id)
+    if isinstance(result, dict) and "success" not in result:
+        result["success"] = result.get("status") in ("ok", "warning")
+    if isinstance(result, dict) and result.get("success"):
+        log_audit(
+            request,
+            action="RECORDING_STARTED",
+            resource_type="recording",
+            resource_id=result.get("recording_id"),
+            description=f"Started clip recording on camera #{camera.id} ({camera.name}).",
+        )
     return JsonResponse(result)
 
 
@@ -365,12 +396,20 @@ def camera_record_start_view(request, camera_id):
 def camera_record_stop_view(request, camera_id):
     """
     Proxies recording stop request to canonical surveillance engine.
-    Strictly enforces authorization: only owner or admin can stop recording.
+    Strictly enforces authorization: any user authorized to access this camera can stop recording.
     """
     camera = get_user_camera_or_404(request.user, camera_id)
-    if getattr(request.user, 'role', '') not in ('admin', 'supervisor') and camera.user_id != request.user.id:
-        return JsonResponse({"status": "error", "message": "Permission denied. Only camera owner or admin can control recording."}, status=403)
-    result = stop_camera_recording(camera.id, camera.user_id)
+    result = stop_camera_recording(camera.id, request.user.id)
+    if isinstance(result, dict) and "success" not in result:
+        result["success"] = result.get("status") in ("ok", "warning")
+    if isinstance(result, dict) and result.get("success"):
+        log_audit(
+            request,
+            action="RECORDING_STOPPED",
+            resource_type="recording",
+            resource_id=result.get("recording_id"),
+            description=f"Stopped clip recording on camera #{camera.id} ({camera.name}).",
+        )
     return JsonResponse(result)
 
 
@@ -387,20 +426,31 @@ def camera_test_connection_view(request):
         except Exception:
             data = {}
     source_type = data.get("source_type", "") or request.POST.get("source_type", "")
-    source = data.get("source", "") or request.POST.get("source", "")
-    result = test_camera_connection(source_type, source, request.user.id)
-    return JsonResponse(result)
+    source = (
+        data.get("source", "")
+        or data.get("source_value", "")
+        or request.POST.get("source", "")
+        or request.POST.get("source_value", "")
+    )
+    result = dict(test_camera_connection(source_type, source, request.user.id))
+    http_status = int(result.pop("status_code", 200))
+    return JsonResponse(result, status=http_status)
 
 
 @require_POST
 @login_required
 def camera_test_view(request, camera_id):
     """
-    Tests existing registered camera via canonical surveillance engine.
+    Tests existing registered camera via canonical surveillance engine and updates its operational status.
     """
+    from django.utils import timezone
     camera = get_user_camera_or_404(request.user, camera_id)
-    if getattr(request.user, 'role', '') not in ('admin', 'supervisor') and camera.user_id != request.user.id:
-        return JsonResponse({"status": "error", "message": "Permission denied."}, status=403)
     result = test_existing_camera(camera.id, camera.user_id)
+    new_status = "online" if result.get("success") else "offline"
+    if camera.status != new_status:
+        camera.status = new_status
+        camera.updated_at = timezone.now()
+        camera.save(update_fields=["status", "updated_at"])
+    result["camera_status"] = new_status
     return JsonResponse(result)
 

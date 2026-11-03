@@ -228,13 +228,18 @@ async function main() {
     // -------------------------------------------------------------------------
     // Step 3: Verify Dashboard & Operational Telemetry
     // -------------------------------------------------------------------------
-    const dashboardMetrics = await client.eval(`
-      ({
-        camsHeader: document.querySelector('.dashboard-cams-title')?.innerText || '',
-        activeCards: document.querySelectorAll('.camera-card').length,
-        hasStrip: !!document.querySelector('.dashboard-status-strip'),
-      })
-    `);
+    let dashboardMetrics = { activeCards: 0, hasStrip: false };
+    for (let i = 0; i < 20; i++) {
+      dashboardMetrics = await client.eval(`
+        ({
+          camsHeader: document.querySelector('.dashboard-cams-title')?.innerText || '',
+          activeCards: document.querySelectorAll('.camera-card').length,
+          hasStrip: !!document.querySelector('.dashboard-status-strip') || !!document.querySelector('.dashboard-health-strip'),
+        })
+      `);
+      if (dashboardMetrics.activeCards > 0 && dashboardMetrics.hasStrip) break;
+      await client.wait(250);
+    }
     report(3, 'Dashboard Operational Metrics', dashboardMetrics.activeCards > 0 && dashboardMetrics.hasStrip,
            `Active camera cards: ${dashboardMetrics.activeCards}, Status strip present: ${dashboardMetrics.hasStrip}`);
 
@@ -242,8 +247,12 @@ async function main() {
     // Step 4: Navigate to Cameras Gallery
     // -------------------------------------------------------------------------
     await client.eval("window.location.hash = '#cameras'");
-    await client.wait(1500);
-    const camerasCount = await client.eval("document.querySelectorAll('.camera-card').length");
+    let camerasCount = 0;
+    for (let i = 0; i < 20; i++) {
+      await client.wait(250);
+      camerasCount = await client.eval("document.querySelectorAll('.camera-card').length");
+      if (camerasCount > 0) break;
+    }
     report(4, 'Navigate to Cameras Page', camerasCount > 0, `Rendered ${camerasCount} camera cards`);
     await client.screenshot('02_cameras_gallery.png');
 
@@ -279,7 +288,7 @@ async function main() {
       ({
         fps: document.getElementById('hudFps')?.innerText || '',
         objects: document.getElementById('hudObjects')?.innerText || '',
-        mode: document.getElementById('hudTracking')?.innerText || '',
+        mode: document.getElementById('hudTracking')?.innerText || document.getElementById('telemetryMode')?.innerText || '',
         activeTracks: document.getElementById('aiActiveTracks')?.innerText || '',
         imgNaturalWidth: document.getElementById('camera-live-stream')?.naturalWidth || 0,
         imgNaturalHeight: document.getElementById('camera-live-stream')?.naturalHeight || 0,

@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 56" fill="none" width="260" height="56">
+  <!-- DeepVision Master Brand Identity — Precision Optical Eye & Aperture -->
+  <defs>
+    <linearGradient id="dv-iris-grad" x1="6" y1="8" x2="50" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00F5D4"/>
+      <stop offset="50%" stop-color="#00C9FF"/>
+      <stop offset="100%" stop-color="#0072FF"/>
+    </linearGradient>
+    <linearGradient id="dv-pupil-grad" x1="24" y1="24" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="60%" stop-color="#00F5D4"/>
+      <stop offset="100%" stop-color="#00A3FF"/>
+    </linearGradient>
+    <radialGradient id="dv-glow" cx="28" cy="28" r="16" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00E5FF" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#00E5FF" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="dv-soft-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#00C9FF" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- 1. Sleek Optical Eye Mark (56x56 bounding box) -->
+  <g transform="translate(0, 0)" filter="url(#dv-soft-shadow)">
+    <!-- Soft Focal Glow -->
+    <circle cx="28" cy="28" r="15" fill="url(#dv-glow)"/>
+
+    <!-- Dynamic Upper Eye Ribbon -->
+    <path d="M 6 28 C 13 14, 43 14, 50 28 C 45 22, 38 18, 28 18 C 22.48 18, 18 22.48, 18 28 C 18 31.8, 20.1 35.1, 23.4 36.8"
+          stroke="url(#dv-iris-grad)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+    <!-- Dynamic Lower Interlocking Ribbon -->
+    <path d="M 50 28 C 43 42, 13 42, 6 28 C 11 34, 18 38, 28 38 C 33.52 38, 38 33.52, 38 28 C 38 24.2, 35.9 20.9, 32.6 19.2"
+          stroke="url(#dv-iris-grad)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+    <!-- Core Focal Aperture -->
+    <circle cx="28" cy="28" r="5" fill="url(#dv-pupil-grad)"/>
+
+    <!-- High-Precision Specular Glint -->
+    <circle cx="29.8" cy="26.2" r="1.4" fill="#FFFFFF"/>
+  </g>
+
+  <!-- 2. Refined Wordmark with Precision Typography -->
+  <g transform="translate(64, 14)">
+    <text x="0" y="22"
+          font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif"
+          font-weight="800"
+          font-size="21"
+          letter-spacing="0.06em"
+          fill="#F8FAFC">DEEP<tspan fill="#00D2FF" font-weight="900">VISION</tspan></text>
+    
+    <text x="1" y="34"
+          font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Inter', monospace"
+          font-weight="600"
+          font-size="7.5"
+          letter-spacing="0.22em"
+          fill="#64748B">SURVEILLANCE OPERATIONS</text>
+  </g>
+</svg>

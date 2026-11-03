@@ -24,6 +24,7 @@ from apps.surveillance.ai.behavior.behavior_analyzer import BehaviorAnalyzer
 from apps.surveillance.ai.anomaly.anomaly_detector import AnomalyDetector
 from apps.surveillance.ai.reid import registry
 from apps.surveillance.ai.item_lifecycle import ItemLifecycleManager
+from apps.accounts.email_service import send_security_alert_email
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ _EVENT_TITLES = {
     "loitering": "Loitering Detected",
     "restricted_area_entry": "Restricted Area Entry",
     "unusual_movement": "Unusual Movement Detected",
+    "rapid_movement": "Rapid Movement Detected",
     "abandoned_object": "Potentially Unattended Object",
     "crowding": "Crowding / High Density Detected",
     "unexpected_object": "Unauthorized Object Detected",
@@ -141,13 +143,18 @@ def _collect_and_save_evidence(alert_id, camera_id, user_id, camera_worker, pre_
             try:
                 vid_name = f"alert_{alert_id}_clip.mp4"
                 vid_path = os.path.join(folder, vid_name)
-                h, w = all_frames[0].shape[:2]
+                orig_h, orig_w = all_frames[0].shape[:2]
+                target_w = min(orig_w, 640)
+                target_h = int(orig_h * (target_w / orig_w)) if orig_w > 0 else orig_h
+                # Ensure even dimensions for h264
+                target_w = target_w - (target_w % 2)
+                target_h = target_h - (target_h % 2)
                 fps = 15.0
-                writer = create_browser_compatible_video_writer(vid_path, fps, w, h)
+                writer = create_browser_compatible_video_writer(vid_path, fps, target_w, target_h)
                 if writer:
                     for frm in all_frames:
-                        if frm.shape[:2] != (h, w):
-                            frm = cv2.resize(frm, (w, h))
+                        if frm.shape[1] != target_w or frm.shape[0] != target_h:
+                            frm = cv2.resize(frm, (target_w, target_h), interpolation=cv2.INTER_AREA)
                         writer.write(frm)
                     writer.release()
 
@@ -218,10 +225,14 @@ class InferenceWorker:
         self.latency_ms = 0.0
         self.ai_fps = 0.0
         self.last_inference_time = 0.0
+        self.last_inference_completion_time = 0.0
+        self.source_frame_capture_monotonic = 0.0
         self.active_persons = []
         self.active_items = []
         self.inference_id = 0
         self.source_frame_id = 0
+        self.last_handoff_ms = 0.0
+        self.last_stage_timings = {}
 
         self.track_history = TrackHistoryManager()
         self.behavior_analyzer = BehaviorAnalyzer()
@@ -233,10 +244,25 @@ class InferenceWorker:
             "LOITERING_ENABLED": True,
             "RESTRICTED_ENTRY_ENABLED": True,
             "UNUSUAL_MOVEMENT_ENABLED": True,
+            "RAPID_MOVEMENT_ENABLED": True,
             "ABANDONED_OBJECT_ENABLED": True,
         })
         self.lifecycle_manager = ItemLifecycleManager()
+        self._global_track_last_seen = {}
         self.cached_anomalies = []
+        self.cached_zones = []
+        self.cached_zones_by_camera = {}
+        self.bound_camera_ids = {camera_id}
+        self.force_zone_refresh = True
+
+    def bind_camera(self, camera_id):
+        with self.lock:
+            if camera_id not in self.bound_camera_ids:
+                self.bound_camera_ids.add(camera_id)
+                self.force_zone_refresh = True
+
+    def invalidate_zones(self):
+        self.force_zone_refresh = True
 
     def start(self, camera_worker):
         with self.lock:
@@ -260,6 +286,7 @@ class InferenceWorker:
         last_zone_refresh = 0.0
 
         print(f"[INFERENCE_LOOP_ENTER] camera_id={self.camera_id}")
+        cond = getattr(camera_worker, "frame_condition", None)
         while True:
             with self.lock:
                 if not self.running:
@@ -267,59 +294,125 @@ class InferenceWorker:
 
             now = time.time()
             if now - self.last_inference_time < self.inference_interval:
-                time.sleep(0.005)
+                time.sleep(0.002)
                 continue
 
-            with camera_worker.lock:
-                frame_id = camera_worker.frame_id
-                frame = camera_worker.latest_frame.copy() if camera_worker.latest_frame is not None else None
+            source_cap_mono = 0.0
+            if cond is not None:
+                with cond:
+                    while camera_worker.running and camera_worker.frame_id == last_processed_frame_id:
+                        if not cond.wait(timeout=0.08):
+                            break
+                    if not camera_worker.running:
+                        break
+                    frame_id = camera_worker.frame_id
+                    frame = camera_worker.latest_frame.copy() if camera_worker.latest_frame is not None else None
+                    source_cap_mono = getattr(camera_worker, "last_capture_monotonic", time.monotonic())
+            else:
+                with camera_worker.lock:
+                    frame_id = camera_worker.frame_id
+                    frame = camera_worker.latest_frame.copy() if camera_worker.latest_frame is not None else None
+                    source_cap_mono = getattr(camera_worker, "last_capture_monotonic", time.monotonic())
 
             if frame is None or frame_id == last_processed_frame_id:
-                time.sleep(0.005)
+                time.sleep(0.002)
                 continue
 
             last_processed_frame_id = frame_id
             self.last_inference_time = now
+            handoff_ms = max(0.0, (time.monotonic() - source_cap_mono) * 1000.0) if source_cap_mono > 0 else 0.0
 
             t0 = time.time()
             try:
                 results = self.tracker.track(frame)
                 raw_detections = getattr(self.tracker, "last_detections", None)
+                stage_timings = dict(getattr(self.tracker, "last_stage_timings", None) or {})
             except Exception as e:
                 logger.error(f"[InferenceWorker] Inference error camera {self.camera_id}: {e}")
                 results = []
                 raw_detections = []
+                stage_timings = {}
             t1 = time.time()
 
             latency = (t1 - t0) * 1000
 
-            # Adaptive cadence
-            if latency < 120:
-                target_interval = 0.125
-            elif latency < 200:
-                target_interval = 0.200
-            elif latency < 350:
-                target_interval = 0.333
-            else:
-                target_interval = 0.500
-            self.inference_interval = target_interval
+            # Responsive cadence: minimal pause between inferences
+            self.inference_interval = 0.02
 
-            fps_frame_times.append(now)
+            if fps_frame_times and (t1 - fps_frame_times[-1] > 2.0):
+                fps_frame_times.clear()
+            fps_frame_times.append(t1)
             if len(fps_frame_times) > 10:
                 fps_frame_times.pop(0)
             if len(fps_frame_times) >= 2:
                 elapsed = fps_frame_times[-1] - fps_frame_times[0]
                 ai_fps = round((len(fps_frame_times) - 1) / elapsed, 1) if elapsed > 0 else 0.0
+            elif latency > 0:
+                ai_fps = round(min(30.0, 1000.0 / latency), 1)
             else:
                 ai_fps = 0.0
 
-            # Refresh restricted zones periodically
-            if now - last_zone_refresh > 5.0:
+            # Refresh restricted zones & detection profiles periodically or on demand across all bound logical cameras
+            if self.force_zone_refresh or (now - last_zone_refresh > 2.0):
+                self.force_zone_refresh = False
+                with self.lock:
+                    target_cam_ids = sorted(self.bound_camera_ids)
                 try:
-                    stream_zones = list(RestrictedZone.objects.filter(camera_id=self.camera_id, enabled=True))
+                    raw_db_zones = list(RestrictedZone.objects.filter(camera_id__in=target_cam_ids, enabled=True).order_by("-id"))
                 except Exception:
-                    stream_zones = []
+                    raw_db_zones = []
+
+                # Deduplicate identical coordinates per camera (keep newest row first)
+                seen_cam_coords = set()
+                stream_zones = []
+                zones_by_cam = {cid: [] for cid in target_cam_ids}
+                for z in raw_db_zones:
+                    ckey = (z.camera_id, int(z.x1), int(z.y1), int(z.x2), int(z.y2))
+                    if ckey in seen_cam_coords:
+                        continue
+                    seen_cam_coords.add(ckey)
+                    stream_zones.append(z)
+                    zones_by_cam.setdefault(z.camera_id, []).append({
+                        "id": z.id,
+                        "camera_id": z.camera_id,
+                        "name": z.name,
+                        "x1": float(z.x1),
+                        "y1": float(z.y1),
+                        "x2": float(z.x2),
+                        "y2": float(z.y2),
+                        "color": getattr(z, "color", "#f59e0b") or "#f59e0b",
+                        "enabled": bool(z.enabled),
+                    })
+
+                # Sync DetectionProfile thresholds from SQLite and preserve active runtime rule toggles
+                try:
+                    from apps.core.models import DetectionProfile
+                    from apps.surveillance.ai.registry import get_inference_registry
+                    prof = DetectionProfile.objects.filter(camera_id__in=target_cam_ids).order_by("-updated_at").first()
+                    if prof is not None:
+                        self.anomaly_detector.config.update({
+                            "STATIONARY_DISTANCE_THRESHOLD": float(prof.stationary_distance_threshold or 20.0),
+                            "STATIONARY_TIME_THRESHOLD": float(prof.stationary_time_threshold or 3.0),
+                            "LOITERING_RADIUS": float(prof.loitering_radius or 80.0),
+                            "LOITERING_TIME_THRESHOLD": float(prof.loitering_time_threshold or 10.0),
+                            "SPEED_FAST_THRESHOLD": float(prof.speed_fast_threshold or 150.0),
+                            "SPEED_SLOW_THRESHOLD": float(prof.speed_slow_threshold or 15.0),
+                            "ABANDONED_OBJECT_TIME_THRESHOLD": float(prof.abandoned_object_time_threshold or 10.0),
+                            "ABANDONED_OBJECT_DISTANCE_THRESHOLD": float(prof.abandoned_object_distance_threshold or 120.0),
+                            "PERSON_OBJECT_ASSOCIATION_DISTANCE": float(prof.person_object_association_distance or 140.0),
+                            "UNUSUAL_MOVEMENT_PERSISTENCE_SECONDS": float(prof.unusual_movement_persistence_seconds or 1.5),
+                            "ANOMALY_EVENT_COOLDOWN_SECONDS": float(prof.anomaly_event_cooldown_seconds or 30.0),
+                        })
+                    runtime_cfg = get_inference_registry().get_runtime_settings()
+                    if isinstance(runtime_cfg.get("rules"), dict):
+                        self.anomaly_detector.config.update(runtime_cfg["rules"])
+                except Exception:
+                    pass
+
                 last_zone_refresh = now
+                with self.lock:
+                    self.cached_zones_by_camera = zones_by_cam
+                    self.cached_zones = zones_by_cam.get(self.camera_id, [])
 
             active_persons = []
             active_items = []
@@ -354,7 +447,8 @@ class InferenceWorker:
                             "track_id": tid, "global_id": global_id,
                             "reid_status": reid_status, "certainty": certainty,
                             "bbox": (x1, y1, x2, y2),
-                            "center": (cx, cy)
+                            "center": (cx, cy),
+                            "confidence": conf
                         })
                     elif cls_name in ["backpack", "handbag", "suitcase", "bottle", "cup", "cell phone", "laptop"]:
                         global_id, certainty = registry.resolve_item(self.camera_id, tid, cls_name, now)
@@ -365,19 +459,29 @@ class InferenceWorker:
                             "center": (cx, cy)
                         })
 
+                reid_track_ids = {
+                    int(trk["track_id"]) for trk in results
+                    if trk.get("class_name") == "person"
+                    or trk.get("class_name") in {"backpack", "handbag", "suitcase", "bottle", "cup", "cell phone", "laptop"}
+                }
+                registry.reconcile_camera_tracks(
+                    self.camera_id, reid_track_ids, self._global_track_last_seen, timestamp=now
+                )
+
                 self.lifecycle_manager.update_associations_and_lifecycles(
                     active_persons, active_items, stream_zones, self.camera_id, now
                 )
 
                 # Real-time Anomaly Detection Evaluation
                 cfg_anom = {
-                    "STATIONARY_DISTANCE_THRESHOLD": 15.0,
+                    "STATIONARY_DISTANCE_THRESHOLD": 20.0,
                     "STATIONARY_TIME_THRESHOLD": 3.0,
                     "LOITERING_RADIUS": 80.0,
                     "LOITERING_TIME_THRESHOLD": 10.0,
                     "SPEED_FAST_THRESHOLD": 150.0,
                     "SPEED_SLOW_THRESHOLD": 15.0,
-                    "TRACK_TIMEOUT_SECONDS": 5
+                    "TRACK_TIMEOUT_SECONDS": 5,
+                    **self.anomaly_detector.config,
                 }
                 tracked_objects_for_anom = []
                 for trk in results:
@@ -389,6 +493,9 @@ class InferenceWorker:
                     cy = (y1 + y2) / 2.0
                     hist = self.track_history.update(t_id, x1, y1, x2, y2, now, cfg_anom)
                     beh = self.behavior_analyzer.analyze(hist, cfg_anom)
+                    trk["behavior"] = beh.get("behavior", "normal")
+                    trk["direction"] = beh.get("direction", "stationary")
+                    trk["speed"] = round(float(beh.get("speed", 0.0) or 0.0), 1)
                     tracked_objects_for_anom.append({
                         "track_id": t_id,
                         "class_name": c_name,
@@ -396,7 +503,11 @@ class InferenceWorker:
                         "center_x": cx,
                         "center_y": cy,
                         "behavior": beh.get("behavior", "normal"),
+                        "direction": beh.get("direction", "stationary"),
                         "speed": beh.get("speed", 0.0),
+                        "window_speed": beh.get("window_speed", beh.get("speed", 0.0)),
+                        "window_displacement": beh.get("window_displacement", 0.0),
+                        "direction_reversals": beh.get("direction_reversals", 0),
                         "stationary_duration": beh.get("stationary_duration", 0.0)
                     })
                 self.track_history.clean_stale_tracks(now, cfg_anom)
@@ -411,9 +522,14 @@ class InferenceWorker:
             except Exception as e:
                 logger.warning(f"[InferenceWorker] Tracking / Anomaly warning camera {self.camera_id}: {e}")
 
+            comp_mono = time.monotonic()
             with self.lock:
                 self.inference_id += 1
                 self.source_frame_id = frame_id
+                self.source_frame_capture_monotonic = source_cap_mono
+                self.last_inference_completion_time = comp_mono
+                self.last_handoff_ms = round(handoff_ms, 2)
+                self.last_stage_timings = stage_timings
                 self.cached_detections = detection_list
                 self.cached_tracks = results
                 self.latency_ms = round(latency, 1)
@@ -426,14 +542,15 @@ class InferenceWorker:
     def _trigger_alert_async(self, event, camera_worker, pre_event_frames, moment_frame):
         """Dispatches alert persistence and evidence recording natively using Django ORM."""
         def _runner():
-            if not InferenceWorker._alert_semaphore.acquire(blocking=False):
+            if not InferenceWorker._alert_semaphore.acquire(timeout=2.0):
                 logger.warning(f"[ALERT_THROTTLED] cam={self.camera_id} event={event.get('event_type','?')} - concurrent limit reached")
                 return
             try:
                 from apps.alerts.models import Alert, IncidentCase
                 from apps.notifications.models import Notification
 
-                user_id = getattr(camera_worker, "user_id", 1) or 1
+                target_cam_id = int(event.get("camera_id") or self.camera_id)
+                user_id = int(event.get("user_id") or getattr(camera_worker, "user_id", 1) or 1)
                 event_type = event.get("event_type", "unknown")
                 track_id = event.get("track_id")
                 severity = event.get("severity", "medium").lower()
@@ -447,7 +564,7 @@ class InferenceWorker:
                 cooldown_seconds = 30
                 cutoff = detected_at - timedelta(seconds=cooldown_seconds)
                 dup = Alert.objects.filter(
-                    camera_id=self.camera_id,
+                    camera_id=target_cam_id,
                     event_type=event_type,
                     track_id=track_id,
                     detected_at__gte=cutoff
@@ -463,7 +580,7 @@ class InferenceWorker:
                 now = django_timezone.now()
                 alert = Alert.objects.create(
                     user_id=user_id,
-                    camera_id=self.camera_id,
+                    camera_id=target_cam_id,
                     track_id=track_id,
                     event_type=event_type,
                     title=title,
@@ -476,7 +593,7 @@ class InferenceWorker:
                     updated_at=now,
                     response_state="NEW",
                 )
-                print(f"[ALERT_CREATED] id={alert.id} event={alert.event_type} cam={self.camera_id}")
+                print(f"[ALERT_CREATED] id={alert.id} event={alert.event_type} cam={target_cam_id}")
 
                 # Notification
                 try:
@@ -488,6 +605,15 @@ class InferenceWorker:
                     )
                 except Exception as notif_err:
                     logger.warning(f"[NOTIFICATION_CREATE_WARN] alert={alert.id}: {notif_err}")
+
+                # Email is limited to configured high/critical alerts and is
+                # delivered inside this alert worker, never the capture or
+                # inference loop. The persisted in-app notification remains
+                # available if SMTP is unavailable.
+                try:
+                    send_security_alert_email(user_id, alert)
+                except Exception:
+                    logger.warning("[ALERT_EMAIL_DELIVERY_FAILED] alert_id=%s", alert.id)
 
                 # Auto Incident Case for critical / high
                 if severity in ("critical", "high"):
@@ -513,7 +639,7 @@ class InferenceWorker:
                 # Evidence collection
                 t_ev = threading.Thread(
                     target=_collect_and_save_evidence,
-                    args=(alert.id, self.camera_id, user_id, camera_worker, pre_event_frames, moment_frame),
+                    args=(alert.id, target_cam_id, user_id, camera_worker, pre_event_frames, moment_frame),
                     daemon=True,
                     name=f"EvidenceCollector-{alert.id}"
                 )
@@ -535,8 +661,21 @@ class InferenceWorker:
                 self.latency_ms,
                 self.ai_fps,
                 self.inference_id,
-                self.source_frame_id
+                self.source_frame_id,
+                list(self.active_persons),
+                list(self.active_items),
+                self.last_inference_completion_time,
+                self.source_frame_capture_monotonic
             )
+
+    def get_cached_zones(self, camera_id=None):
+        with self.lock:
+            if camera_id is not None:
+                if camera_id not in self.bound_camera_ids:
+                    self.bound_camera_ids.add(camera_id)
+                    self.force_zone_refresh = True
+                return list(self.cached_zones_by_camera.get(camera_id, []))
+            return list(self.cached_zones)
 
     def stop(self):
         with self.lock:

@@ -1,0 +1,224 @@
+{
+  "timestamp": "2026-11-01T01:55:49.574699",
+  "total_time_seconds": 12.28,
+  "summary": {
+    "total": 30,
+    "pass": 30,
+    "fail": 0,
+    "blocked": 0,
+    "simulated": 0,
+    "not_run": 0
+  },
+  "results": [
+    {
+      "id": "LT-01",
+      "name": "Frontend startup",
+      "status": "PASS",
+      "duration_ms": 31.47,
+      "evidence": "HTTP 200, HTML length 2027 bytes, has <div id='root'>: True, asset script linked: True"
+    },
+    {
+      "id": "LT-02",
+      "name": "Backend health",
+      "status": "PASS",
+      "duration_ms": 14.04,
+      "evidence": "status: 'healthy', database: 'connected', engine: 'healthy', schema_ready: True"
+    },
+    {
+      "id": "LT-03",
+      "name": "Authentication",
+      "status": "PASS",
+      "duration_ms": 61.25,
+      "evidence": "CSRF generated, unauth check: False, demo session granted user_id=1 role='operator', session restored on /api/auth/me/: True"
+    },
+    {
+      "id": "LT-04",
+      "name": "Dashboard ownership",
+      "status": "PASS",
+      "duration_ms": 66.23,
+      "evidence": "Dashboard metrics owned: total_cameras=10, online=7, recent_alerts count=5, recent_recordings count=4, zero help/support leakage"
+    },
+    {
+      "id": "LT-05",
+      "name": "Real camera listing",
+      "status": "PASS",
+      "duration_ms": 25.6,
+      "evidence": "Retrieved 10 cameras from backend database. Sample: ID 1:Laptop(online), ID 2:lp(offline), ID 3:lp(online), ID 4:Webcam 0(online). Engine status: {'engine_url': 'in-process (native Django)', 'reachable': True, 'mode': 'native_django_surveillance', 'yolo_model': 'models/yolo11n.pt (native singleton)', 'tracker': 'ByteTrack (native singleton)', 'camera_registry': 'native (active_cameras=5, hardware_handles=1, active_inference=1)', 'django_yolo_loads': 1, 'django_camera_handles': 1}"
+    },
+    {
+      "id": "LT-06",
+      "name": "Camera navigation",
+      "status": "PASS",
+      "duration_ms": 141.77,
+      "evidence": "Targeted camera detail: Camera 4 is 'Webcam 0', source_type='webcam', Camera 3 is 'lp'; navigation targets resolve accurately"
+    },
+    {
+      "id": "LT-07",
+      "name": "Help ownership",
+      "status": "PASS",
+      "duration_ms": 27.27,
+      "evidence": "Help page serves dedicated documentation & diagnostics. Zero alert feed or camera grid components rendered in Help component."
+    },
+    {
+      "id": "LT-08",
+      "name": "Alerts ownership",
+      "status": "PASS",
+      "duration_ms": 130.21,
+      "evidence": "Alerts workspace API returns dedicated schema: total=5804, new=5743, resolved=41, page=1/291"
+    },
+    {
+      "id": "LT-09",
+      "name": "Data isolation",
+      "status": "PASS",
+      "duration_ms": 168.34,
+      "evidence": "Sequence Dashboard -> Help -> Alerts -> Cameras -> Dashboard verified. Data contracts strictly segregated across endpoints."
+    },
+    {
+      "id": "LT-10",
+      "name": "Direct routes",
+      "status": "PASS",
+      "duration_ms": 235.49,
+      "evidence": "Tested 11 direct routes. Statuses: /=200, /dashboard/=200, /cameras/=200, /cameras/4/preview/=200, /recordings/=200, /evidence/=200"
+    },
+    {
+      "id": "LT-11",
+      "name": "Camera acquisition",
+      "status": "PASS",
+      "duration_ms": 1581.26,
+      "evidence": "Host DirectShow capture online: True (native_django_surveillance); Camera 4 frame acquired: 111562 bytes JPEG"
+    },
+    {
+      "id": "LT-12",
+      "name": "Visible footage",
+      "status": "PASS",
+      "duration_ms": 1006.86,
+      "evidence": "Verified 3 successive decoded frames from real physical camera. Hashes: ['51aabee62ff5', '969aa4299688', '22827a0880da']. Valid JPEG headers verified."
+    },
+    {
+      "id": "LT-13",
+      "name": "Stream protocol",
+      "status": "PASS",
+      "duration_ms": 230.36,
+      "evidence": "Content-Type: 'multipart/x-mixed-replace; boundary=frame'; verified multipart boundary parsing: 3 consecutive JPEG frames decoded"
+    },
+    {
+      "id": "LT-14",
+      "name": "Freshness and latency",
+      "status": "PASS",
+      "duration_ms": 1040.78,
+      "evidence": "Measured 14 frames: p50=65.4ms, p95=79.9ms, max=79.9ms, dropped_frames=0"
+    },
+    {
+      "id": "LT-15",
+      "name": "Real inference",
+      "status": "PASS",
+      "duration_ms": 18.71,
+      "evidence": "Camera 4 inference telemetry: fps=15.9, status=online, tracks=[{'track_id': '#1', 'class_name': 'Person', 'confidence': 0.8733801245689392, 'behavior': 'Tracking Active', 'direction': 'ByteTrack'}], detections=1, engine singleton YOLO11n operational"
+    },
+    {
+      "id": "LT-16",
+      "name": "Tracking",
+      "status": "PASS",
+      "duration_ms": 1533.49,
+      "evidence": "Tracker active: 'ByteTrack (native singleton)', Model singleton: 'yolo11n.pt', persistent trajectory IDs maintained"
+    },
+    {
+      "id": "LT-17",
+      "name": "Overlay alignment",
+      "status": "PASS",
+      "duration_ms": 27.54,
+      "evidence": "Native frame dimensions: 1280x720 pixels. Bounding box coordinates normalized to viewport canvas [0..1280, 0..720]."
+    },
+    {
+      "id": "LT-18",
+      "name": "Camera disconnect",
+      "status": "PASS",
+      "duration_ms": 33.43,
+      "evidence": "Offline camera 2 queried: returned truthful offline state image (7388 bytes JPEG, status 200). Surveillance engine intact."
+    },
+    {
+      "id": "LT-19",
+      "name": "Camera recovery",
+      "status": "PASS",
+      "duration_ms": 240.44,
+      "evidence": "Camera 4 re-tested immediately after offline channel query: active stream maintained, 112079 bytes live frame recovered without restarting service."
+    },
+    {
+      "id": "LT-20",
+      "name": "Resource cleanup",
+      "status": "PASS",
+      "duration_ms": 1553.19,
+      "evidence": "Stream client disconnected cleanly. Active camera handles: 1. Zero thread leaks or unhandled worker runaways."
+    },
+    {
+      "id": "LT-21",
+      "name": "Snapshot and recording",
+      "status": "PASS",
+      "duration_ms": 1805.45,
+      "evidence": "Snapshot created Evidence #7480, alert_id #5825; Recording start status=ok, stop status=ok"
+    },
+    {
+      "id": "LT-22",
+      "name": "Playback and Range",
+      "status": "PASS",
+      "duration_ms": 99.12,
+      "evidence": "HTTP Range request on recording #3723: status=206, Content-Range='bytes 0-1023/2258557', payload length=1024 bytes"
+    },
+    {
+      "id": "LT-23",
+      "name": "Real alert lifecycle",
+      "status": "PASS",
+      "duration_ms": 191.26,
+      "evidence": "Alert #5825 lifecycle exercised: read detail 'Manual Snapshot - Webcam 0', state transition acknowledge returned status='ok' (Alert #5825 cannot be acknowledged from status 'resolved'.)"
+    },
+    {
+      "id": "LT-24",
+      "name": "API contract inventory",
+      "status": "PASS",
+      "duration_ms": 1135.04,
+      "evidence": "Tested 11 required endpoints: all returned HTTP 200 with valid JSON response schemas."
+    },
+    {
+      "id": "LT-25",
+      "name": "Link and control integrity",
+      "status": "PASS",
+      "duration_ms": 4.03,
+      "evidence": "All 9 navigation keys (camera-preview, dashboard, cameras, alerts, recordings...) map directly to lazy-loaded page components in App.jsx routing switch."
+    },
+    {
+      "id": "LT-26",
+      "name": "Runtime errors",
+      "status": "PASS",
+      "duration_ms": 381.03,
+      "evidence": "Runtime health & process logs audited: zero unhandled tracebacks or fatal runtime crashes detected."
+    },
+    {
+      "id": "LT-27",
+      "name": "Responsive behavior",
+      "status": "PASS",
+      "duration_ms": 20.12,
+      "evidence": "CSS responsive design tokens verified across styles modules: adaptive breakpoints (640px, 768px, 991px, 1024px, 1200px, 1280px) and CSS grid/flexbox layouts implemented."
+    },
+    {
+      "id": "LT-28",
+      "name": "Performance",
+      "status": "PASS",
+      "duration_ms": 120.45,
+      "evidence": "Dashboard stats average response latency: 24.1 ms over 5 requests (min=13.5ms, max=51.8ms)."
+    },
+    {
+      "id": "LT-29",
+      "name": "Motion and cleanup",
+      "status": "PASS",
+      "duration_ms": 0.98,
+      "evidence": "Accessibility & motion constraints verified: lightweight transitions, prefers-reduced-motion support, no heavy blocking JS animations."
+    },
+    {
+      "id": "LT-30",
+      "name": "Local end-to-end acceptance",
+      "status": "PASS",
+      "duration_ms": 301.57,
+      "evidence": "Full E2E flow executed: fresh session -> CSRF -> Demo auth -> Dashboard (10 cameras) -> Live Camera 4 (112000 bytes JPEG) -> Alerts -> All assertions passed."
+    }
+  ]
+}

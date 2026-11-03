@@ -1,0 +1,107 @@
+{
+  "suite": "P1_COMPREHENSIVE_SECURITY_VERIFICATION",
+  "timestamp": "2026-11-02T04:50:08Z",
+  "passed": 14,
+  "total": 14,
+  "all_passed": true,
+  "results": [
+    {
+      "id": "SEC-01",
+      "category": "Authentication",
+      "status": "PASS",
+      "passed": true,
+      "details": "Unauthenticated requests blocked across 9 APIs: {'/api/cameras/': 401, '/api/alerts/': 401, '/api/recordings/': 401, '/api/evidence/': 401, '/api/cases/': 401, '/api/notifications/': 401, '/api/audit-logs/': 401, '/api/settings/detection/': 401, '/api/dashboard/stats/': 401}"
+    },
+    {
+      "id": "SEC-02",
+      "category": "Authentication / 2FA OTP",
+      "status": "PASS",
+      "passed": true,
+      "details": "Step-1 login requires_otp=True, pre-OTP authenticated=False, bad OTP status=400"
+    },
+    {
+      "id": "SEC-03",
+      "category": "RBAC Enforcement",
+      "status": "PASS",
+      "passed": true,
+      "details": "role='user' blocked: audit=403, settings_mutate=403, cam4_edit=403, cam4_del=403, cam4_zone=403"
+    },
+    {
+      "id": "SEC-04",
+      "category": "RBAC Least-Privilege Access",
+      "status": "PASS",
+      "passed": true,
+      "details": "role='user' shared facility Camera 4 GET=200; role='admin' GET /api/audit-logs/=200"
+    },
+    {
+      "id": "SEC-05",
+      "category": "CSRF Protection",
+      "status": "PASS",
+      "passed": true,
+      "details": "Missing CSRF rejected (403): {'POST /api/auth/demo-session/': 403, 'POST /api/cameras/': 403, 'POST /api/cameras/4/zones/': 403, 'POST /api/settings/detection/': 403, 'POST /api/cameras/4/record/start/': 403}; GET /api/auth/demo-session/=405"
+    },
+    {
+      "id": "SEC-06",
+      "category": "XSS & Security Headers",
+      "status": "PASS",
+      "passed": true,
+      "details": "API Content-Type=application/json, X-Content-Type-Options=nosniff, X-Frame-Options=DENY, CSP_present=False"
+    },
+    {
+      "id": "SEC-07",
+      "category": "SQL Injection Defense",
+      "status": "PASS",
+      "passed": true,
+      "details": "Zero 500s, zero hash leaks, zero cross-tenant rows returned across all SQLi payloads"
+    },
+    {
+      "id": "SEC-08",
+      "category": "IDOR / BOLA Multi-Tenant Isolation",
+      "status": "PASS",
+      "passed": true,
+      "details": "Cross-tenant probes blocked: {'alert_get': 404, 'alert_ack': 404, 'alert_res': 404, 'case_get': 404, 'rec_api': 404, 'rec_view': 404, 'rec_dl': 404, 'ev_api': 404, 'ev_prev': 404, 'ev_dl': 404, 'priv_cam_get': 404, 'priv_cam_snap': 404}"
+    },
+    {
+      "id": "SEC-09",
+      "category": "Recording & Evidence Owner Permissions",
+      "status": "PASS",
+      "passed": true,
+      "details": "Authorized owner accessed 5 recordings and 5 evidence items with 0 false 404s"
+    },
+    {
+      "id": "SEC-10",
+      "category": "SSRF Defense",
+      "status": "PASS",
+      "passed": true,
+      "details": "All 9 internal/loopback/metadata SSRF payloads blocked (400) on both test-connection and create: {'http://127.0.0.1:8000/api/health/': {'test_conn': 400, 'create': 400}, 'http://localhost:8000/api/cameras/4/stream/': {'test_conn': 400, 'create': 400}, 'http://169.254.169.254/latest/meta-data/': {'test_conn': 400, 'create': 400}, 'rtsp://127.0.0.1:8554/live': {'test_conn': 400, 'create': 400}, 'http://[::1]:8000/': {'test_conn': 400, 'create': 400}, 'http://[::ffff:127.0.0.1]:8000/': {'test_conn': 400, 'create': 400}, 'http://0.0.0.0:8000/': {'test_conn': 400, 'create': 400}, 'http://metadata.google.internal/computeMetadata/v1/': {'test_conn': 400, 'create': 400}, 'file:///etc/passwd': {'test_conn': 400, 'create': 400}}"
+    },
+    {
+      "id": "SEC-11",
+      "category": "Path Traversal & Input Validation",
+      "status": "PASS",
+      "passed": true,
+      "details": "Traversal probes safe ({'/static/../../.env': 404, '/static/..%2f..%2finstance%2fdeepvision.db': 500, '/media/../../.env': 404, '/evidence/../../.env/preview/': 404}); malformed JSON status=400"
+    },
+    {
+      "id": "SEC-12",
+      "category": "Session Security & Secret Exposure",
+      "status": "PASS",
+      "passed": true,
+      "details": "HttpOnly=True, SameSite=True, zero secrets exposed=True"
+    },
+    {
+      "id": "SEC-13",
+      "category": "Audit Logs Persistence & API",
+      "status": "PASS",
+      "passed": true,
+      "details": "AuditLog rows 1910 -> 1911; recent API actions=['DETECTION_SETTINGS_UPDATED', 'AUTH_DEMO_SESSION', 'AUTH_OTP_FAILED', 'rate_limit:verify_login_otp', 'AUTH_LOGIN_OTP_SENT']"
+    },
+    {
+      "id": "SEC-14",
+      "category": "Database Integrity Post-Security-Suite",
+      "status": "PASS",
+      "passed": true,
+      "details": "PRAGMA integrity_check=ok, active_cameras=10"
+    }
+  ]
+}

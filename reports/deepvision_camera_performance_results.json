@@ -1,0 +1,91 @@
+{
+  "timestamp": "2026-10-25T07:37:07.440006+00:00",
+  "device": "DirectShow Physical Camera (dshow://0)",
+  "resolution": "1280x720 (Native HD)",
+  "hardware_max_fps": 14.6,
+  "modes": {
+    "raw": {
+      "mode": "raw",
+      "duration_sec": 60.0,
+      "total_frames_received": 1603,
+      "actual_fps": 26.72,
+      "camera_capture_fps": 29.1,
+      "ai_fps": 5.6,
+      "frame_age_ms": {
+        "p50": 25.33,
+        "p95": 467.63,
+        "min": 8.72,
+        "max": 797.38
+      },
+      "inter_frame_arrival_ms": {
+        "p50": 32.97,
+        "p95": 69.55,
+        "min": 0.34,
+        "max": 284.05
+      },
+      "dropped_frames": 7,
+      "stale_frames": 0,
+      "cpu_usage_pct_avg": 77.7,
+      "memory_usage_mb_avg": 21.4,
+      "inference_latency_ms": 0.0,
+      "inference_result_age_ms": null,
+      "tracks_count": 1,
+      "bridge_status": "online",
+      "bridge_backend": "DirectShow (dshow://0)",
+      "bridge_engine": {
+        "engine_url": "in-process (native Django)",
+        "reachable": true,
+        "mode": "native_django_surveillance",
+        "yolo_model": "models/yolo11n.pt (native singleton)",
+        "tracker": "ByteTrack (native singleton)",
+        "camera_registry": "native (active_cameras=1, hardware_handles=1, active_inference=0)",
+        "django_yolo_loads": 0,
+        "django_camera_handles": 1
+      }
+    },
+    "tracking": {
+      "mode": "tracking",
+      "duration_sec": 60.23,
+      "total_frames_received": 973,
+      "actual_fps": 16.16,
+      "camera_capture_fps": 11.6,
+      "ai_fps": 0.2,
+      "frame_age_ms": {
+        "p50": 645.94,
+        "p95": 1914.95,
+        "min": 24.66,
+        "max": 3552.58
+      },
+      "inter_frame_arrival_ms": {
+        "p50": 47.41,
+        "p95": 152.58,
+        "min": 0.14,
+        "max": 974.98
+      },
+      "dropped_frames": 212,
+      "stale_frames": 0,
+      "cpu_usage_pct_avg": 99.1,
+      "memory_usage_mb_avg": 16.2,
+      "inference_latency_ms": 4274.41,
+      "inference_result_age_ms": {
+        "p50": 1583.5,
+        "p95": 5356.5,
+        "min": 0.0,
+        "max": 9491.5
+      },
+      "tracks_count": 1,
+      "bridge_status": "online",
+      "bridge_backend": "DirectShow (dshow://0)",
+      "bridge_engine": {
+        "engine_url": "in-process (native Django)",
+        "reachable": true,
+        "mode": "native_django_surveillance",
+        "yolo_model": "models/yolo11n.pt (native singleton)",
+        "tracker": "ByteTrack (native singleton)",
+        "camera_registry": "native (active_cameras=1, hardware_handles=1, active_inference=1)",
+        "django_yolo_loads": 1,
+        "django_camera_handles": 1
+      }
+    }
+  }
+}

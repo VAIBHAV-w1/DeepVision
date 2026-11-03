@@ -1,0 +1,56 @@
+{
+  "suite": "P1_CAMERA_SOURCES_COMPATIBILITY",
+  "timestamp": "2026-11-01T17:10:08Z",
+  "passed": 6,
+  "total": 6,
+  "all_passed": true,
+  "hardware_notes": [
+    "1 physical integrated DirectShow/USB webcam attached at index 0 (dshow://0, 1280x720).",
+    "No second external USB webcam (usb:2) or physical RTSP NVR connected on local host.",
+    "4 registered mobile IP camera endpoints (Cameras 6, 7, 9, 10) are currently unreachable on LAN and truthfully marked 'offline' with URLs preserved intact."
+  ],
+  "results": [
+    {
+      "id": "CAM-01",
+      "title": "DirectShow Webcam (webcam:0)",
+      "status": "PASS",
+      "passed": true,
+      "details": "test=True, test_conn=True, snapshot=1280x720"
+    },
+    {
+      "id": "CAM-02",
+      "title": "USB Webcam Source (usb:0 & absent usb:2)",
+      "status": "PASS",
+      "passed": true,
+      "details": "usb:0 online=True; absent usb:2 truthfully offline=True in 23ms"
+    },
+    {
+      "id": "CAM-03",
+      "title": "MJPEG / IP Stream, Non-Frozen EOF & Auto-Reconnect",
+      "status": "PASS",
+      "passed": true,
+      "details": "url=http://10.55.110.31:60895/videofeed, resolver_ok=True, non_frozen_eof=True (drained_in_flight_frames=1), frames_before_drop=3, frames_after_reconnect=8, clean_stop=True"
+    },
+    {
+      "id": "CAM-04",
+      "title": "RTSP Stream Timeout & Clean Release",
+      "status": "PASS",
+      "passed": true,
+      "details": "Unreachable LAN RTSP failed cleanly (truthful offline) in 2527ms (<6.5s timeout)"
+    },
+    {
+      "id": "CAM-05",
+      "title": "Disconnected Mobile Cameras Preserved & Truthful Offline",
+      "status": "PASS",
+      "passed": true,
+      "details": "active_cameras=10; mobile_cameras={6: {'url': 'http://192.168.1.9:8080/videofeed', 'probe_online': False, 'db_status': 'offline'}, 7: {'url': 'http://192.168.1.10:8080/videofeed', 'probe_online': False, 'db_status': 'offline'}, 9: {'url': 'http://10.59.117.86:8080/videofeed', 'probe_online': False, 'db_status': 'offline'}, 10: {'url': 'https://192.0.0.4:8080/videofeed', 'probe_online': False, 'db_status': 'offline'}}"
+    },
+    {
+      "id": "CAM-06",
+      "title": "Sequential Camera Switching & Hardware Handle Deduplication",
+      "status": "PASS",
+      "passed": true,
+      "details": "Switched [4, 3, 5, 4] cleanly; max_django_camera_handles=1 (expected <= 1)"
+    }
+  ]
+}

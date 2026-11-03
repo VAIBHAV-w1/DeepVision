@@ -1,0 +1,100 @@
+{
+  "timestamp": "2026-10-31T18:57:00+05:30",
+  "project": "DeepVision 3.0",
+  "environment": "Localhost Windows (127.0.0.1:8000)",
+  "database": {
+    "file": "instance/deepvision.db",
+    "preflight_signature": "cc2d13f77b681107",
+    "post_verification_signature": "cc2d13f77b681107",
+    "signature_match": true,
+    "tables_count": 18,
+    "integrity": "ok"
+  },
+  "benchmarks": {
+    "camera_hardware": "HP Wide Vision HD Camera (dshow://0)",
+    "resolution": "1280x720",
+    "directshow_grab_ms": 0.01,
+    "directshow_retrieve_ms": 60.58,
+    "directshow_mean_read_ms": 60.59,
+    "directshow_p95_read_ms": 78.08,
+    "hardware_max_fps": 16.0,
+    "preprocessing_ms": 1.25,
+    "yolo11n_cpu_forward_pass_ms": {
+      "384px": 34.9,
+      "480px": 38.3,
+      "640px": 64.2
+    },
+    "yolo_nms_postprocessing_ms": 0.94,
+    "bytetrack_update_ms": 1.62,
+    "behavior_anomaly_eval_ms": 0.037,
+    "jpeg_encoding_ms": 4.16,
+    "stream_delivery_fps": 14.8,
+    "mean_inference_age_ms": 11.8,
+    "p95_inference_age_ms": 70.3,
+    "target_freshness_met": true
+  },
+  "test_suites": {
+    "localhost_mandatory_suite": {
+      "script": "verification/test_localhost_mandatory_suite.py",
+      "total": 30,
+      "passed": 30,
+      "failed": 0,
+      "pass_rate_pct": 100.0,
+      "execution_time_seconds": 5.61
+    },
+    "security_audit_suite": {
+      "script": "verification/test_security_audit.py",
+      "total": 23,
+      "passed": 23,
+      "failed": 0,
+      "pass_rate_pct": 100.0
+    },
+    "complete_auth_otp_suite": {
+      "script": "verification/test_complete_auth_otp.py",
+      "total": 18,
+      "passed": 18,
+      "failed": 0,
+      "pass_rate_pct": 100.0
+    },
+    "webcam0_intrusion_demonstration": {
+      "script": "verification/test_webcam0_intrusion_demo.py",
+      "status": "PASSED",
+      "camera_id": 4,
+      "camera_name": "Webcam 0",
+      "zone_created_id": 4,
+      "alert_verified_id": 5500,
+      "alert_type": "restricted_area_entry",
+      "alert_severity": "high",
+      "evidence_snapshot_id": 6940,
+      "evidence_clip_id": 6942,
+      "notification_id": 4363
+    },
+    "chrome_cdp_browser_audit": {
+      "script": "verification/run_full_browser_audit.mjs",
+      "viewports_tested": [
+        {"name": "1920x1080", "overflow_px": 0, "status": "PASS"},
+        {"name": "1600x900", "overflow_px": 0, "status": "PASS"},
+        {"name": "1366x768", "overflow_px": 0, "status": "PASS"},
+        {"name": "1024x768", "overflow_px": 0, "status": "PASS"},
+        {"name": "768x1024", "overflow_px": 0, "status": "PASS"},
+        {"name": "390x844", "overflow_px": 0, "status": "PASS"},
+        {"name": "375x812", "overflow_px": 0, "status": "PASS"}
+      ],
+      "console_errors_detected": 0
+    }
+  },
+  "screenshots": [
+    "verification/screenshots/final_3.0/01_deepvision_3.0_overview_dashboard.png",
+    "verification/screenshots/final_3.0/02_deepvision_3.0_live_surveillance_webcam0.png",
+    "verification/screenshots/final_3.0/03_deepvision_3.0_webcam0_zone_editor.png",
+    "verification/screenshots/final_3.0/04_deepvision_3.0_security_alerts.png",
+    "verification/screenshots/final_3.0/05_deepvision_3.0_cameras_inventory.png",
+    "verification/screenshots/final_3.0/06_deepvision_3.0_evidence_vault.png"
+  ],
+  "production_lock": {
+    "git_push_executed": false,
+    "external_deployment_executed": false,
+    "vercel_changes_executed": false,
+    "locked": true
+  }
+}

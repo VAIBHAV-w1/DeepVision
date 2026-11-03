@@ -1,0 +1,511 @@
+{
+  "dataset_name": "DeepVision 4.0 Mobile Phone Empirical Evaluation Dataset",
+  "description": "Multi-condition evaluation dataset for cell phone detection across real surveillance recordings",
+  "total_frames": 33,
+  "conditions": [
+    "handheld_vertical",
+    "handheld_horizontal_desk",
+    "tabletop_resting",
+    "handheld_frontal_typing",
+    "handheld_bright_screen",
+    "handheld_angled",
+    "furniture_armchair_cluttered"
+  ],
+  "frames": [
+    {
+      "frame_id": "phone_vert_01",
+      "file": "extracted_frames/handheld_vertical_alert333_f060.jpg",
+      "condition": "handheld_vertical",
+      "orientation": "vertical",
+      "distance": "medium",
+      "lighting": "normal_indoor",
+      "background": "office_neutral",
+      "gt_bbox": [
+        434,
+        241,
+        554,
+        373
+      ]
+    },
+    {
+      "frame_id": "phone_vert_02",
+      "file": "extracted_frames/handheld_vertical_alert333_f075.jpg",
+      "condition": "handheld_vertical",
+      "orientation": "vertical",
+      "distance": "medium",
+      "lighting": "normal_indoor",
+      "background": "office_neutral",
+      "gt_bbox": [
+        442,
+        244,
+        558,
+        385
+      ]
+    },
+    {
+      "frame_id": "phone_vert_03",
+      "file": "extracted_frames/handheld_vertical_alert333_f080.jpg",
+      "condition": "handheld_vertical",
+      "orientation": "vertical",
+      "distance": "medium",
+      "lighting": "normal_indoor",
+      "background": "office_neutral",
+      "gt_bbox": [
+        442,
+        245,
+        558,
+        378
+      ]
+    },
+    {
+      "frame_id": "phone_vert_04",
+      "file": "extracted_frames/handheld_vertical_alert333_f095.jpg",
+      "condition": "handheld_vertical",
+      "orientation": "vertical",
+      "distance": "medium",
+      "lighting": "normal_indoor",
+      "background": "office_neutral",
+      "gt_bbox": [
+        440,
+        246,
+        557,
+        390
+      ]
+    },
+    {
+      "frame_id": "phone_vert_05",
+      "file": "extracted_frames/handheld_vertical_alert333_f100.jpg",
+      "condition": "handheld_vertical",
+      "orientation": "vertical",
+      "distance": "medium",
+      "lighting": "normal_indoor",
+      "background": "office_neutral",
+      "gt_bbox": [
+        441,
+        246,
+        559,
+        405
+      ]
+    },
+    {
+      "frame_id": "phone_horiz_01",
+      "file": "extracted_frames/handheld_desk_alert371_f040.jpg",
+      "condition": "handheld_horizontal_desk",
+      "orientation": "horizontal",
+      "distance": "close_medium",
+      "lighting": "normal_indoor",
+      "background": "desk_surface",
+      "gt_bbox": [
+        486,
+        326,
+        638,
+        479
+      ]
+    },
+    {
+      "frame_id": "phone_horiz_02",
+      "file": "extracted_frames/handheld_desk_alert371_f060.jpg",
+      "condition": "handheld_horizontal_desk",
+      "orientation": "horizontal",
+      "distance": "close_medium",
+      "lighting": "normal_indoor",
+      "background": "desk_surface",
+      "gt_bbox": [
+        493,
+        326,
+        640,
+        479
+      ]
+    },
+    {
+      "frame_id": "phone_horiz_03",
+      "file": "extracted_frames/handheld_desk_alert371_f080.jpg",
+      "condition": "handheld_horizontal_desk",
+      "orientation": "horizontal",
+      "distance": "close_medium",
+      "lighting": "normal_indoor",
+      "background": "desk_surface",
+      "gt_bbox": [
+        494,
+        328,
+        640,
+        479
+      ]
+    },
+    {
+      "frame_id": "phone_horiz_04",
+      "file": "extracted_frames/handheld_desk_alert371_f100.jpg",
+      "condition": "handheld_horizontal_desk",
+      "orientation": "horizontal",
+      "distance": "close_medium",
+      "lighting": "normal_indoor",
+      "background": "desk_surface",
+      "gt_bbox": [
+        492,
+        329,
+        638,
+        479
+      ]
+    },
+    {
+      "frame_id": "phone_horiz_05",
+      "file": "extracted_frames/handheld_desk_alert371_f120.jpg",
+      "condition": "handheld_horizontal_desk",
+      "orientation": "horizontal",
+      "distance": "close_medium",
+      "lighting": "normal_indoor",
+      "background": "desk_surface",
+      "gt_bbox": [
+        485,
+        330,
+        635,
+        479
+      ]
+    },
+    {
+      "frame_id": "phone_table_01",
+      "file": "extracted_frames/table_phone_alert453_f010.jpg",
+      "condition": "tabletop_resting",
+      "orientation": "flat_surface",
+      "distance": "medium",
+      "lighting": "normal_indoor",
+      "background": "table_wood",
+      "gt_bbox": [
+        525,
+        90,
+        618,
+        168
+      ]
+    },
+    {
+      "frame_id": "phone_table_02",
+      "file": "extracted_frames/table_phone_alert453_f020.jpg",
+      "condition": "tabletop_resting",
+      "orientation": "flat_surface",
+      "distance": "medium",
+      "lighting": "normal_indoor",
+      "background": "table_wood",
+      "gt_bbox": [
+        525,
+        88,
+        616,
+        166
+      ]
+    },
+    {
+      "frame_id": "phone_table_03",
+      "file": "extracted_frames/table_phone_alert453_f060.jpg",
+      "condition": "tabletop_resting",
+      "orientation": "flat_surface",
+      "distance": "medium",
+      "lighting": "normal_indoor",
+      "background": "table_wood",
+      "gt_bbox": [
+        520,
+        90,
+        611,
+        168
+      ]
+    },
+    {
+      "frame_id": "phone_table_04",
+      "file": "extracted_frames/table_phone_alert453_f080.jpg",
+      "condition": "tabletop_resting",
+      "orientation": "flat_surface",
+      "distance": "medium",
+      "lighting": "normal_indoor",
+      "background": "table_wood",
+      "gt_bbox": [
+        518,
+        91,
+        611,
+        173
+      ]
+    },
+    {
+      "frame_id": "phone_table_05",
+      "file": "extracted_frames/table_phone_alert453_f100.jpg",
+      "condition": "tabletop_resting",
+      "orientation": "flat_surface",
+      "distance": "medium",
+      "lighting": "normal_indoor",
+      "background": "table_wood",
+      "gt_bbox": [
+        450,
+        120,
+        532,
+        210
+      ]
+    },
+    {
+      "frame_id": "phone_front_01",
+      "file": "extracted_frames/cam4_185545_f006.jpg",
+      "condition": "handheld_frontal_typing",
+      "orientation": "vertical",
+      "distance": "close_medium",
+      "lighting": "normal_indoor",
+      "background": "person_body",
+      "gt_bbox": [
+        275,
+        315,
+        404,
+        422
+      ]
+    },
+    {
+      "frame_id": "phone_front_02",
+      "file": "extracted_frames/cam4_185545_f008.jpg",
+      "condition": "handheld_frontal_typing",
+      "orientation": "vertical",
+      "distance": "close_medium",
+      "lighting": "normal_indoor",
+      "background": "person_body",
+      "gt_bbox": [
+        279,
+        315,
+        403,
+        415
+      ]
+    },
+    {
+      "frame_id": "phone_front_03",
+      "file": "extracted_frames/cam4_185545_f010.jpg",
+      "condition": "handheld_frontal_typing",
+      "orientation": "vertical",
+      "distance": "close_medium",
+      "lighting": "normal_indoor",
+      "background": "person_body",
+      "gt_bbox": [
+        255,
+        313,
+        402,
+        417
+      ]
+    },
+    {
+      "frame_id": "phone_front_04",
+      "file": "extracted_frames/cam4_185545_f012.jpg",
+      "condition": "handheld_frontal_typing",
+      "orientation": "vertical",
+      "distance": "close_medium",
+      "lighting": "normal_indoor",
+      "background": "person_body",
+      "gt_bbox": [
+        259,
+        312,
+        401,
+        418
+      ]
+    },
+    {
+      "frame_id": "phone_front_05",
+      "file": "extracted_frames/cam4_185545_f014.jpg",
+      "condition": "handheld_frontal_typing",
+      "orientation": "vertical",
+      "distance": "close_medium",
+      "lighting": "normal_indoor",
+      "background": "person_body",
+      "gt_bbox": [
+        269,
+        314,
+        399,
+        418
+      ]
+    },
+    {
+      "frame_id": "phone_bright_01",
+      "file": "extracted_frames/handheld_bright_alert318_f055.jpg",
+      "condition": "handheld_bright_screen",
+      "orientation": "vertical",
+      "distance": "close",
+      "lighting": "bright_screen_glow",
+      "background": "person_hand",
+      "gt_bbox": [
+        426,
+        126,
+        585,
+        480
+      ]
+    },
+    {
+      "frame_id": "phone_bright_02",
+      "file": "extracted_frames/handheld_bright_alert318_f060.jpg",
+      "condition": "handheld_bright_screen",
+      "orientation": "vertical",
+      "distance": "close",
+      "lighting": "bright_screen_glow",
+      "background": "person_hand",
+      "gt_bbox": [
+        439,
+        133,
+        603,
+        453
+      ]
+    },
+    {
+      "frame_id": "phone_bright_03",
+      "file": "extracted_frames/handheld_bright_alert318_f075.jpg",
+      "condition": "handheld_bright_screen",
+      "orientation": "vertical",
+      "distance": "close",
+      "lighting": "bright_screen_glow",
+      "background": "person_hand",
+      "gt_bbox": [
+        428,
+        145,
+        603,
+        479
+      ]
+    },
+    {
+      "frame_id": "phone_bright_04",
+      "file": "extracted_frames/handheld_bright_alert318_f080.jpg",
+      "condition": "handheld_bright_screen",
+      "orientation": "vertical",
+      "distance": "close",
+      "lighting": "bright_screen_glow",
+      "background": "person_hand",
+      "gt_bbox": [
+        427,
+        149,
+        602,
+        478
+      ]
+    },
+    {
+      "frame_id": "phone_bright_05",
+      "file": "extracted_frames/handheld_bright_alert318_f090.jpg",
+      "condition": "handheld_bright_screen",
+      "orientation": "vertical",
+      "distance": "close",
+      "lighting": "bright_screen_glow",
+      "background": "person_hand",
+      "gt_bbox": [
+        429,
+        145,
+        600,
+        479
+      ]
+    },
+    {
+      "frame_id": "phone_angle_01",
+      "file": "extracted_frames/handheld_angled_alert367_f020.jpg",
+      "condition": "handheld_angled",
+      "orientation": "angled",
+      "distance": "medium",
+      "lighting": "dimmed_indoor",
+      "background": "office_neutral",
+      "gt_bbox": [
+        442,
+        423,
+        616,
+        479
+      ]
+    },
+    {
+      "frame_id": "phone_angle_02",
+      "file": "extracted_frames/handheld_angled_alert367_f070.jpg",
+      "condition": "handheld_angled",
+      "orientation": "angled",
+      "distance": "medium",
+      "lighting": "dimmed_indoor",
+      "background": "office_neutral",
+      "gt_bbox": [
+        360,
+        215,
+        520,
+        445
+      ]
+    },
+    {
+      "frame_id": "phone_angle_03",
+      "file": "extracted_frames/handheld_angled_alert367_f080.jpg",
+      "condition": "handheld_angled",
+      "orientation": "angled",
+      "distance": "medium",
+      "lighting": "dimmed_indoor",
+      "background": "office_neutral",
+      "gt_bbox": [
+        362,
+        217,
+        518,
+        447
+      ]
+    },
+    {
+      "frame_id": "phone_angle_04",
+      "file": "extracted_frames/handheld_angled_alert367_f090.jpg",
+      "condition": "handheld_angled",
+      "orientation": "angled",
+      "distance": "medium",
+      "lighting": "dimmed_indoor",
+      "background": "office_neutral",
+      "gt_bbox": [
+        367,
+        228,
+        528,
+        468
+      ]
+    },
+    {
+      "frame_id": "phone_angle_05",
+      "file": "extracted_frames/handheld_angled_alert367_f100.jpg",
+      "condition": "handheld_angled",
+      "orientation": "angled",
+      "distance": "medium",
+      "lighting": "dimmed_indoor",
+      "background": "office_neutral",
+      "gt_bbox": [
+        379,
+        238,
+        542,
+        455
+      ]
+    },
+    {
+      "frame_id": "baseline_frame_01",
+      "file": "../eval_dataset/frames/frame_01.jpg",
+      "condition": "furniture_armchair_cluttered",
+      "orientation": "resting_armchair",
+      "distance": "close_furniture",
+      "lighting": "normal_indoor",
+      "background": "black_office_armchair",
+      "gt_bbox": [
+        930,
+        425,
+        1280,
+        720
+      ]
+    },
+    {
+      "frame_id": "baseline_frame_02",
+      "file": "../eval_dataset/frames/frame_02.jpg",
+      "condition": "furniture_armchair_cluttered",
+      "orientation": "resting_armchair",
+      "distance": "close_furniture",
+      "lighting": "normal_indoor",
+      "background": "black_office_armchair",
+      "gt_bbox": [
+        815,
+        510,
+        1165,
+        720
+      ]
+    },
+    {
+      "frame_id": "baseline_frame_04",
+      "file": "../eval_dataset/frames/frame_04.jpg",
+      "condition": "furniture_armchair_cluttered",
+      "orientation": "resting_armchair",
+      "distance": "close_furniture",
+      "lighting": "normal_indoor",
+      "background": "black_office_armchair",
+      "gt_bbox": [
+        875,
+        395,
+        1175,
+        720
+      ]
+    }
+  ]
+}

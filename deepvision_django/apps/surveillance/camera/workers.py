@@ -37,6 +37,8 @@ class CameraWorker:
         self.frame_id = 0
         self.fps = 0.0
         self.last_frame_time = 0.0
+        self.last_capture_monotonic = 0.0
+        self.frame_condition = threading.Condition(self.lock)
         self.is_starting = False
         self.start_error = None
         self.start_event = threading.Event()
@@ -46,6 +48,8 @@ class CameraWorker:
         self.consecutive_black_frames = 0
         self.state = "CONNECTING"
         self.is_reconnecting = False
+        self.last_acquisition_ms = 0.0
+        self.acquisition_samples = deque(maxlen=180)
 
     def get_operational_status(self):
         """Returns standard surveillance state: CONNECTING, ONLINE, STALE, RECONNECTING, OFFLINE, ERROR."""
@@ -88,6 +92,18 @@ class CameraWorker:
                     self.capture = safe_open_video_capture(self.cap_source)
                     if not self.capture.isOpened():
                         raise RuntimeError(f"Failed to open video capture source for camera {self.camera_id}.")
+                    probed = getattr(self.capture, "_probed_frame", None)
+                    if probed is not None and getattr(probed, "size", 0) > 0:
+                        now = time.time()
+                        self.latest_frame = probed
+                        self.rolling_buffer.append(probed)
+                        self.frame_id = 1
+                        self.last_capture_monotonic = time.monotonic()
+                        self.last_frame_time = now
+                        sample = probed[::16, ::16]
+                        if float(sample.mean()) >= 1.0 or float(sample.std()) >= 0.5:
+                            self.last_valid_frame_time = now
+                            self.state = "ONLINE"
                     self.running = True
                     self.thread = threading.Thread(
                         target=self._read_loop, 
@@ -108,7 +124,8 @@ class CameraWorker:
         last_fps_time = time.time()
         frames_read = 0
         consecutive_failures = 0
-        is_network = self.source_type in ("phone", "ipcamera", "rtsp")
+        reconnect_attempts = 0
+        is_network = self.source_type in ("phone", "ipcamera", "rtsp", "http", "https", "ip", "mjpeg")
         
         try:
             while True:
@@ -118,6 +135,7 @@ class CameraWorker:
                 
                 success = False
                 frame = None
+                t_acq0 = time.monotonic()
                 try:
                     with self.lock:
                         cap_ref = self.capture
@@ -126,50 +144,96 @@ class CameraWorker:
                 except Exception as read_err:
                     success = False
                     self.last_error = str(read_err)
+                acq_ms = (time.monotonic() - t_acq0) * 1000.0
 
                 if success and frame is not None and frame.size > 0:
                     now = time.time()
+                    now_mono = time.monotonic()
                     consecutive_failures = 0
+                    reconnect_attempts = 0
+                    self.last_acquisition_ms = round(acq_ms, 3)
+                    self.acquisition_samples.append(acq_ms)
 
-                    with self.lock:
+                    # Detect dead zeroed DirectShow buffers (contended device lock vs dark room with real sensor noise)
+                    sample = frame[::16, ::16]
+                    is_dead_black = (float(sample.mean()) < 1.0 and float(sample.std()) < 0.5)
+
+                    if is_dead_black:
+                        self.consecutive_black_frames += 1
+                        if self.consecutive_black_frames == 30:
+                            self.last_error = "Sustained zero-luminance buffer detected from capture source"
+                            print(f"[CAMERA_WORKER_WARN] Camera {self.camera_id}: {self.consecutive_black_frames} consecutive zero-luminance frames.")
+                        if self.consecutive_black_frames >= 35 and not is_network:
+                            self._attempt_reconnect()
+                            last_fps_time = time.time()
+                            frames_read = 0
+                            continue
+                        if self.latest_frame is not None and self.consecutive_black_frames < 35:
+                            time.sleep(0.02)
+                            continue
+                    else:
+                        self.consecutive_black_frames = 0
+                        self.last_error = None
+
+                    with self.frame_condition:
                         self.latest_frame = frame
-                        self.rolling_buffer.append(frame.copy())
+                        self.rolling_buffer.append(frame)
                         self.frame_id += 1
+                        self.last_capture_monotonic = now_mono
                         self.last_frame_time = now
-                        self.last_valid_frame_time = now
-                        self.state = "ONLINE"
+                        if not is_dead_black:
+                            self.last_valid_frame_time = now
+                            self.state = "ONLINE"
+                        self.frame_condition.notify_all()
 
                     try:
                         from apps.surveillance.recording import recording_service
-                        recording_service.write_frame(self.camera_id, frame)
+                        from apps.surveillance.camera.registry import get_camera_registry
+                        bound_ids = set(get_camera_registry().get_bound_camera_ids(self.physical_source_id))
+                        bound_ids.add(self.camera_id)
+                        for cid in bound_ids:
+                            recording_service.write_frame(cid, frame)
                     except Exception:
                         pass
 
                     frames_read += 1
-                    if frames_read >= 15:
+                    target_window = 4 if self.fps == 0.0 else 10
+                    if frames_read >= target_window:
                         dt = now - last_fps_time
                         if dt > 0:
                             self.fps = round(frames_read / dt, 1)
                         frames_read = 0
                         last_fps_time = now
 
-                    # Sleep briefly for non-webcam sources
+                    # Sleep briefly for non-webcam sources; let DirectShow block naturally at sensor frame rate
                     if self.source_type not in ("webcam", "usb") and not isinstance(self.cap_source, int):
                         time.sleep(0.015)
                     else:
-                        time.sleep(0.002)
+                        time.sleep(0.001)
                 else:
                     consecutive_failures += 1
-                    if consecutive_failures % 30 == 0:
+                    if consecutive_failures % 10 == 0:
                         print(f"[CAMERA_WORKER_WARN] Camera {self.camera_id}: {consecutive_failures} consecutive frame read failures.")
                     time.sleep(0.05)
                     
-                    if consecutive_failures >= 25 and not is_network:
+                    reconnect_threshold = 3 if is_network else 25
+                    max_reconnect_attempts = 3 if is_network else 6
+                    if consecutive_failures >= reconnect_threshold:
+                        reconnect_attempts += 1
                         reconnected = self._attempt_reconnect()
                         if reconnected:
                             consecutive_failures = 0
-                        elif consecutive_failures > 150:
+                            reconnect_attempts = 0
+                        elif reconnect_attempts >= max_reconnect_attempts:
                             self.state = "OFFLINE"
+                            try:
+                                from apps.cameras.models import Camera
+                                from apps.surveillance.camera.registry import get_camera_registry
+                                bound = set(get_camera_registry().get_bound_camera_ids(self.physical_source_id))
+                                bound.add(self.camera_id)
+                                Camera.objects.filter(id__in=bound).exclude(status="offline").update(status="offline")
+                            except Exception:
+                                pass
                             break
         except Exception as e:
             print(f"[CAMERA_WORKER_ERROR] Camera {self.camera_id} loop exception: {e}")
@@ -216,9 +280,10 @@ class CameraWorker:
         return False
 
     def stop(self):
-        with self.lock:
+        with self.frame_condition:
             self.running = False
             self.state = "OFFLINE"
+            self.frame_condition.notify_all()
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=2.0)
             self.thread = None

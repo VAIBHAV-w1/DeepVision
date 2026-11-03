@@ -1,15 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
-  <!-- Outer Hexagonal Reticle -->
-  <polygon points="24,3 41,13 41,35 24,45 7,35 7,13" stroke="#10b981" stroke-width="3" stroke-linejoin="round" fill="#080c14" />
-  <!-- Optical Ring -->
-  <circle cx="24" cy="24" r="13" stroke="#94a3b8" stroke-width="2" stroke-dasharray="4 2" />
-  <!-- Inner Aperture Ring -->
-  <circle cx="24" cy="24" r="7.5" stroke="#10b981" stroke-width="2.5" fill="#10b981" fill-opacity="0.2" />
-  <!-- Central Pupil / Focal Point -->
-  <circle cx="24" cy="24" r="3.5" fill="#10b981" />
-  <!-- Reticle Crosshair Ticks -->
-  <line x1="24" y1="5" x2="24" y2="10" stroke="#10b981" stroke-width="3" stroke-linecap="round" />
-  <line x1="24" y1="38" x2="24" y2="43" stroke="#10b981" stroke-width="3" stroke-linecap="round" />
-  <line x1="9" y1="24" x2="14" y2="24" stroke="#10b981" stroke-width="3" stroke-linecap="round" />
-  <line x1="34" y1="24" x2="39" y2="24" stroke="#10b981" stroke-width="3" stroke-linecap="round" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" fill="none" width="56" height="56">
+  <rect width="56" height="56" rx="14" fill="#0B0F19"/>
+  <path d="M 19 7 H 12 A 5 5 0 0 0 7 12 V 19 M 37 7 H 44 A 5 5 0 0 1 49 12 V 19 M 7 37 V 44 A 5 5 0 0 0 12 49 H 19 M 37 49 H 44 A 5 5 0 0 0 49 44 V 37" stroke="#00AFC4" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <circle cx="28" cy="28" r="10" stroke="#00AFC4" stroke-width="3" fill="none"/>
+  <circle cx="28" cy="28" r="3.5" fill="#00AFC4"/>
 </svg>

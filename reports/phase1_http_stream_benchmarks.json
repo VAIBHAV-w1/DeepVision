@@ -1,0 +1,20 @@
+{
+  "raw_stream": {
+    "mode": "raw",
+    "total_frames_received": 46,
+    "mean_frame_interval_ms": 66.92,
+    "stream_fps": 14.9,
+    "mean_frame_size_kb": 65.8,
+    "mean_inference_age_ms": null,
+    "p95_inference_age_ms": null
+  },
+  "tracking_stream": {
+    "mode": "tracking",
+    "total_frames_received": 59,
+    "mean_frame_interval_ms": 68.35,
+    "stream_fps": 14.6,
+    "mean_frame_size_kb": 69.3,
+    "mean_inference_age_ms": 11.8,
+    "p95_inference_age_ms": 70.3
+  }
+}

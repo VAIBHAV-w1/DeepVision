@@ -43,6 +43,11 @@ def get_shared_yolo_model():
             model_path = os.path.join(models_dir, "yolo11n.pt")
             print(f"[MODEL_LOADER] Loading shared YOLO model from {model_path}...")
             print(f"[MODEL_LOADER] MODEL_LOAD_COUNT={_model_load_count} (should always be 1)")
+            import torch
+            try:
+                torch.set_num_threads(4)
+            except Exception:
+                pass
             model = YOLO(model_path)
             model.to("cpu")
             _shared_yolo_model = model

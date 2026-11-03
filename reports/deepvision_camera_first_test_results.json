@@ -1,0 +1,101 @@
+{
+  "timestamp": "2026-10-27T18:05:35.576054+00:00",
+  "target_url": "http://127.0.0.1:8000",
+  "bridge_url": "http://127.0.0.1:8554",
+  "total_tests": 13,
+  "passed": 13,
+  "failed": 0,
+  "results": [
+    {
+      "id": "CAMERA-01",
+      "name": "Real raw physical camera footage acquisition",
+      "status": "PASS",
+      "duration_ms": 1234.97,
+      "evidence": "Acquired 3 physical frames from DirectShow bridge. Frame sizes: [102494, 102471, 102464] bytes. Hashes: ['d20bd9cb', '568ed38c', 'a5e412f3']"
+    },
+    {
+      "id": "CAMERA-02",
+      "name": "Raw stream unannotated delivery",
+      "status": "PASS",
+      "duration_ms": 267.78,
+      "evidence": "Endpoint: /api/cameras/4/stream/original/. Content-Type: 'multipart/x-mixed-replace; boundary=frame'. Decoded 2 unannotated frames."
+    },
+    {
+      "id": "CAMERA-03",
+      "name": "Detection & tracking neural inference pipeline",
+      "status": "PASS",
+      "duration_ms": 290.82,
+      "evidence": "Decoded 2 frames from /stream/tracking/. Model: 'models/yolo11n.pt (native singleton)', Tracker: 'ByteTrack (native singleton)'"
+    },
+    {
+      "id": "CAMERA-04",
+      "name": "Strict prohibition of synthetic fallbacks & demo modes",
+      "status": "PASS",
+      "duration_ms": 1.73,
+      "evidence": "Zero synthetic canvas patterns or demo footage in active code. Exactly two primary viewing modes verified: RAW STREAM | DETECTION & TRACKING"
+    },
+    {
+      "id": "CAMERA-05",
+      "name": "Repeated mode switching without socket leaks",
+      "status": "PASS",
+      "duration_ms": 490.73,
+      "evidence": "Switched RAW <-> TRACKING repeatedly. Host bridge status: online. Zero socket leaks."
+    },
+    {
+      "id": "CAMERA-06",
+      "name": "Permission and physical bridge architecture distinction",
+      "status": "PASS",
+      "duration_ms": 0.89,
+      "evidence": "Browser getUserMedia cleanly avoided. DirectShow host bridge connectivity diagnosed accurately with Retry button."
+    },
+    {
+      "id": "CAMERA-07",
+      "name": "Truthful offline camera state and error reporting",
+      "status": "PASS",
+      "duration_ms": 98.61,
+      "evidence": "Offline camera #2 reported status='offline'. Truthful offline frame returned (7388 bytes)."
+    },
+    {
+      "id": "CAMERA-08",
+      "name": "Dynamic camera recovery without service restart",
+      "status": "PASS",
+      "duration_ms": 137.36,
+      "evidence": "Immediately recovered live stream for Camera 4 (102578 bytes) following offline channel query."
+    },
+    {
+      "id": "CAMERA-09",
+      "name": "Snapshot creation and recording lifecycle",
+      "status": "PASS",
+      "duration_ms": 1747.05,
+      "evidence": "Created snapshot Evidence #6329, Recording start status=ok, stop status=ok"
+    },
+    {
+      "id": "CAMERA-10",
+      "name": "Sustained performance, latency, and freshness telemetry",
+      "status": "PASS",
+      "duration_ms": 506.48,
+      "evidence": "Sustained test: 6 frames. p50=47.8ms, p95=59.5ms, max=59.5ms, observed FPS=20.92, dropped_frames=0"
+    },
+    {
+      "id": "OPS-01",
+      "name": "Docker container and DirectShow camera bridge health",
+      "status": "PASS",
+      "duration_ms": 39.21,
+      "evidence": "Django health: status='healthy', database='connected'. Camera bridge: status='online', backend='DirectShow (dshow://0)'"
+    },
+    {
+      "id": "OPS-02",
+      "name": "Forensic database record counts preservation",
+      "status": "PASS",
+      "duration_ms": 343.43,
+      "evidence": "Preserved DB counts: Cameras=10, Recordings=3138, Evidence=6329, Incident Cases=841"
+    },
+    {
+      "id": "REG-01",
+      "name": "Clean frontend bundle compilation and static serving",
+      "status": "PASS",
+      "duration_ms": 1.03,
+      "evidence": "Vite production build verified in deepvision_django/static/dist/. index.html size: 2027 bytes, root container: True, assets linked: True"
+    }
+  ]
+}

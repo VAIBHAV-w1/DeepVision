@@ -38,6 +38,22 @@ def notifications_list_view(request):
     if severity_filter in ('low', 'medium', 'high', 'critical'):
         notifs_qs = notifs_qs.filter(alert__severity=severity_filter)
 
+    date_filter = request.GET.get('date', '').strip().lower()
+    if date_filter == 'today':
+        notifs_qs = notifs_qs.filter(created_at__date=timezone.localdate())
+    elif date_filter == 'yesterday':
+        from datetime import timedelta
+        notifs_qs = notifs_qs.filter(created_at__date=timezone.localdate() - timedelta(days=1))
+    elif date_filter:
+        import re
+        from datetime import datetime
+        if re.match(r'^\d{4}-\d{2}-\d{2}$', date_filter):
+            try:
+                d_val = datetime.strptime(date_filter, '%Y-%m-%d').date()
+                notifs_qs = notifs_qs.filter(created_at__date=d_val)
+            except Exception:
+                pass
+
     notifs_qs = notifs_qs.order_by('-created_at', '-id')
 
     page_number = request.GET.get('page', 1)
@@ -111,35 +127,92 @@ def unread_count_api_view(request):
 @login_required
 def api_notifications_list_view(request):
     """
-    JSON API for notifications polling in app.js toasts.
+    JSON API for notifications center (paginated, with timestamps, camera attribution, and unread counts).
     """
     user_id = request.user.id
-    notifs_qs = Notification.objects.filter(user_id=user_id).select_related('alert', 'alert__camera')
+    base_qs = Notification.objects.filter(user_id=user_id)
+    unread_count = base_qs.filter(is_read=False).count()
+    total_all = base_qs.count()
+
+    notifs_qs = base_qs.select_related('alert', 'alert__camera')
     status_filter = request.GET.get('status', '').strip().lower()
     if status_filter == 'unread':
         notifs_qs = notifs_qs.filter(is_read=False)
+    elif status_filter == 'read':
+        notifs_qs = notifs_qs.filter(is_read=True)
+
+    severity_filter = request.GET.get('severity', '').strip().lower()
+    if severity_filter in ('low', 'medium', 'high', 'critical'):
+        notifs_qs = notifs_qs.filter(alert__severity=severity_filter)
+
+    date_filter = request.GET.get('date', '').strip().lower()
+    if date_filter == 'today':
+        notifs_qs = notifs_qs.filter(created_at__date=timezone.localdate())
+    elif date_filter == 'yesterday':
+        from datetime import timedelta
+        notifs_qs = notifs_qs.filter(created_at__date=timezone.localdate() - timedelta(days=1))
+    elif date_filter:
+        import re
+        from datetime import datetime
+        if re.match(r'^\d{4}-\d{2}-\d{2}$', date_filter):
+            try:
+                d_val = datetime.strptime(date_filter, '%Y-%m-%d').date()
+                notifs_qs = notifs_qs.filter(created_at__date=d_val)
+            except Exception:
+                pass
+
     try:
-        per_page = int(request.GET.get('per_page', 5))
+        per_page = max(1, min(100, int(request.GET.get('per_page', 30))))
     except (ValueError, TypeError):
-        per_page = 5
-    notifs = list(notifs_qs.order_by('-created_at', '-id')[:per_page])
+        per_page = 30
+    try:
+        page_number = max(1, int(request.GET.get('page', 1)))
+    except (ValueError, TypeError):
+        page_number = 1
+
+    paginator = Paginator(notifs_qs.order_by('-created_at', '-id'), per_page)
+    page_obj = paginator.get_page(page_number)
+
     data = []
-    for n in notifs:
-        title = n.alert.title if (n.alert and n.alert.title) else (n.alert.event_type if (n.alert and n.alert.event_type) else "Security Notification")
-        message = n.alert.message if (n.alert and n.alert.message) else f"Security event #{n.id}"
+    for n in page_obj.object_list:
+        al = n.alert
+        cam = al.camera if al else None
+        cam_name = cam.name if cam else (f"Camera 0{al.camera_id}" if (al and al.camera_id) else "System")
+        title = al.title if (al and al.title) else (al.event_type if (al and al.event_type) else "Security Notification")
+        message = al.message if (al and al.message) else f"Security event #{n.id}"
+        ts_dt = n.created_at or (al.detected_at if al else None)
+        created_iso = ts_dt.isoformat() if ts_dt else ""
         data.append({
             'id': n.id,
+            'alert_id': al.id if al else None,
             'title': title,
             'message': message,
             'is_read': n.is_read,
+            'created_at': created_iso,
+            'read_at': n.read_at.isoformat() if n.read_at else None,
+            'camera_id': al.camera_id if al else None,
+            'camera_name': cam_name,
+            'severity': al.severity if al else 'medium',
             'alert': {
-                'id': n.alert.id if n.alert else None,
-                'title': n.alert.title if (n.alert and n.alert.title) else title,
-                'message': n.alert.message if (n.alert and n.alert.message) else message,
-                'camera_id': n.alert.camera_id if n.alert else None,
-                'event_type': n.alert.event_type if n.alert else None,
-                'severity': n.alert.severity if n.alert else None,
-            } if n.alert else None
+                'id': al.id,
+                'title': al.title or title,
+                'message': al.message or message,
+                'camera_id': al.camera_id,
+                'camera_name': cam_name,
+                'event_type': al.event_type,
+                'severity': al.severity,
+                'detected_at': al.detected_at.isoformat() if al.detected_at else created_iso,
+            } if al else None
         })
-    return JsonResponse({'notifications': data, 'count': len(data)})
+    return JsonResponse({
+        'notifications': data,
+        'count': len(data),
+        'total_count': paginator.count,
+        'total_all': total_all,
+        'unread_count': unread_count,
+        'num_pages': paginator.num_pages,
+        'current_page': page_obj.number,
+        'has_next': page_obj.has_next(),
+        'has_previous': page_obj.has_previous(),
+    })
 

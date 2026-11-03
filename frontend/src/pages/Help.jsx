@@ -1,136 +1,198 @@
 import React from 'react';
+import { useTranslation } from '../i18n/i18nContext';
 
-export function Help() {
+/**
+ * DeepVision Help — Clear, practical guidance written for everyday operators
+ */
+export function Help({ onNavigate }) {
+  const { t } = useTranslation();
+
+  const cards = [
+    {
+      title: t('help.monitorGuide', 'How to Monitor Live Cameras'),
+      body: t(
+        'help.monitorGuideText',
+        'Open Cameras and choose a camera to view its live feed. Switch between RAW STREAM and DETECTION & TRACKING from the camera controls.'
+      ),
+      actionLabel: 'Open Cameras →',
+      targetPage: 'cameras',
+      accentBg: 'rgba(0, 229, 255, 0.12)',
+      accentColor: 'var(--dv-cyan-500, #00E5FF)',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+          <line x1="8" y1="21" x2="16" y2="21" />
+          <line x1="12" y1="17" x2="12" y2="21" />
+        </svg>
+      ),
+    },
+    {
+      title: 'Managing Hardware & IP Cameras',
+      body: 'Open Cameras to register USB/DirectShow webcams, RTSP/ONVIF cameras, or mobile IP streams, run live connection diagnostics, edit locations, or remove retired sensors.',
+      actionLabel: 'Manage Cameras →',
+      targetPage: 'cameras',
+      accentBg: 'rgba(56, 189, 248, 0.12)',
+      accentColor: '#38BDF8',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+          <circle cx="12" cy="13" r="4" />
+        </svg>
+      ),
+    },
+    {
+      title: t('help.recordingsGuide', 'Finding Recordings & Evidence'),
+      body: t(
+        'help.recordingsGuideText',
+        'Open Recordings for archived MP4 video clips and manual captures, or Evidence for forensic snapshots and SHA-256 verified artifacts. Filter by camera, type, or search terms.'
+      ),
+      actionLabel: 'Browse Recordings →',
+      targetPage: 'recordings',
+      accentBg: 'rgba(0, 230, 118, 0.12)',
+      accentColor: 'var(--dv-status-online, #00E676)',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polygon points="5 3 19 12 5 21 5 3" />
+        </svg>
+      ),
+    },
+    {
+      title: t('help.alertsGuide', 'Responding to Security Alerts & Cases'),
+      body: t(
+        'help.alertsGuideText',
+        'Open Notifications and choose View Incident to inspect the event, camera, and available evidence. From the incident, create or review its linked investigation case.'
+      ),
+      actionLabel: 'Open Notifications →',
+      targetPage: 'notifications',
+      accentBg: 'rgba(255, 179, 0, 0.12)',
+      accentColor: 'var(--dv-status-warning, #FFB300)',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+      ),
+    },
+    {
+      title: 'Drawing Restricted Perimeter Zones',
+      body: 'In Cameras, choose a camera and switch to DETECTION & TRACKING. Use its zone controls to define restricted boundaries for that camera.',
+      actionLabel: 'Open Cameras →',
+      targetPage: 'cameras',
+      accentBg: 'rgba(244, 63, 94, 0.12)',
+      accentColor: '#F43F5E',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="4 2" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      ),
+    },
+    {
+      title: 'Detection Sensitivity, Themes & Languages',
+      body: 'Open Settings to adjust YOLO11n detection confidence thresholds, toggle active behavior rules (loitering, restricted entry, crowding, rapid motion, unattended object), or switch between Dark/Light themes and English, Hindi, or Kannada.',
+      actionLabel: 'Open Settings →',
+      targetPage: 'settings',
+      accentBg: 'rgba(168, 85, 247, 0.12)',
+      accentColor: '#A855F7',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9" />
+        </svg>
+      ),
+    },
+  ];
+
   return (
-
-    <div style={{ maxWidth: '1080px', margin: '0 auto', paddingBottom: '3rem' }}>
-      {/* Operational Header */}
-      <div className="hero-editorial-wrap" style={{ marginBottom: '1.75rem' }}>
-        <div className="editorial-badge-pill" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#10b981', padding: '4px 12px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', marginBottom: '8px' }}>
-          <span>OPERATOR GUIDANCE</span>
+    <div
+      className="deepvision-help-page"
+      style={{
+        maxWidth: '1200px',
+        margin: '0 auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '18px',
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          padding: '18px 22px',
+          background: 'var(--bg-surface, #0C121D)',
+          border: '1px solid var(--border-color, #1A2436)',
+          borderRadius: 'var(--radius-lg, 8px)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(0, 229, 255, 0.12)', border: '1px solid rgba(0, 229, 255, 0.28)', color: 'var(--dv-cyan-500, #00E5FF)', padding: '3px 10px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em' }}>
+            <span>OPERATOR GUIDANCE</span>
+          </div>
+          <a
+            href="/api/health/"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: '0.78rem', color: 'var(--dv-cyan-500, #00E5FF)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}
+          >
+            <span>View Health Diagnostics</span>
+            <span>&rarr;</span>
+          </a>
         </div>
-        <h1 className="editorial-hero-title" style={{ fontSize: '1.6rem', fontWeight: 700, margin: '2px 0 6px 0', letterSpacing: '-0.02em', color: 'var(--text-main)' }}>
-          Surveillance Documentation &amp; Setup Guides
+        <h1 style={{ fontSize: '1.35rem', fontWeight: 800, margin: '2px 0 6px 0', color: 'var(--text-main, #F8FAFC)' }}>
+          {t('help.subtitle', 'Simple instructions for operating the DeepVision surveillance platform')}
         </h1>
-        <p className="editorial-hero-subtitle" style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: 0 }}>
-          Technical guidance for hardware camera connection, neural stream modes, forensic archiving, and incident management.
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary, #94A3B8)', margin: 0, lineHeight: 1.5 }}>
+          Practical reference for watching live cameras, recording clips, managing perimeter zones, investigating alerts, and configuring system preferences.
         </p>
       </div>
 
-      {/* Guide Cards Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem', marginBottom: '2.5rem' }}>
-        {/* 1. Camera Ingestion & Setup */}
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
-          <div style={{ width: '38px', height: '38px', borderRadius: 'var(--radius-sm)', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M 23 7 l -7 5 7 5 V 7 z"></path>
-              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
-            </svg>
-          </div>
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.5rem' }}>Hardware Camera Ingestion</h3>
-          <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-            DeepVision ingests video streams through native DirectShow capture (webcams indexed at <code>dshow://0</code>), RTSP network streams (<code>rtsp://user:pass@ip:port/stream</code>), and Wi-Fi phone cameras (IP Webcam app).
-          </p>
-        </div>
+      {/* Guide Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: '14px' }}>
+        {cards.map((card) => (
+          <div
+            key={card.title}
+            style={{
+              padding: '18px',
+              background: 'var(--bg-surface, #0C121D)',
+              border: '1px solid var(--border-color, #1A2436)',
+              borderRadius: 'var(--radius-lg, 8px)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: card.accentBg, color: card.accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {card.icon}
+                </div>
+                <h2 style={{ fontSize: '0.96rem', fontWeight: 700, margin: 0, color: 'var(--text-main, #F8FAFC)' }}>
+                  {card.title}
+                </h2>
+              </div>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #94A3B8)', lineHeight: 1.55, margin: 0 }}>
+                {card.body}
+              </p>
+            </div>
 
-        {/* 2. Feed Modes */}
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
-          <div style={{ width: '38px', height: '38px', borderRadius: 'var(--radius-sm)', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M 3 7 V 5 a 2 2 0 0 1 2 -2 h 2"></path>
-              <path d="M 17 3 h 2 a 2 2 0 0 1 2 2 v 2"></path>
-              <path d="M 21 17 v 2 a 2 2 0 0 1 -2 2 h -2"></path>
-              <path d="M 7 21 H 5 a 2 2 0 0 1 -2 -2 v -2"></path>
-            </svg>
+            {onNavigate && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate(card.targetPage)}
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: '0.76rem', fontWeight: 600 }}
+                >
+                  {card.actionLabel}
+                </button>
+              </div>
+            )}
           </div>
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.5rem' }}>Stream Modes: Original vs AI</h3>
-          <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-            <strong>ORIGINAL</strong> delivers the raw, unprocessed CCTV camera feed with zero added inference latency. <strong>TRACKING + DETECTION</strong> runs the YOLO11n neural engine to detect persons and overlay persistent ByteTrack trajectory IDs in real time.
-          </p>
-        </div>
-
-        {/* 3. Recording & Media Delivery */}
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
-          <div style={{ width: '38px', height: '38px', borderRadius: 'var(--radius-sm)', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polygon points="5 3 19 12 5 21 5 3"></polygon>
-            </svg>
-          </div>
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.5rem' }}>Video Archiving &amp; Playback</h3>
-          <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-            Recordings are encoded into standard MP4 files using OpenCV VideoWriter. Clips are streamed via HTTP 206 Partial Content range requests, allowing operators to scrub smoothly through recorded video timelines.
-          </p>
-        </div>
-
-        {/* 4. Incident Response & Evidence */}
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
-          <div style={{ width: '38px', height: '38px', borderRadius: 'var(--radius-sm)', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M 12 22 s 8 -4 8 -10 V 5 l -8 -3 -8 3 v 7 c 0 6 8 10 8 10 z"></path>
-            </svg>
-          </div>
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.5rem' }}>Incident Forensics &amp; Cases</h3>
-          <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-            Security alerts allow operators to isolate anomalies, view preserved evidence snapshots, attach investigation notes, and escalate alerts into tracked Incident Cases.
-          </p>
-        </div>
-
-        {/* 5. Troubleshooting & Health */}
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
-          <div style={{ width: '38px', height: '38px', borderRadius: 'var(--radius-sm)', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="12"></line>
-              <line x1="12" y1="16" x2="12.01" y2="16"></line>
-            </svg>
-          </div>
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.5rem' }}>Signal Diagnostics &amp; Recovery</h3>
-          <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-            If a hardware camera drops signal, the CameraWorker thread attempts automatic reconnection. Health status can be verified through the <code>/api/health/</code> and <code>/api/surveillance/health/</code> diagnostics endpoints.
-          </p>
-        </div>
-
-        {/* 6. Hardware Limitations Notice */}
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
-          <div style={{ width: '38px', height: '38px', borderRadius: 'var(--radius-sm)', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <path d="M 9.09 9 a 3 3 0 0 1 5.83 1 c 0 2 -3 3 -3 3"></path>
-              <line x1="12" y1="17" x2="12.01" y2="17"></line>
-            </svg>
-          </div>
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.5rem' }}>Hardware Controls &amp; Capabilities</h3>
-          <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-            Physical webcams do not support motorized mechanical PTZ or two-way audio talkback. The live player provides client-side digital zoom (1x, 1.5x, 2x) with digital frame panning.
-          </p>
-        </div>
-      </div>
-
-      {/* System Technical Support & Diagnostic Logs */}
-      <div className="card" style={{ padding: '1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', margin: '0 0 0.25rem 0' }}>
-            System Technical Support &amp; Architecture Diagnostics
-          </h3>
-          <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', margin: 0, maxWidth: '600px' }}>
-            Access real-time engine telemetry, verify database connection status, and review active YOLO11n singleton health directly through the API endpoint.
-          </p>
-        </div>
-        <a
-          href="/api/health/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="btn btn-secondary btn-sm"
-          style={{ padding: '8px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-        >
-          <span>View Health Diagnostics</span>
-          <span>&rarr;</span>
-        </a>
+        ))}
       </div>
     </div>
   );
 }
-
 
 export default Help;

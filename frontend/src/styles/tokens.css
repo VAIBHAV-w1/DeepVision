@@ -1,0 +1,98 @@
+/**
+ * DeepVision SOC Design System Tokens
+ * Canonical specification for color, typography, surface depth, and tactical telemetry.
+ */
+
+:root {
+  /* =========================================================================
+     1. COLOR PALETTE: Obsidian Tactical Surveillance Core
+     ========================================================================= */
+  --dv-canvas: #090D14;
+  --dv-surface-0: #0C121D;
+  --dv-surface-1: #111827;
+  --dv-surface-2: #162032;
+  --dv-surface-3: #1D2A42;
+  --dv-surface-glass: rgba(12, 18, 29, 0.82);
+
+  /* Borders & Dividers */
+  --dv-border-subtle: #1A2436;
+  --dv-border-default: #24324A;
+  --dv-border-bright: #334466;
+  --dv-border-active: #00E5FF;
+
+  /* Primary Brand: Optical Cyan & Security Cobalt */
+  --dv-cyan-50: #ECFEFF;
+  --dv-cyan-100: #CFFAFE;
+  --dv-cyan-400: #22D3EE;
+  --dv-cyan-500: #00E5FF;
+  --dv-cyan-600: #0284C7;
+  --dv-cyan-glow: rgba(0, 229, 255, 0.22);
+  --dv-cyan-soft: rgba(0, 229, 255, 0.08);
+
+  /* Semantic Security Status Tokens */
+  --dv-status-online: #00E676;
+  --dv-status-online-glow: rgba(0, 230, 118, 0.25);
+  --dv-status-warning: #FFB300;
+  --dv-status-warning-glow: rgba(255, 179, 0, 0.25);
+  --dv-status-critical: #FF3D71;
+  --dv-status-critical-glow: rgba(255, 61, 113, 0.25);
+  --dv-status-offline: #64748B;
+  --dv-status-stale: #94A3B8;
+
+  /* Text & Readability Hierarchies */
+  --dv-text-primary: #F8FAFC;
+  --dv-text-secondary: #94A3B8;
+  --dv-text-muted: #64748B;
+  --dv-text-disabled: #475569;
+  --dv-text-accent: #00E5FF;
+
+  /* =========================================================================
+     2. TYPOGRAPHY SYSTEM
+     ========================================================================= */
+  --dv-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --dv-font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, Monaco, monospace;
+  --dv-font-display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* =========================================================================
+     3. ELEVATION, RADIUS & SHADOW
+     ========================================================================= */
+  --dv-radius-xs: 4px;
+  --dv-radius-sm: 6px;
+  --dv-radius-md: 8px;
+  --dv-radius-lg: 12px;
+  --dv-radius-xl: 16px;
+
+  --dv-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --dv-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --dv-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.65);
+  --dv-shadow-cyan: 0 0 16px rgba(0, 229, 255, 0.18);
+  --dv-shadow-critical: 0 0 16px rgba(255, 61, 113, 0.25);
+
+  /* Transition timings */
+  --dv-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --dv-transition-default: 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Light Theme Compatibility Layer */
+[data-theme="light"] {
+  --dv-canvas: #F1F5F9;
+  --dv-surface-0: #FFFFFF;
+  --dv-surface-1: #F8FAFC;
+  --dv-surface-2: #E2E8F0;
+  --dv-surface-3: #CBD5E1;
+  --dv-surface-glass: rgba(255, 255, 255, 0.9);
+
+  --dv-border-subtle: #E2E8F0;
+  --dv-border-default: #CBD5E1;
+  --dv-border-bright: #94A3B8;
+  --dv-border-active: #0284C7;
+
+  --dv-cyan-500: #0284C7;
+  --dv-cyan-glow: rgba(2, 132, 199, 0.15);
+
+  --dv-text-primary: #0F172A;
+  --dv-text-secondary: #475569;
+  --dv-text-muted: #64748B;
+  --dv-text-disabled: #94A3B8;
+  --dv-text-accent: #0284C7;
+}

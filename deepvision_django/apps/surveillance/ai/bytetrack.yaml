@@ -2,9 +2,9 @@
 # Optimized for surveillance streams: variable frame rates, occlusions, and track ID stability.
 
 tracker_type: bytetrack
-track_high_thresh: 0.25
-track_low_thresh: 0.05
-new_track_thresh: 0.35
-track_buffer: 90
+track_high_thresh: 0.45
+track_low_thresh: 0.15
+new_track_thresh: 0.45
+track_buffer: 75
 match_thresh: 0.80
-fuse_score: False
+fuse_score: True

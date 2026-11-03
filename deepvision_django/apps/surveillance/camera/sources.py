@@ -4,6 +4,87 @@ Ported natively into Django surveillance architecture.
 """
 import os
 import sys
+import socket
+import ipaddress
+import urllib.parse
+
+_ALLOWED_STREAM_SCHEMES = frozenset({"http", "https", "rtsp", "rtsps"})
+_PROHIBITED_HOSTNAMES = frozenset({
+    "localhost",
+    "localhost.localdomain",
+    "ip6-localhost",
+    "ip6-loopback",
+    "metadata.google.internal",
+    "metadata",
+    "instance-data",
+})
+
+
+def _assert_safe_ip(ip_obj):
+    """Rejects loopback, link-local (including 169.254.169.254), unspecified, and multicast IPs."""
+    candidates = [ip_obj]
+    mapped = getattr(ip_obj, "ipv4_mapped", None)
+    if mapped is not None:
+        candidates.append(mapped)
+    for addr in candidates:
+        if addr.is_loopback:
+            raise ValueError("Security Error: Loopback stream addresses (127.0.0.0/8, ::1) are prohibited.")
+        if addr.is_link_local:
+            raise ValueError("Security Error: Link-local and cloud metadata addresses (169.254.0.0/16) are prohibited.")
+        if addr.is_unspecified:
+            raise ValueError("Security Error: Unspecified stream addresses (0.0.0.0, ::) are prohibited.")
+        if addr.is_multicast:
+            raise ValueError("Security Error: Multicast stream addresses are prohibited.")
+
+
+def validate_network_stream_url(url: str) -> str:
+    """
+    Centralized SSRF guard for all network camera streams (RTSP, HTTP, HTTPS, MJPEG, Phone, IP camera).
+    Blocks loopback, link-local / cloud metadata (169.254.169.254), unspecified, multicast,
+    prohibited internal hostnames, and DNS-resolved loopback/metadata targets while permitting
+    valid private LAN camera subnets (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12).
+    """
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("Network stream URL cannot be empty.")
+
+    parsed = urllib.parse.urlsplit(url.strip())
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in _ALLOWED_STREAM_SCHEMES:
+        raise ValueError(f"Unsupported or prohibited stream protocol: {scheme or 'none'}")
+
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise ValueError("Network stream URL must specify a valid hostname or IP address.")
+
+    if host in _PROHIBITED_HOSTNAMES or host.endswith(".localhost") or host.endswith(".internal"):
+        raise ValueError(f"Security Error: Prohibited internal or loopback hostname '{host}'.")
+
+    # Fast path for IPv4 / IPv6 literals (zero DNS blocking)
+    try:
+        ip_obj = ipaddress.ip_address(host)
+    except ValueError:
+        ip_obj = None
+
+    if ip_obj is not None:
+        _assert_safe_ip(ip_obj)
+        return url.strip()
+
+    # Hostname DNS resolution check to prevent DNS-rebinding / alias SSRF (e.g. localtest.me -> 127.0.0.1)
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        infos = []
+    for info in infos:
+        sockaddr = info[4]
+        if sockaddr and sockaddr[0]:
+            raw_ip = str(sockaddr[0]).split("%", 1)[0]
+            try:
+                resolved_ip = ipaddress.ip_address(raw_ip)
+            except ValueError:
+                continue
+            _assert_safe_ip(resolved_ip)
+
+    return url.strip()
 
 def validate_video_path(filename):
     """
@@ -71,23 +152,23 @@ def normalize_camera_source(source_type, source):
     if source_type in ("webcam", "usb", "video", "file", "local"):
         return source
     elif source_type == "phone":
-        if not (source.startswith("http://") or source.startswith("https://") or source.startswith("rtsp://")):
+        if "://" not in source:
             source = "http://" + source
         try:
             import urllib.parse
             parts = urllib.parse.urlsplit(source)
-            if not parts.path or parts.path == "/" or parts.path == "":
+            if parts.scheme in ("http", "https") and (not parts.path or parts.path == "/" or parts.path == ""):
                 source = urllib.parse.urlunsplit((parts.scheme, parts.netloc, "/videofeed", parts.query, parts.fragment))
         except Exception:
             pass
         return source
     elif source_type == "rtsp":
-        if not source.startswith("rtsp://"):
+        if "://" not in source:
             source = "rtsp://" + source
         return source
-    elif source_type in ("ipcamera", "http", "https", "ip"):
-        if not (source.startswith("http://") or source.startswith("https://") or source.startswith("rtsp://")):
-            if ":554" in source or "rtsp" in source.lower():
+    elif source_type in ("ipcamera", "http", "https", "ip", "mjpeg"):
+        if "://" not in source:
+            if source_type != "mjpeg" and (":554" in source or "rtsp" in source.lower()):
                 source = "rtsp://" + source
             elif source_type == "https":
                 source = "https://" + source
@@ -126,8 +207,9 @@ def resolve_camera_capture_source(source_type, source):
             raise ValueError(resolved_path)
         return resolved_path
         
-    elif source_type in ("rtsp", "phone", "ipcamera", "http", "https", "ip"):
-        return normalize_camera_source(source_type, source)
+    elif source_type in ("rtsp", "phone", "ipcamera", "http", "https", "ip", "mjpeg"):
+        normalized = normalize_camera_source(source_type, source)
+        return validate_network_stream_url(normalized)
         
     else:
         raise ValueError(f"Unsupported source type: {source_type}")
@@ -149,6 +231,6 @@ def get_physical_source_key(source_type, source):
         return f"{backend}://{cap_source}"
     elif source_type in ("video", "file", "local"):
         return f"file://{os.path.abspath(str(cap_source))}"
-    elif source_type in ("rtsp", "phone", "ipcamera", "http", "https", "ip"):
+    elif source_type in ("rtsp", "phone", "ipcamera", "http", "https", "ip", "mjpeg"):
         return f"net://{normalize_camera_source(source_type, source)}"
     return f"generic://{cap_source}"

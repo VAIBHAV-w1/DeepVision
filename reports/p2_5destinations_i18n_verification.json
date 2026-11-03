@@ -1,0 +1,61 @@
+{
+  "timestamp": "2026-11-03T10:45:52.521Z",
+  "tests": [
+    {
+      "name": "Strictly 5 Primary Navigation Items",
+      "expected": [
+        "nav-dashboard",
+        "nav-cameras",
+        "nav-notifications",
+        "nav-settings",
+        "nav-help"
+      ],
+      "actual": [
+        "nav-dashboard",
+        "nav-cameras",
+        "nav-notifications",
+        "nav-settings",
+        "nav-help"
+      ],
+      "pass": true
+    },
+    {
+      "name": "Dashboard Clean & Independent (No live player)",
+      "pass": true
+    },
+    {
+      "name": "Cameras Workspace",
+      "pass": true
+    },
+    {
+      "name": "Notifications Central Security Workspace",
+      "pass": true
+    },
+    {
+      "name": "Legacy #alerts -> #notifications?tab=incidents",
+      "actual": "#notifications?tab=incidents&incident=undefined",
+      "pass": true
+    },
+    {
+      "name": "Hindi Reactive Language Switch",
+      "actual": "डैशबोर्ड",
+      "pass": true
+    },
+    {
+      "name": "Kannada Reactive Language Switch",
+      "actual": "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್",
+      "pass": true
+    }
+  ],
+  "screenshots": [
+    "01_dashboard_1440.png",
+    "02_cameras_1440.png",
+    "03_notifications_1440.png",
+    "04_settings_1440.png",
+    "05_help_1440.png",
+    "06_dashboard_hindi_1440.png",
+    "07_dashboard_kannada_1440.png"
+  ],
+  "passed": 7,
+  "failed": 0
+}

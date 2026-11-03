@@ -7,6 +7,7 @@ Provides:
 - Forgot Password & Password Reset
 - Logout (styled banner notification)
 """
+import logging
 import re
 from datetime import datetime, timezone
 from django.shortcuts import render, redirect
@@ -17,6 +18,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from apps.accounts.models import User
 from apps.accounts.email_service import send_verification_email, send_password_reset_email
 
+logger = logging.getLogger(__name__)
 EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
 
@@ -65,6 +67,8 @@ def validate_password_strength(password):
 
 @require_http_methods(["GET", "POST"])
 def login_view(request):
+    if request.user.is_authenticated:
+        return redirect("dashboard")
     if request.method == "POST":
         email = request.POST.get("email", "").strip().lower()
         password = request.POST.get("password", "")
@@ -111,6 +115,8 @@ def login_view(request):
 
 @require_http_methods(["GET", "POST"])
 def signup_view(request):
+    if request.user.is_authenticated:
+        return redirect("dashboard")
     if request.method == "POST":
         full_name = request.POST.get("full_name", "").strip()
         email = request.POST.get("email", "").strip().lower()
@@ -139,16 +145,17 @@ def signup_view(request):
             new_user.save()
 
             try:
-                send_verification_email(email, otp)
-            except Exception as mail_err:
-                print(f"[AUTH] Could not deliver verification email via SMTP: {mail_err}")
+                if not send_verification_email(email, otp):
+                    logger.warning("[AUTH] Verification email delivery failed.")
+            except Exception:
+                logger.warning("[AUTH] Verification email delivery failed.")
 
             request.session["signup_email"] = email
             messages.success(request, "Account created successfully. A verification code has been sent to your email.")
             return redirect("verify_email")
 
-        except Exception as e:
-            print(f"[AUTH] Registration error: {e}")
+        except Exception:
+            logger.error("[AUTH] Registration failed.")
             messages.error(request, "An error occurred during account registration. Please try again.")
             return render(request, "pages/auth/signup.html", {"full_name": full_name, "email": email})
 
@@ -216,10 +223,18 @@ def resend_otp_view(request):
     try:
         otp = user.generate_otp()
         user.save()
-        send_verification_email(user.email, otp)
-        messages.success(request, "A new verification code has been sent to your email.")
-    except Exception as e:
-        print(f"[AUTH] Failed to resend OTP: {e}")
+        sent = send_verification_email(user.email, otp)
+        if sent:
+            messages.success(request, "A new verification code has been sent to your email.")
+        else:
+            logger.warning("[AUTH] Verification code resend failed for user_id=%s.", user.id)
+            user.email_otp_sent_at = None
+            user.save(update_fields=["email_otp_sent_at"])
+            messages.error(request, "Failed to send verification code. Please try again later.")
+    except Exception:
+        logger.warning("[AUTH] Verification code resend failed for user_id=%s.", user.id)
+        user.email_otp_sent_at = None
+        user.save(update_fields=["email_otp_sent_at"])
         messages.error(request, "Failed to send verification code. Please try again later.")
 
     return redirect("verify_email")
@@ -245,9 +260,10 @@ def forgot_password_view(request):
             try:
                 otp = user.generate_reset_otp()
                 user.save()
-                send_password_reset_email(user.email, otp)
-            except Exception as e:
-                print(f"[AUTH] Forgot password setup error: {e}")
+                if not send_password_reset_email(user.email, otp):
+                    logger.warning("[AUTH] Password reset email delivery failed for user_id=%s.", user.id)
+            except Exception:
+                logger.warning("[AUTH] Password reset setup failed for user_id=%s.", user.id)
 
         messages.success(request, "If the account exists, a password reset code has been sent to the email address.")
         return redirect("reset_password")
@@ -315,8 +331,8 @@ def reset_password_view(request):
 
                 messages.success(request, "Password reset successfully. Please log in with your new password.")
                 return redirect("login")
-            except Exception as e:
-                print(f"[AUTH] Error during password update: {e}")
+            except Exception:
+                logger.error("[AUTH] Password update failed for user_id=%s.", user.id)
                 messages.error(request, "An error occurred during password update. Please try again.")
                 return render(request, "pages/auth/reset_password.html", {"email": email, "step": 2})
 
@@ -350,10 +366,18 @@ def resend_reset_otp_view(request):
     try:
         otp = user.generate_reset_otp()
         user.save()
-        send_password_reset_email(user.email, otp)
-        messages.success(request, "A new reset verification code has been sent to your email.")
-    except Exception as e:
-        print(f"[AUTH] Failed to resend reset OTP: {e}")
+        sent = send_password_reset_email(user.email, otp)
+        if sent:
+            messages.success(request, "A new reset verification code has been sent to your email.")
+        else:
+            logger.warning("[AUTH] Password reset code resend failed for user_id=%s.", user.id)
+            user.password_reset_otp_sent_at = None
+            user.save(update_fields=["password_reset_otp_sent_at"])
+            messages.error(request, "Failed to send reset code. Please try again later.")
+    except Exception:
+        logger.warning("[AUTH] Password reset code resend failed for user_id=%s.", user.id)
+        user.password_reset_otp_sent_at = None
+        user.save(update_fields=["password_reset_otp_sent_at"])
         messages.error(request, "Failed to send reset code. Please try again later.")
 
     return redirect("reset_password")

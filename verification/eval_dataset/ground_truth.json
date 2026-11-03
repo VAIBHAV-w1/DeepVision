@@ -1,0 +1,208 @@
+{
+  "dataset_name": "DeepVision 4.0 Authorized Camera Evaluation Dataset",
+  "created_at": "2026-11-01",
+  "annotation_method": "Human-verified visual inspection of raw authorized recordings on 1280x720 100px coordinate grid (zero synthetic or model-invented labels)",
+  "resolution": [1280, 720],
+  "frames": [
+    {
+      "frame_id": "frame_01",
+      "file": "frames/frame_01.jpg",
+      "source_recording": "camera_4/cam_4_rec_20261031_095239.mp4",
+      "frame_index": 120,
+      "objects": [
+        {"class_name": "person", "bbox": [370, 255, 990, 720], "small": false, "occluded": true},
+        {"class_name": "cell phone", "bbox": [930, 425, 1280, 720], "small": false, "occluded": false}
+      ]
+    },
+    {
+      "frame_id": "frame_02",
+      "file": "frames/frame_02.jpg",
+      "source_recording": "camera_4/cam_4_rec_20261031_095239.mp4",
+      "frame_index": 520,
+      "objects": [
+        {"class_name": "person", "bbox": [315, 205, 960, 720], "small": false, "occluded": true},
+        {"class_name": "cell phone", "bbox": [815, 510, 1165, 720], "small": false, "occluded": false}
+      ]
+    },
+    {
+      "frame_id": "frame_03",
+      "file": "frames/frame_03.jpg",
+      "source_recording": "camera_4/cam_4_rec_20261031_095239.mp4",
+      "frame_index": 980,
+      "objects": [
+        {"class_name": "person", "bbox": [310, 225, 1095, 720], "small": false, "occluded": false}
+      ]
+    },
+    {
+      "frame_id": "frame_04",
+      "file": "frames/frame_04.jpg",
+      "source_recording": "camera_4/cam_4_rec_20261031_095121.mp4",
+      "frame_index": 35,
+      "objects": [
+        {"class_name": "person", "bbox": [340, 250, 1185, 720], "small": false, "occluded": true},
+        {"class_name": "cell phone", "bbox": [875, 395, 1175, 720], "small": false, "occluded": true}
+      ]
+    },
+    {
+      "frame_id": "frame_05",
+      "file": "frames/frame_05.jpg",
+      "source_recording": "camera_8/cam_8_rec_20260918_112059.mp4",
+      "frame_index": 25,
+      "objects": [
+        {"class_name": "person", "bbox": [0, 115, 1155, 720], "small": false, "occluded": false},
+        {"class_name": "bottle", "bbox": [5, 40, 92, 200], "small": true, "occluded": false},
+        {"class_name": "bottle", "bbox": [112, 48, 192, 208], "small": true, "occluded": true},
+        {"class_name": "bowl", "bbox": [150, 152, 260, 225], "small": true, "occluded": false}
+      ]
+    },
+    {
+      "frame_id": "frame_06",
+      "file": "frames/frame_06.jpg",
+      "source_recording": "camera_8/cam_8_rec_20260918_112059.mp4",
+      "frame_index": 95,
+      "objects": [
+        {"class_name": "person", "bbox": [0, 115, 1160, 720], "small": false, "occluded": false},
+        {"class_name": "bottle", "bbox": [5, 40, 92, 200], "small": true, "occluded": false},
+        {"class_name": "bottle", "bbox": [112, 48, 192, 208], "small": true, "occluded": true},
+        {"class_name": "bowl", "bbox": [150, 152, 260, 225], "small": true, "occluded": false},
+        {"class_name": "laptop", "bbox": [590, 470, 680, 625], "small": true, "occluded": true}
+      ]
+    },
+    {
+      "frame_id": "frame_07",
+      "file": "frames/frame_07.jpg",
+      "source_recording": "camera_8/cam_8_rec_20260918_081931.mp4",
+      "frame_index": 45,
+      "multi_moving": true,
+      "objects": [
+        {"class_name": "person", "bbox": [30, 0, 1205, 720], "small": false, "occluded": false},
+        {"class_name": "person", "bbox": [0, 435, 225, 720], "small": false, "occluded": true},
+        {"class_name": "person", "bbox": [1110, 475, 1275, 670], "small": true, "occluded": true}
+      ]
+    },
+    {
+      "frame_id": "frame_08",
+      "file": "frames/frame_08.jpg",
+      "source_recording": "camera_8/cam_8_rec_20260918_081931.mp4",
+      "frame_index": 165,
+      "multi_moving": true,
+      "objects": [
+        {"class_name": "person", "bbox": [25, 0, 1205, 720], "small": false, "occluded": false},
+        {"class_name": "person", "bbox": [0, 385, 225, 720], "small": false, "occluded": true},
+        {"class_name": "person", "bbox": [1120, 470, 1280, 665], "small": true, "occluded": true}
+      ]
+    },
+    {
+      "frame_id": "frame_09",
+      "file": "frames/frame_09.jpg",
+      "source_recording": "camera_4/cam_4_rec_20261101_012104.mp4",
+      "frame_index": 25,
+      "objects": [
+        {"class_name": "person", "bbox": [360, 330, 1030, 720], "small": false, "occluded": false},
+        {"class_name": "backpack", "bbox": [320, 45, 635, 475], "small": false, "occluded": false}
+      ]
+    },
+    {
+      "frame_id": "frame_10",
+      "file": "frames/frame_10.jpg",
+      "source_recording": "camera_3/cam_3_rec_20260926_233944.mp4",
+      "frame_index": 50,
+      "objects": [
+        {"class_name": "person", "bbox": [365, 175, 1215, 720], "small": false, "occluded": false},
+        {"class_name": "bottle", "bbox": [855, 265, 1090, 675], "small": false, "occluded": true},
+        {"class_name": "bottle", "bbox": [115, 468, 152, 528], "small": true, "occluded": false}
+      ]
+    },
+    {
+      "frame_id": "frame_11",
+      "file": "frames/frame_11.jpg",
+      "source_recording": "camera_3/cam_3_rec_20260926_234124.mp4",
+      "frame_index": 50,
+      "objects": [
+        {"class_name": "person", "bbox": [320, 195, 1075, 720], "small": false, "occluded": false},
+        {"class_name": "bottle", "bbox": [945, 615, 1070, 720], "small": true, "occluded": true},
+        {"class_name": "bottle", "bbox": [115, 468, 152, 528], "small": true, "occluded": false}
+      ]
+    },
+    {
+      "frame_id": "frame_12",
+      "file": "frames/frame_12.jpg",
+      "source_recording": "camera_4/cam_4_rec_20260927_155350.mp4",
+      "frame_index": 20,
+      "objects": [
+        {"class_name": "person", "bbox": [315, 195, 1050, 720], "small": false, "occluded": false},
+        {"class_name": "backpack", "bbox": [175, 0, 430, 375], "small": false, "occluded": false},
+        {"class_name": "backpack", "bbox": [405, 0, 570, 345], "small": false, "occluded": true}
+      ]
+    }
+  ],
+  "tracking_sequences": [
+    {
+      "sequence_id": "seq_01_cam4_motion",
+      "directory": "sequences/seq_01_cam4_motion",
+      "source_recording": "camera_4/cam_4_rec_20261031_095239.mp4",
+      "num_frames": 60,
+      "targets": [
+        {
+          "gt_id": "person_1",
+          "class_name": "person",
+          "region": [250, 180, 1050, 720],
+          "present_all_frames": true
+        },
+        {
+          "gt_id": "phone_1",
+          "class_name": "cell phone",
+          "region": [850, 380, 1280, 720],
+          "present_all_frames": true
+        }
+      ]
+    },
+    {
+      "sequence_id": "seq_02_cam8_multiobj",
+      "directory": "sequences/seq_02_cam8_multiobj",
+      "source_recording": "camera_8/cam_8_rec_20260918_112059.mp4",
+      "num_frames": 60,
+      "targets": [
+        {
+          "gt_id": "person_1",
+          "class_name": "person",
+          "region": [0, 80, 1200, 720],
+          "present_all_frames": true
+        },
+        {
+          "gt_id": "bottle_left_1",
+          "class_name": "bottle",
+          "region": [0, 20, 110, 220],
+          "present_all_frames": true
+        }
+      ]
+    },
+    {
+      "sequence_id": "seq_03_cam8_desk",
+      "directory": "sequences/seq_03_cam8_desk",
+      "source_recording": "camera_8/cam_8_rec_20260918_081931.mp4",
+      "num_frames": 60,
+      "targets": [
+        {
+          "gt_id": "person_center",
+          "class_name": "person",
+          "region": [20, 0, 1220, 720],
+          "present_all_frames": true
+        },
+        {
+          "gt_id": "person_left",
+          "class_name": "person",
+          "region": [0, 360, 250, 720],
+          "present_all_frames": true
+        },
+        {
+          "gt_id": "person_right",
+          "class_name": "person",
+          "region": [1080, 440, 1280, 700],
+          "present_all_frames": true
+        }
+      ]
+    }
+  ]
+}
+

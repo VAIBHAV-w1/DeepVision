@@ -39,6 +39,14 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
 # Avoid recursively calling the bridge from within the host bridge
 os.environ["USE_HOST_CAMERA_BRIDGE"] = "False"
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+
+try:
+    import torch
+    torch.set_num_threads(4)
+except Exception:
+    pass
 
 import django
 django.setup()
@@ -115,11 +123,19 @@ class HostCameraBridgeHandler(BaseHTTPRequestHandler):
             cam = Camera.objects.filter(id=camera_id).first()
             user_id = cam.user_id if cam else 1
 
+            # Optimize TCP socket for real-time video streaming (disable Nagle algorithm)
+            try:
+                import socket
+                self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except Exception:
+                pass
+
             self.send_response(200)
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0")
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
+            self.send_header("X-Accel-Buffering", "no")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 

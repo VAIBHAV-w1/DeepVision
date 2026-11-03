@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.db import connection
 from apps.accounts.decorators import login_required
 from apps.cameras.models import Camera
@@ -186,6 +187,7 @@ def health_check_view(request):
     return JsonResponse(payload, status=http_status)
 
 
+@ensure_csrf_cookie
 def react_app_view(request, *args, **kwargs):
     """
     Serves the production built React single-page application (SPA).

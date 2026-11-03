@@ -1,17 +1,20 @@
 """
 Native Django Surveillance Recording Service.
-Manages camera recording sessions, MP4 file writing, database records,
-and storage statistics using Django ORM.
+Manages camera recording sessions, asynchronous non-blocking MP4 file writing,
+database records, and storage statistics using Django ORM.
 """
 
 import os
+import time
+import queue
+import shutil
 import threading
 import logging
+from datetime import datetime, timezone
 try:
     import cv2
 except (ImportError, Exception):
     cv2 = None
-from datetime import datetime, timezone
 
 from django.conf import settings
 from django.utils import timezone as django_timezone
@@ -40,6 +43,22 @@ def _get_evidence_dir():
     return base
 
 
+def check_storage_capacity(min_free_mb=None):
+    """
+    Checks available disk space on the recordings partition.
+    Returns (ok: bool, free_mb: float, required_mb: float).
+    """
+    required_mb = float(
+        min_free_mb
+        if min_free_mb is not None
+        else getattr(settings, "SURVEILLANCE_MIN_FREE_DISK_MB", 500.0)
+    )
+    rec_dir = _get_recordings_dir()
+    usage = shutil.disk_usage(rec_dir)
+    free_mb = round(usage.free / (1024.0 * 1024.0), 2)
+    return (free_mb >= required_mb, free_mb, required_mb)
+
+
 def validate_recording_path(file_path):
     """Validates that a file path is safely within recordings or evidence directory."""
     if not file_path:
@@ -55,11 +74,109 @@ def validate_recording_path(file_path):
     return full_ev.startswith(base_ev + os.sep) or full_ev == base_ev
 
 
-def start_recording(user_id, camera_id):
+class AsyncRecordingWriter(threading.Thread):
+    """
+    Dedicated non-blocking background thread that writes frames to disk.
+    Prevents video encoding and disk I/O from stalling the camera capture loop.
+    """
+    def __init__(self, camera_id, full_path, fps=25.0, max_queue=90, max_file_mb=None):
+        super().__init__(name=f"RecWriter-Cam{camera_id}", daemon=True)
+        self.camera_id = camera_id
+        self.full_path = full_path
+        self.fps = fps
+        self.max_file_bytes = int(
+            float(max_file_mb if max_file_mb is not None else getattr(settings, "SURVEILLANCE_MAX_SINGLE_RECORDING_MB", 2048.0))
+            * 1024 * 1024
+        )
+        self.frame_queue = queue.Queue(maxsize=max_queue)
+        self.running = True
+        self.writer = None
+        self.frames_written = 0
+        self.stopped_by_storage_guard = False
+
+    def run(self):
+        while self.running or not self.frame_queue.empty():
+            try:
+                item = self.frame_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            if item is None:
+                # Sentinel to finalize
+                break
+
+            frame = item
+            if frame is None or getattr(frame, "size", 0) == 0:
+                self.frame_queue.task_done()
+                continue
+
+            # Periodic storage & single-file size guard (every 150 frames) to prevent unbounded multi-GB disk exhaustion
+            if self.frames_written > 0 and (self.frames_written % 150 == 0):
+                try:
+                    ok_disk, free_mb, req_mb = check_storage_capacity()
+                    curr_bytes = os.path.getsize(self.full_path) if os.path.exists(self.full_path) else 0
+                    if (not ok_disk) or (self.max_file_bytes > 0 and curr_bytes >= self.max_file_bytes):
+                        logger.warning(
+                            f"[REC_STORAGE_GUARD] Stopping recording cam={self.camera_id} "
+                            f"(free_mb={free_mb}, req_mb={req_mb}, file_bytes={curr_bytes})"
+                        )
+                        self.stopped_by_storage_guard = True
+                        self.running = False
+                        self.frame_queue.task_done()
+                        break
+                except Exception:
+                    pass
+
+            h, w = frame.shape[:2]
+            if self.writer is None and cv2 is not None:
+                try:
+                    self.writer = create_browser_compatible_video_writer(self.full_path, self.fps, w, h)
+                except Exception as e:
+                    logger.error(f"[REC_WRITER_INIT_ERROR] cam={self.camera_id}: {e}")
+
+            if self.writer and self.writer.isOpened():
+                try:
+                    self.writer.write(frame)
+                    self.frames_written += 1
+                except Exception as e:
+                    logger.error(f"[REC_WRITE_ERROR] cam={self.camera_id}: {e}")
+
+            self.frame_queue.task_done()
+
+        if self.writer:
+            try:
+                self.writer.release()
+            except Exception as e:
+                logger.warning(f"[REC_WRITER_RELEASE_ERROR] cam={self.camera_id}: {e}")
+            self.writer = None
+
+    def push_frame(self, frame):
+        if not self.running:
+            return
+        try:
+            # Non-blocking enqueue: drop frame if disk writer is falling behind to protect capture
+            self.frame_queue.put_nowait(frame.copy())
+        except queue.Full:
+            pass
+
+    def stop_and_join(self, timeout=3.0):
+        self.running = False
+        try:
+            self.frame_queue.put_nowait(None)
+        except Exception:
+            pass
+        self.join(timeout=timeout)
+
+
+def start_recording(user_id, camera_id, fps=15.0, min_free_mb=None):
     """
     Creates a new Recording record with status='recording' using Django ORM.
-    Generates safe filename and sets up active recording registry.
+    Enforces minimum free disk storage threshold and spawns an asynchronous background writer.
     """
+    ok_disk, free_mb, req_mb = check_storage_capacity(min_free_mb=min_free_mb)
+    if not ok_disk:
+        raise OSError(f"Insufficient disk space for recording ({free_mb:.1f} MB free, {req_mb:.1f} MB required).")
+
     now = django_timezone.now()
     timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f'cam_{camera_id}_rec_{timestamp_str}.mp4'
@@ -82,34 +199,53 @@ def start_recording(user_id, camera_id):
         file_size=0,
     )
 
+    safe_fps = max(10.0, min(30.0, float(fps or 15.0)))
+    writer_thread = AsyncRecordingWriter(camera_id, full_path, fps=safe_fps)
+    writer_thread.start()
+
     with _lock:
+        # If an existing recording was somehow still active for this camera, close it
+        old_data = _active_recordings.pop(camera_id, None)
+        if old_data and old_data.get('writer_thread'):
+            try:
+                old_data['writer_thread'].stop_and_join(timeout=1.0)
+            except Exception:
+                pass
+
         _active_recordings[camera_id] = {
             'recording_id': recording.id,
             'user_id': user_id,
             'full_path': full_path,
-            'writer': None,
+            'writer_thread': writer_thread,
             'start_time': now,
         }
 
-    logger.info(f"[RECORDING_STARTED] id={recording.id} cam={camera_id} path={relative_path}")
+    logger.info(f"[RECORDING_STARTED] id={recording.id} cam={camera_id} user={user_id} path={relative_path}")
     return recording
 
 
-def stop_recording(recording_id, user_id):
+def stop_recording(recording_id, user_id=None):
     """
-    Marks a recording as completed, finalizes VideoWriter, updates duration and size.
+    Marks a recording as completed, finalizes async writer, updates duration and size.
     """
-    rec = Recording.objects.filter(id=recording_id, user_id=user_id, status='recording').first()
+    query = Recording.objects.filter(id=recording_id, status='recording')
+    if user_id is not None:
+        query = query.filter(user_id=user_id)
+    rec = query.first()
     if not rec:
         return None
 
     with _lock:
-        rec_data = _active_recordings.pop(rec.camera_id, None)
-        if rec_data:
-            writer = rec_data.get('writer')
-            if writer:
+        rec_data = _active_recordings.get(rec.camera_id)
+        # A camera can have a newer in-memory session than this DB row (for
+        # example after a restart or overlapping start request). Only the
+        # owner of that exact session may remove and stop its writer.
+        if rec_data and rec_data.get('recording_id') == rec.id:
+            _active_recordings.pop(rec.camera_id, None)
+            writer_thread = rec_data.get('writer_thread')
+            if writer_thread:
                 try:
-                    writer.release()
+                    writer_thread.stop_and_join(timeout=3.0)
                 except Exception as e:
                     logger.warning(f"[RECORDING_WRITER_RELEASE_WARN] {e}")
 
@@ -118,7 +254,7 @@ def stop_recording(recording_id, user_id):
     rec.status = 'completed'
 
     if rec.started_at:
-        rec.duration_seconds = max(0.0, (now - rec.started_at).total_seconds())
+        rec.duration_seconds = round(max(0.0, (now - rec.started_at).total_seconds()), 1)
 
     base = _get_recordings_dir()
     full_path = os.path.normpath(os.path.join(base, rec.file_path))
@@ -130,40 +266,41 @@ def stop_recording(recording_id, user_id):
     return rec
 
 
-def stop_camera_recording_by_camera(camera_id, user_id):
+def stop_camera_recording_by_camera(camera_id, user_id=None):
     """Stops the active recording for a camera if one exists."""
     active = get_active_recording(camera_id, user_id)
+    if not active:
+        # Fallback check directly in database
+        active_qs = Recording.objects.filter(camera_id=camera_id, status='recording')
+        if user_id is not None:
+            active_qs = active_qs.filter(user_id=user_id)
+        active = active_qs.first()
     if not active:
         return None
     return stop_recording(active.id, user_id)
 
 
-def get_active_recording(camera_id, user_id):
+def get_active_recording(camera_id, user_id=None):
     """Returns the active (status='recording') Recording for a camera, if any."""
-    return Recording.objects.filter(camera_id=camera_id, user_id=user_id, status='recording').first()
+    qs = Recording.objects.filter(camera_id=camera_id, status='recording')
+    if user_id is not None:
+        qs = qs.filter(user_id=user_id)
+    return qs.first()
 
 
 def write_frame(camera_id, frame):
     """
-    Writes a frame to the active recording VideoWriter for the camera.
-    Initializes VideoWriter lazily on first frame.
+    Pushes a frame to the active non-blocking async recording writer.
+    Returns immediately, guaranteeing zero capture stalls.
     """
     if frame is None or not hasattr(frame, 'shape') or frame.size == 0:
         return
 
-    h, w = frame.shape[:2]
     with _lock:
         rec_data = _active_recordings.get(camera_id)
         if not rec_data:
             return
+        writer_thread = rec_data.get('writer_thread')
 
-        writer = rec_data.get('writer')
-        if writer is None:
-            writer = create_browser_compatible_video_writer(rec_data['full_path'], 20.0, w, h)
-            rec_data['writer'] = writer
-
-        if writer and writer.isOpened():
-            try:
-                writer.write(frame)
-            except Exception as e:
-                logger.error(f"[RECORDING_WRITE_FRAME_ERROR] cam={camera_id}: {e}")
+    if writer_thread:
+        writer_thread.push_frame(frame)

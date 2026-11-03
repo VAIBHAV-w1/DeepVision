@@ -19,6 +19,10 @@ class BehaviorAnalyzer:
         # Default values
         speed = 0.0
         distance = 0.0
+        window_speed = 0.0
+        window_displacement = 0.0
+        window_duration = 0.0
+        direction_reversals = 0
         direction = "stationary"
         behavior = "normal"
 
@@ -36,6 +40,41 @@ class BehaviorAnalyzer:
             # Speed = position change over elapsed time (pixels per second)
             if time_diff > 0:
                 speed = distance / time_diff
+
+            # Rolling ~1.0s window speed & net straight-line displacement (rejects stationary bbox jitter)
+            win_idx = max(0, len(positions) - 10)
+            for idx in range(len(timestamps) - 2, -1, -1):
+                win_idx = idx
+                if (curr_time - timestamps[idx]) >= 0.9:
+                    break
+            window_duration = max(0.0, curr_time - timestamps[win_idx])
+            if window_duration > 0.05 and win_idx < len(positions) - 1:
+                path_len = 0.0
+                for k in range(win_idx + 1, len(positions)):
+                    p0, p1 = positions[k - 1], positions[k]
+                    path_len += math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+                window_speed = path_len / window_duration
+                start_p = positions[win_idx]
+                window_displacement = math.hypot(curr_pos[0] - start_p[0], curr_pos[1] - start_p[1])
+            else:
+                window_speed = speed
+                window_displacement = distance
+
+            # Count sharp direction reversals (>110 deg turn between meaningful >=18px motion segments)
+            recent_pts = positions[-14:]
+            seg_vectors = []
+            acc_dx, acc_dy = 0.0, 0.0
+            for k in range(1, len(recent_pts)):
+                acc_dx += recent_pts[k][0] - recent_pts[k - 1][0]
+                acc_dy += recent_pts[k][1] - recent_pts[k - 1][1]
+                seg_mag = math.hypot(acc_dx, acc_dy)
+                if seg_mag >= 18.0:
+                    seg_vectors.append((acc_dx / seg_mag, acc_dy / seg_mag))
+                    acc_dx, acc_dy = 0.0, 0.0
+            for k in range(1, len(seg_vectors)):
+                dot = seg_vectors[k - 1][0] * seg_vectors[k][0] + seg_vectors[k - 1][1] * seg_vectors[k][1]
+                if dot < -0.35:
+                    direction_reversals += 1
 
             # Determine direction using change in center coordinates with a small noise threshold
             dx = curr_pos[0] - prev_pos[0]
@@ -72,12 +111,14 @@ class BehaviorAnalyzer:
         speed_fast_thresh = config.get("SPEED_FAST_THRESHOLD", 150.0)
         speed_slow_thresh = config.get("SPEED_SLOW_THRESHOLD", 15.0)
 
+        effective_speed = max(speed, window_speed) if window_displacement >= 25.0 else min(speed, speed_fast_thresh * 0.8)
+
         # Classification hierarchy
         if track_history.get("loitering_duration", 0.0) >= loiter_time_thresh:
             behavior = "loitering"
         elif track_history.get("stationary_duration", 0.0) >= stat_time_thresh:
             behavior = "stationary"
-        elif speed >= speed_fast_thresh:
+        elif effective_speed >= speed_fast_thresh:
             behavior = "moving_fast"
         elif speed <= speed_slow_thresh:
             # Only classify moving_slow if not completely stationary
@@ -92,6 +133,10 @@ class BehaviorAnalyzer:
             "behavior": behavior,
             "direction": direction,
             "speed": float(speed),
+            "window_speed": float(window_speed),
+            "window_displacement": float(window_displacement),
+            "window_duration": float(window_duration),
+            "direction_reversals": int(direction_reversals),
             "distance": float(distance),
             "stationary_duration": float(track_history.get("stationary_duration", 0.0))
         }

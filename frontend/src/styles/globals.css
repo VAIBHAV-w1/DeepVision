@@ -23,38 +23,40 @@
 
   /* High Contrast Restrained Borders */
   --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-color: rgba(255, 255, 255, 0.10);
+  --border-color: rgba(255, 255, 255, 0.1);
   --border-color-subtle: rgba(255, 255, 255, 0.05);
   --border-focus: #10b981;
 
   /* Typography */
-  --text-main: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-main: var(--dv-text-primary, #f8fafc);
+  --text-secondary: var(--dv-text-secondary, #94a3b8);
+  --text-muted: var(--dv-text-muted, #64748b);
   --text-inverse: #090d16;
 
-  /* Emerald Security Green Accent (Reference 2 Enterprise Security Direction) */
-  --color-primary: #10b981;
-  --color-primary-hover: #059669;
-  --color-primary-active: #047857;
-  --color-primary-subtle: rgba(16, 185, 129, 0.12);
-  --color-primary-border: rgba(16, 185, 129, 0.28);
+  /* DeepVision Primary Optical Cyan Accent */
+  --color-primary: var(--dv-cyan-500, #00e5ff);
+  --color-primary-hover: var(--dv-cyan-400, #22d3ee);
+  --color-primary-active: var(--dv-cyan-600, #0284c7);
+  --color-primary-subtle: rgba(0, 229, 255, 0.12);
+  --color-primary-border: rgba(0, 229, 255, 0.28);
+  --border-focus: var(--dv-cyan-500, #00e5ff);
 
-  /* Restrained State Colors */
-  --color-live: #10b981;
-  --color-live-subtle: rgba(16, 185, 129, 0.12);
-  --color-live-border: rgba(16, 185, 129, 0.30);
+  /* Tactical Status Colors */
+  --color-live: var(--dv-status-online, #00e676);
+  --color-live-subtle: rgba(0, 230, 118, 0.14);
+  --color-live-border: rgba(0, 230, 118, 0.35);
 
-  --color-offline: #ef4444;
-  --color-offline-subtle: rgba(239, 68, 68, 0.12);
-  --color-offline-border: rgba(239, 68, 68, 0.30);
+  --color-offline: var(--dv-status-offline, #64748b);
+  --color-offline-subtle: rgba(100, 116, 139, 0.14);
+  --color-offline-border: rgba(100, 116, 139, 0.3);
 
-  --color-warn: #f59e0b;
-  --color-warn-subtle: rgba(245, 158, 11, 0.12);
-  --color-warn-border: rgba(245, 158, 11, 0.30);
+  --color-warn: var(--dv-status-warning, #ffb300);
+  --color-warn-subtle: rgba(255, 179, 0, 0.14);
+  --color-warn-border: rgba(255, 179, 0, 0.35);
 
-  --color-critical: #dc2626;
-  --color-critical-subtle: rgba(220, 38, 38, 0.14);
+  --color-critical: var(--dv-status-critical, #ff3d71);
+  --color-critical-subtle: rgba(255, 61, 113, 0.16);
+  --color-critical-border: rgba(255, 61, 113, 0.35);
 
   /* Elevation & Shadows (Understated, crisp, enterprise security precision) */
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
@@ -64,9 +66,13 @@
   --shadow-glow: 0 0 14px -2px rgba(16, 185, 129, 0.25);
 
   /* Font Families */
-  --font-display: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  --font-display:
+    "Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
 
   /* Layout Constants */
   --header-height: 60px;
@@ -85,7 +91,6 @@
   --transition-fast: 140ms ease-out;
   --transition-normal: 200ms ease-out;
 }
-
 
 /* --------------------------------------------------------------------------
    2. Dark Theme (Deep Obsidian / Midnight Slate with Emerald Security Accent)
@@ -120,15 +125,15 @@
 
   --color-live: #10b981;
   --color-live-subtle: rgba(16, 185, 129, 0.14);
-  --color-live-border: rgba(16, 185, 129, 0.30);
+  --color-live-border: rgba(16, 185, 129, 0.3);
 
   --color-offline: #f43f5e;
   --color-offline-subtle: rgba(244, 63, 94, 0.14);
-  --color-offline-border: rgba(244, 63, 94, 0.30);
+  --color-offline-border: rgba(244, 63, 94, 0.3);
 
   --color-warn: #f59e0b;
   --color-warn-subtle: rgba(245, 158, 11, 0.14);
-  --color-warn-border: rgba(245, 158, 11, 0.30);
+  --color-warn-border: rgba(245, 158, 11, 0.3);
 
   --color-critical: #ef4444;
   --color-critical-subtle: rgba(239, 68, 68, 0.18);
@@ -168,20 +173,20 @@
   --color-primary: #059669;
   --color-primary-hover: #047857;
   --color-primary-active: #065f46;
-  --color-primary-subtle: rgba(5, 150, 105, 0.10);
+  --color-primary-subtle: rgba(5, 150, 105, 0.1);
   --color-primary-border: rgba(5, 150, 105, 0.35);
 
   --color-live: #059669;
-  --color-live-subtle: rgba(5, 150, 105, 0.10);
-  --color-live-border: rgba(5, 150, 105, 0.30);
+  --color-live-subtle: rgba(5, 150, 105, 0.1);
+  --color-live-border: rgba(5, 150, 105, 0.3);
 
   --color-offline: #e11d48;
-  --color-offline-subtle: rgba(225, 29, 72, 0.10);
-  --color-offline-border: rgba(225, 29, 72, 0.30);
+  --color-offline-subtle: rgba(225, 29, 72, 0.1);
+  --color-offline-border: rgba(225, 29, 72, 0.3);
 
   --color-warn: #d97706;
-  --color-warn-subtle: rgba(217, 119, 6, 0.10);
-  --color-warn-border: rgba(217, 119, 6, 0.30);
+  --color-warn-subtle: rgba(217, 119, 6, 0.1);
+  --color-warn-border: rgba(217, 119, 6, 0.3);
 
   --color-critical: #dc2626;
   --color-critical-subtle: rgba(220, 38, 38, 0.12);
@@ -207,7 +212,9 @@ vercel-live-feedback,
 /* --------------------------------------------------------------------------
    3. Base HTML & Global Reset
    -------------------------------------------------------------------------- */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -230,7 +237,9 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  transition: background-color var(--transition-normal), color var(--transition-normal);
+  transition:
+    background-color var(--transition-normal),
+    color var(--transition-normal);
   overflow-x: hidden;
 }
 
@@ -244,7 +253,8 @@ a:hover {
   color: var(--color-primary-hover);
 }
 
-img, video {
+img,
+video {
   max-width: 100%;
   height: auto;
   display: block;
@@ -253,7 +263,12 @@ img, video {
 /* --------------------------------------------------------------------------
    4. Typography & Expressive Editorial Headings
    -------------------------------------------------------------------------- */
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: var(--font-display);
   color: var(--text-main);
   font-weight: 700;
@@ -374,7 +389,9 @@ h1, h2, h3, h4, h5, h6 {
   height: var(--header-height);
   background-color: var(--bg-surface);
   border-bottom: 1px solid var(--border-color);
-  transition: background-color var(--transition-normal), border-color var(--transition-normal);
+  transition:
+    background-color var(--transition-normal),
+    border-color var(--transition-normal);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
@@ -434,7 +451,6 @@ h1, h2, h3, h4, h5, h6 {
   color: #ffffff;
   box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
 }
-
 
 .brand-title-wrap {
   display: flex;
@@ -498,6 +514,65 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: var(--shadow-sm);
 }
 
+.nav-link-dropdown {
+  position: relative;
+}
+
+.nav-link-dropdown > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.nav-link-dropdown > summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 1200;
+  display: flex;
+  min-width: 205px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--border-color, #24324a);
+  border-radius: 6px;
+  background: var(--bg-surface, #0c121d);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+}
+
+.nav-dropdown-link,
+.mobile-nav-submenu .mobile-nav-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 4px;
+  color: var(--text-secondary, #94a3b8);
+  font-size: 0.82rem;
+  text-decoration: none;
+}
+
+.nav-dropdown-link:hover,
+.nav-dropdown-link.active,
+.mobile-nav-submenu .mobile-nav-link.active {
+  color: var(--text-main, #f8fafc);
+  background: var(--bg-surface-hover, rgba(148, 163, 184, 0.12));
+}
+
+.mobile-nav-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px 12px;
+  padding: 0 0 0 8px;
+  border-left: 1px solid var(--border-color, #24324a);
+  list-style: none;
+}
+
 [data-theme="dark"] .nav-link-pill.active {
   background-color: var(--bg-surface-raised);
   color: #ffffff;
@@ -513,7 +588,7 @@ h1, h2, h3, h4, h5, h6 {
   border-radius: var(--radius-full);
   background-color: var(--color-offline);
   color: #ffffff;
-  font-size: 0.70rem;
+  font-size: 0.7rem;
   font-weight: 700;
   line-height: 1;
 }
@@ -554,7 +629,9 @@ h1, h2, h3, h4, h5, h6 {
   z-index: 1040;
   opacity: 0;
   visibility: hidden;
-  transition: opacity var(--transition-normal), visibility var(--transition-normal);
+  transition:
+    opacity var(--transition-normal),
+    visibility var(--transition-normal);
 }
 
 .sidebar-backdrop.active {
@@ -573,7 +650,9 @@ h1, h2, h3, h4, h5, h6 {
   z-index: 1050;
   transform: translateX(100%);
   visibility: hidden;
-  transition: transform var(--transition-normal), visibility var(--transition-normal);
+  transition:
+    transform var(--transition-normal),
+    visibility var(--transition-normal);
   display: flex;
   flex-direction: column;
   padding: 1.5rem;
@@ -614,7 +693,8 @@ h1, h2, h3, h4, h5, h6 {
   transition: all var(--transition-fast);
 }
 
-.mobile-nav-link:hover, .mobile-nav-link.active {
+.mobile-nav-link:hover,
+.mobile-nav-link.active {
   color: var(--text-main);
   background-color: var(--bg-surface-subtle);
 }
@@ -649,7 +729,7 @@ h1, h2, h3, h4, h5, h6 {
   background-color: var(--color-primary);
   color: #ffffff !important;
   border-color: var(--color-primary);
-  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.30);
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
 }
 
 .btn-primary:hover {
@@ -658,7 +738,6 @@ h1, h2, h3, h4, h5, h6 {
   transform: translateY(-1px);
   box-shadow: 0 4px 16px rgba(16, 185, 129, 0.42);
 }
-
 
 .btn-secondary {
   background-color: var(--bg-surface);
@@ -696,7 +775,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .btn-sm {
   padding: 0.42rem 0.85rem;
-  font-size: 0.80rem;
+  font-size: 0.8rem;
   border-radius: var(--radius-xs);
 }
 
@@ -769,7 +848,8 @@ h1, h2, h3, h4, h5, h6 {
   margin-bottom: 0.45rem;
 }
 
-.form-control, .form-select {
+.form-control,
+.form-select {
   width: 100%;
   padding: 0.65rem 0.95rem;
   font-family: var(--font-sans);
@@ -778,10 +858,13 @@ h1, h2, h3, h4, h5, h6 {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
-.form-control:focus, .form-select:focus {
+.form-control:focus,
+.form-select:focus {
   outline: none;
   border-color: var(--border-focus);
   box-shadow: 0 0 0 3px var(--color-primary-subtle);
@@ -790,11 +873,13 @@ h1, h2, h3, h4, h5, h6 {
 /* --------------------------------------------------------------------------
    10. Dropdowns (Theme & Notifications)
    -------------------------------------------------------------------------- */
-.theme-menu-wrap, .notif-menu-wrap {
+.theme-menu-wrap,
+.notif-menu-wrap {
   position: relative;
 }
 
-.theme-dropdown, .notif-dropdown {
+.theme-dropdown,
+.notif-dropdown {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
@@ -815,13 +900,20 @@ h1, h2, h3, h4, h5, h6 {
   padding: 0;
 }
 
-.theme-dropdown.show, .notif-dropdown.show {
+.theme-dropdown.show,
+.notif-dropdown.show {
   display: block;
 }
 
 @keyframes dropdownFadeIn {
-  from { opacity: 0; transform: translateY(-6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .theme-option {
@@ -969,12 +1061,20 @@ h1, h2, h3, h4, h5, h6 {
   align-items: flex-start;
   gap: 0.85rem;
   animation: toastSlideIn 240ms cubic-bezier(0.16, 1, 0.3, 1);
-  transition: opacity 200ms ease, transform 200ms ease;
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
 }
 
 @keyframes toastSlideIn {
-  from { opacity: 0; transform: translateY(-12px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -986,7 +1086,9 @@ h1, h2, h3, h4, h5, h6 {
   border-top: 1px solid var(--border-color);
   padding: 2rem 0;
   margin-top: auto;
-  transition: background-color var(--transition-normal), border-color var(--transition-normal);
+  transition:
+    background-color var(--transition-normal),
+    border-color var(--transition-normal);
   z-index: 10;
 }
 
@@ -1020,7 +1122,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .app-footer-tagline {
-  font-size: 0.80rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
   line-height: 1.35;
 }
@@ -1076,7 +1178,8 @@ h1, h2, h3, h4, h5, h6 {
 /* --------------------------------------------------------------------------
    8. Indian Languages Localization & RTL Layout Support
    -------------------------------------------------------------------------- */
-[dir="rtl"], .rtl-layout {
+[dir="rtl"],
+.rtl-layout {
   direction: rtl;
   text-align: right;
 }
@@ -1105,3 +1208,152 @@ h1, h2, h3, h4, h5, h6 {
   outline-offset: 2px;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   9. Screen-Fit Responsive Architecture (Desktop, Tablet & Mobile)
+   -------------------------------------------------------------------------- */
+
+/* Responsive Monitor Layout */
+@media (max-width: 1100px) {
+  .monitor-viewport-layout {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+  }
+  .monitor-sidebar {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)) !important;
+    gap: 12px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .monitor-topbar {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+    padding: 10px 14px !important;
+  }
+  .monitor-topbar h1 {
+    font-size: 1.05rem !important;
+  }
+  .hud-camera-pill {
+    font-size: 0.72rem !important;
+    padding: 3px 8px !important;
+  }
+  .channel-switcher-strip {
+    padding: 8px 10px !important;
+    gap: 6px !important;
+  }
+  .monitor-sidebar {
+    grid-template-columns: 1fr !important;
+  }
+  .security-center-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    padding: 10px 14px !important;
+  }
+  .security-center-tabs {
+    padding: 4px 6px !important;
+    gap: 6px !important;
+  }
+  .security-tab-btn {
+    padding: 6px 10px !important;
+    font-size: 0.78rem !important;
+  }
+}
+
+/* Screen-fit height optimization: eliminate excessive outer margins */
+.app-main {
+  min-height: calc(100dvh - var(--header-height, 60px) - 50px);
+  padding: 1rem 1.25rem 2rem 1.25rem;
+}
+
+@media (max-width: 576px) {
+  .app-main {
+    padding: 0.75rem 0.75rem 1.5rem 0.75rem;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Authoritative Single-Row Top Navbar & Responsive Layout Overrides
+   Ensures all 10 workspaces + Brand Logo + Controls fit cleanly on 1 row
+   from 1181px to 4K without 2-line wrapping or horizontal overflow.
+   -------------------------------------------------------------------------- */
+.app-main {
+  padding: 0 !important;
+}
+
+.app-header {
+  width: 100%;
+  height: 58px;
+}
+
+.app-header-inner {
+  padding: 0 clamp(12px, 1.4vw, 24px) !important;
+  gap: 0.5rem !important;
+}
+
+.nav-links-center {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem !important;
+  flex-wrap: nowrap !important;
+  min-width: 0;
+}
+
+.nav-link-pill {
+  white-space: nowrap !important;
+  flex-shrink: 0;
+  padding: 0.34rem 0.58rem !important;
+  font-size: 0.78rem !important;
+  gap: 0.28rem !important;
+}
+
+.nav-controls-right {
+  gap: 0.45rem !important;
+  flex-shrink: 0;
+}
+
+@media (max-width: 1620px) {
+  .brand-subtext,
+  .brand-tagline,
+  .soc-status-text {
+    display: none !important;
+  }
+  .soc-status-badge-top {
+    padding: 6px !important;
+    border-radius: 9999px !important;
+  }
+}
+
+@media (max-width: 1340px) {
+  .nav-link-pill {
+    padding: 0.3rem 0.46rem !important;
+    font-size: 0.74rem !important;
+  }
+}
+
+@media (max-width: 1180px) {
+  .nav-links-center {
+    display: none !important;
+  }
+  .mobile-nav-toggle {
+    display: flex !important;
+  }
+}
+
+@media (max-width: 960px) {
+  .surveillance-live-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

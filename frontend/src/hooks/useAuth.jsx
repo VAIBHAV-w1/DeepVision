@@ -85,7 +85,7 @@ export function AuthProvider({ children }) {
   };
 
   const loginAsDemo = async () => {
-    const demoUser = {
+    const fallbackUser = {
       id: 9999,
       username: 'soc_operator_demo',
       email: 'operator@deepvision.internal',
@@ -97,7 +97,6 @@ export function AuthProvider({ children }) {
     try {
       localStorage.setItem('deepvision_demo_session', 'true');
     } catch (_) {}
-    setUser(demoUser);
     try {
       const res = await authService.demoLogin();
       if (res && res.user) {
@@ -105,7 +104,8 @@ export function AuthProvider({ children }) {
         return res.user;
       }
     } catch (_) {}
-    return demoUser;
+    setUser(fallbackUser);
+    return fallbackUser;
   };
 
   const logout = async () => {

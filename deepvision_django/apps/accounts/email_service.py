@@ -1,162 +1,119 @@
-"""
-Email service for DeepVision Django application.
-Sends HTML verification and password reset emails via SMTP.
-No plaintext passwords or secrets logged.
-"""
-import os
-import smtplib
+"""Django-backed email delivery for authentication and security alerts."""
 import logging
-from pathlib import Path
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from html import escape
+
+from django.conf import settings
+from django.core.mail import EmailMultiAlternatives, get_connection
+from django.utils.html import strip_tags
 
 logger = logging.getLogger(__name__)
 
-# Ensure environment variables are loaded
-try:
-    from dotenv import load_dotenv
-    env_path = Path(__file__).resolve().parent.parent.parent.parent / '.env'
-    if env_path.exists():
-        load_dotenv(env_path)
-    else:
-        load_dotenv()
-except Exception:
-    pass
 
-
-import threading
-
-def _send_smtp_email(recipient_email, subject, html_content):
-    """
-    Sends HTML email via SMTP using environment configuration or Django settings.
-    """
-    mail_server = os.getenv("MAIL_SERVER") or os.getenv("SMTP_HOST") or os.getenv("EMAIL_HOST")
-    mail_port = os.getenv("MAIL_PORT") or os.getenv("SMTP_PORT") or os.getenv("EMAIL_PORT") or "587"
-    mail_username = os.getenv("MAIL_USERNAME") or os.getenv("SMTP_USERNAME") or os.getenv("EMAIL_HOST_USER")
-    mail_password = (os.getenv("MAIL_PASSWORD") or os.getenv("SMTP_PASSWORD") or os.getenv("EMAIL_HOST_PASSWORD") or "").strip()
-    mail_use_tls = (os.getenv("MAIL_USE_TLS") or os.getenv("SMTP_USE_TLS") or os.getenv("EMAIL_USE_TLS", "True")).lower() == "true"
-    
-    mail_sender = os.getenv("MAIL_DEFAULT_SENDER") or os.getenv("SMTP_FROM") or os.getenv("DEFAULT_FROM_EMAIL")
-    if not mail_sender or "yourgmail" in mail_sender:
-        mail_sender = mail_username
-
-    if not all([mail_server, mail_port, mail_username, mail_password]):
-        logger.warning("[EMAIL] SMTP configuration incomplete. Email delivery skipped.")
+def _send_email(recipient_email, subject, html_content):
+    """Send through Django's configured backend and report actual delivery."""
+    if not all((settings.EMAIL_HOST, settings.EMAIL_HOST_USER,
+                settings.EMAIL_HOST_PASSWORD, settings.DEFAULT_FROM_EMAIL)):
+        logger.warning("Email delivery skipped: SMTP configuration is incomplete.")
         return False
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = mail_sender
-    msg["To"] = recipient_email
-    msg.attach(MIMEText(html_content, "html"))
 
     try:
-        port = int(mail_port)
-        smtp_client = smtplib.SMTP(mail_server, port, timeout=5)
-        if mail_use_tls:
-            smtp_client.starttls()
-        # Clean potential spaces in app passwords
-        smtp_client.login(mail_username, mail_password)
-        smtp_client.sendmail(mail_sender, recipient_email, msg.as_string())
-        smtp_client.quit()
-        logger.info(f"[EMAIL] Successfully sent '{subject}' to {recipient_email}")
+        connection = get_connection(
+            fail_silently=False,
+            timeout=getattr(settings, "EMAIL_TIMEOUT", 8),
+        )
+        message = EmailMultiAlternatives(
+            subject=subject,
+            body=strip_tags(html_content),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[recipient_email],
+            connection=connection,
+        )
+        message.attach_alternative(html_content, "text/html")
+        sent_count = message.send(fail_silently=False)
+        if sent_count != 1:
+            logger.warning("Email backend did not accept the message (type=%s).", subject)
+            return False
+        logger.info("Email delivered via configured backend (type=%s).", subject)
         return True
-    except Exception as e:
-        logger.error(f"[EMAIL] SMTP transmission to {recipient_email} failed: {e}")
+    except Exception:
+        # SMTP exceptions can contain provider details; keep credentials and
+        # recipient data out of logs and let callers report a generic failure.
+        logger.warning("Email delivery failed (type=%s).", subject)
         return False
 
 
-def _dispatch_email_async(recipient_email, subject, html_content):
-    """
-    Dispatches email synchronously in serverless environments (to prevent process freezing)
-    and asynchronously in persistent server environments.
-    """
-    is_serverless = bool(os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
-    if is_serverless:
-        return _send_smtp_email(recipient_email, subject, html_content)
-
-    t = threading.Thread(
-        target=_send_smtp_email,
-        args=(recipient_email, subject, html_content),
-        daemon=True,
-        name=f"SMTP-{recipient_email}"
-    )
-    t.start()
-    return True
+def _otp_email(greeting, intro, otp, accent="#2b5c8f"):
+    safe_greeting = escape(greeting)
+    safe_otp = escape(str(otp))
+    return f"""
+    <html><body style="font-family:Arial,sans-serif;padding:20px;color:#333;line-height:1.6">
+      <h2 style="color:{accent};border-bottom:2px solid {accent};padding-bottom:10px">DeepVision</h2>
+      <p>{safe_greeting}</p><p>{intro}</p>
+      <p style="font-size:28px;font-weight:bold;background:#f4f6f9;padding:15px 25px;display:inline-block;letter-spacing:4px;border-radius:6px;border:1px solid #e1e4e8;color:{accent}">{safe_otp}</p>
+      <p>This code expires in 15 minutes. If you did not request it, you can ignore this email.</p>
+      <hr style="border:0;border-top:1px solid #eee;margin-top:30px">
+      <p style="font-size:11px;color:#999">Automated message. Please do not reply.</p>
+    </body></html>"""
 
 
 def send_verification_email(recipient_email, otp, full_name=None):
-    """
-    Sends email verification HTML message containing 6-digit OTP code.
-    Accepts optional full_name parameter for personalization.
-    """
     greeting = f"Hello {full_name}," if full_name else "Hello,"
-    html_content = f"""
-    <html>
-      <body style="font-family: Arial, sans-serif; padding: 20px; color: #333; line-height: 1.6;">
-        <h2 style="color: #2b5c8f; border-bottom: 2px solid #2b5c8f; padding-bottom: 10px;">DeepVision</h2>
-        <p>{greeting}</p>
-        <p>Thank you for creating an account with DeepVision. To complete your registration, please verify your email address using the code below:</p>
-        <div style="font-size: 28px; font-weight: bold; background-color: #f4f6f9; padding: 15px 25px; display: inline-block; letter-spacing: 4px; border-radius: 6px; border: 1px solid #e1e4e8; color: #2b5c8f; margin: 15px 0;">
-          {otp}
-        </div>
-        <p>This verification code is valid for <strong>15 minutes</strong>. If you hit the attempt limit or the code expires, you will need to request a new code.</p>
-        <p style="color: #666; font-size: 14px; margin-top: 25px;">If you did not initiate this registration, you can safely ignore this email.</p>
-        <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;">
-        <p style="font-size: 11px; color: #999;">This is an automated message. Please do not reply to this email.</p>
-      </body>
-    </html>
-    """
-    return _dispatch_email_async(recipient_email, "DeepVision - Email Verification", html_content)
+    body = _otp_email(greeting, "Use this code to verify your DeepVision email address:", otp)
+    return _send_email(recipient_email, "DeepVision - Email Verification", body)
 
 
 def send_password_reset_email(recipient_email, otp, full_name=None):
-    """
-    Sends password reset HTML message containing 6-digit reset code.
-    Accepts optional full_name parameter for personalization.
-    """
     greeting = f"Hello {full_name}," if full_name else "Hello,"
-    html_content = f"""
-    <html>
-      <body style="font-family: Arial, sans-serif; padding: 20px; color: #333; line-height: 1.6;">
-        <h2 style="color: #2b5c8f; border-bottom: 2px solid #2b5c8f; padding-bottom: 10px;">DeepVision</h2>
-        <p>{greeting}</p>
-        <p>We received a request to reset the password for your DeepVision account.</p>
-        <p>To proceed with resetting your password, please use the verification code below:</p>
-        <div style="font-size: 28px; font-weight: bold; background-color: #f4f6f9; padding: 15px 25px; display: inline-block; letter-spacing: 4px; border-radius: 6px; border: 1px solid #e1e4e8; color: #d9534f; margin: 15px 0;">
-          {otp}
-        </div>
-        <p>This password reset code is valid for <strong>15 minutes</strong>. If you hit the attempt limit or the code expires, you will need to submit a new reset request.</p>
-        <p style="color: #666; font-size: 14px; margin-top: 25px;">If you did not request a password reset, you can safely ignore this email.</p>
-        <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;">
-        <p style="font-size: 11px; color: #999;">This is an automated message. Please do not reply to this email.</p>
-      </body>
-    </html>
-    """
-    return _dispatch_email_async(recipient_email, "DeepVision - Password Reset Verification", html_content)
+    body = _otp_email(
+        greeting,
+        "Use this code to continue resetting your DeepVision password:",
+        otp,
+        accent="#b42318",
+    )
+    return _send_email(recipient_email, "DeepVision - Password Reset Verification", body)
 
 
 def send_login_otp_email(recipient_email, otp, full_name=None):
-    """
-    Sends sign-in verification HTML message containing 6-digit login OTP.
-    Accepts optional full_name parameter for personalization.
-    """
     greeting = f"Hello {full_name}," if full_name else "Hello,"
-    html_content = f"""
-    <html>
-      <body style="font-family: Arial, sans-serif; padding: 20px; color: #333; line-height: 1.6;">
-        <h2 style="color: #2b5c8f; border-bottom: 2px solid #2b5c8f; padding-bottom: 10px;">DeepVision</h2>
-        <p>{greeting}</p>
-        <p>A sign-in attempt was detected for your DeepVision operator account.</p>
-        <p>To complete your login, enter the 6-digit verification code below:</p>
-        <div style="font-size: 28px; font-weight: bold; background-color: #f4f6f9; padding: 15px 25px; display: inline-block; letter-spacing: 4px; border-radius: 6px; border: 1px solid #e1e4e8; color: #2b5c8f; margin: 15px 0;">
-          {otp}
-        </div>
-        <p>This sign-in code is valid for <strong>15 minutes</strong> and can only be used once.</p>
-        <p style="color: #666; font-size: 14px; margin-top: 25px;">If you did not initiate this sign-in request, please secure your account credentials immediately.</p>
-        <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;">
-        <p style="font-size: 11px; color: #999;">This is an automated message. Please do not reply to this email.</p>
-      </body>
-    </html>
-    """
-    return _dispatch_email_async(recipient_email, "DeepVision - Sign-In Verification Code", html_content)
+    body = _otp_email(greeting, "Use this code to complete your DeepVision sign-in:", otp)
+    return _send_email(recipient_email, "DeepVision - Sign-In Verification Code", body)
+
+
+def send_security_alert_email(user_id, alert):
+    """Email opted-in high/critical events using existing notification preferences."""
+    from apps.accounts.models import User
+    from apps.notifications.models import NotificationPreference
+
+    severity = (alert.severity or "").lower()
+    if severity not in {"high", "critical"}:
+        return False
+
+    preferences = NotificationPreference.objects.filter(user_id=user_id).first()
+    if preferences:
+        if not preferences.enabled or not getattr(preferences, f"notify_{severity}", False):
+            return False
+        event_type = (alert.event_type or "").lower()
+        event_preference = {
+            "loitering": "notify_loitering",
+            "restricted_area_entry": "notify_restricted_entry",
+            "intrusion": "notify_restricted_entry",
+            "unusual_movement": "notify_unusual_movement",
+            "rapid_movement": "notify_unusual_movement",
+            "abandoned_object": "notify_abandoned_object",
+        }.get(event_type)
+        if event_preference and not getattr(preferences, event_preference, False):
+            return False
+
+    user = User.objects.filter(id=user_id, is_active=True).only("email").first()
+    if not user or not user.email:
+        return False
+
+    title = escape(alert.title or "Security event")
+    camera_id = escape(str(alert.camera_id or "System"))
+    message = escape(alert.message or "A security event requires review.")
+    body = f"""<html><body style="font-family:Arial,sans-serif;color:#222;line-height:1.6">
+      <h2>DeepVision security alert</h2><p><strong>{escape(severity.upper())}</strong>: {title}</p>
+      <p>{message}</p><p>Camera: {camera_id} · Event #{escape(str(alert.id))}</p>
+      <p>Sign in to DeepVision to review this event and its evidence.</p>
+    </body></html>"""
+    return _send_email(user.email, f"DeepVision {severity.upper()} security alert", body)

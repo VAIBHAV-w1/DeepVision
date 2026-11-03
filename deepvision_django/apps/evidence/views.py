@@ -99,17 +99,17 @@ def evidence_list_view(request):
     })
 
 
+def _get_authorized_evidence_or_404(user, evidence_id):
+    return get_object_or_404(Evidence.objects.select_related('alert', 'camera'), id=evidence_id, user_id=user.id)
+
+
 @never_cache
 @login_required
 def evidence_detail_view(request, evidence_id):
     """
     Renders detailed forensic view for a specific evidence asset.
     """
-    evidence = get_object_or_404(
-        Evidence.objects.select_related('alert', 'camera'),
-        id=evidence_id,
-        user_id=request.user.id
-    )
+    evidence = _get_authorized_evidence_or_404(request.user, evidence_id)
 
     full_path = safe_resolve_evidence(evidence.file_path)
     file_exists = full_path is not None
@@ -128,7 +128,7 @@ def preview_evidence_media_view(request, evidence_id):
     Serves the existing evidence asset inline.
     Supports HTTP Range requests for video clips and standard binary response for snapshots.
     """
-    evidence = get_object_or_404(Evidence, id=evidence_id, user_id=request.user.id)
+    evidence = _get_authorized_evidence_or_404(request.user, evidence_id)
     full_path = safe_resolve_evidence(evidence.file_path)
     if not full_path:
         raise Http404("Evidence file not found on disk.")
@@ -151,7 +151,7 @@ def download_evidence_view(request, evidence_id):
     """
     Serves the existing evidence asset as a download attachment.
     """
-    evidence = get_object_or_404(Evidence, id=evidence_id, user_id=request.user.id)
+    evidence = _get_authorized_evidence_or_404(request.user, evidence_id)
     full_path = safe_resolve_evidence(evidence.file_path)
     if not full_path:
         raise Http404("Evidence file not found on disk.")
