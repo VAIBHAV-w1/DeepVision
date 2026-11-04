@@ -83,3 +83,4 @@ Evaluated over 299 target observations across 3 multi-person, multi-object video
 
 ## STAGE 2.3 CONCLUSION
 YOLO11n singleton execution and ByteTrack multi-object tracking are verified with 0 ID switches and zero dog false positives on standard surveillance video.
+
