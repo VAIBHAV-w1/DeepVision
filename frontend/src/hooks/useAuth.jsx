@@ -9,32 +9,12 @@ export function AuthProvider({ children }) {
 
   const checkAuth = async () => {
     try {
-      // 1. Verify active session with backend (with explicit 5-second timeout)
+      // Verify active session with backend (with explicit 5-second timeout)
       const res = await authService.me({ timeout: 5000 }).catch(() => null);
       if (res && res.authenticated && res.user) {
         setUser(res.user);
         return;
       }
-
-      // 2. Fall back to demo session if active in localStorage
-      try {
-        if (typeof localStorage !== 'undefined' && localStorage.getItem('deepvision_demo_session') === 'true') {
-          setUser({
-            id: 9999,
-            username: 'soc_operator_demo',
-            email: 'operator@deepvision.internal',
-            first_name: 'SOC',
-            last_name: 'Operator',
-            role: 'operator',
-            is_staff: false,
-          });
-          return;
-        }
-      } catch (e) {
-        // localStorage restricted or disabled
-      }
-
-      // 3. Unauthenticated state
       setUser(null);
     } catch (e) {
       setUser(null);
@@ -61,11 +41,6 @@ export function AuthProvider({ children }) {
     });
 
     const handleUnauthorized = () => {
-      try {
-        if (typeof localStorage !== 'undefined' && localStorage.getItem('deepvision_demo_session') === 'true') {
-          return;
-        }
-      } catch (e) {}
       setUser(null);
     };
 

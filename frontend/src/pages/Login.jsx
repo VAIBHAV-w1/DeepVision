@@ -16,8 +16,8 @@ export function Login({ onNavigate, onNeedsVerification }) {
   const { addToast } = useToast();
 
   const [step, setStep] = useState('credentials'); // 'credentials' | 'otp'
-  const [email, setEmail] = useState('vaibhav@deepvision.ai');
-  const [password, setPassword] = useState('••••••••');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -58,39 +58,40 @@ export function Login({ onNavigate, onNeedsVerification }) {
 
   const handleCredentialsSubmit = async (e) => {
     e.preventDefault();
-    if (!email) {
-      setError('Email is required.');
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError(t('auth.emailRequired', 'Email is required.'));
+      return;
+    }
+    if (!password) {
+      setError(t('auth.passwordRequired', 'Password is required.'));
       return;
     }
 
     try {
       setLoading(true);
       setError(null);
-      // Clean masked password if left as default placeholder
-      const cleanPass = password === '••••••••' ? 'Admin@123' : password;
-      const res = await api.auth.login(email, cleanPass);
+      const res = await api.auth.login(trimmedEmail, password);
 
       if (res && res.requires_otp) {
         setStep('otp');
         setCooldown(60);
-        addToast('Verification code dispatched to your email.', 'info');
+        addToast(t('auth.otpDispatched', 'Verification code dispatched to your email.'), 'info');
       } else if (res && res.needs_verification) {
-        if (onNeedsVerification) onNeedsVerification(res.email || email);
+        if (onNeedsVerification) onNeedsVerification(res.email || trimmedEmail);
       } else if (res && res.success) {
         await checkAuth();
         if (onNavigate) onNavigate('dashboard');
         else window.location.hash = '#dashboard';
       } else {
-        // Fallback demo authentication for verification environments
-        await checkAuth();
-        if (onNavigate) onNavigate('dashboard');
-        else window.location.hash = '#dashboard';
+        const errorMsg = res?.error || res?.message || t('auth.invalidCredentials', 'Invalid email or password.');
+        setError(errorMsg);
+        addToast(errorMsg, 'error');
       }
     } catch (err) {
-      // If server returned 401 or network blocked in sandbox, fallback to authenticated demo session
-      await checkAuth();
-      if (onNavigate) onNavigate('dashboard');
-      else window.location.hash = '#dashboard';
+      const errorMsg = err?.data?.error || err?.message || t('auth.serviceUnavailable', 'Unable to reach authentication service. Please check your credentials or network status.');
+      setError(errorMsg);
+      addToast(errorMsg, 'error');
     } finally {
       setLoading(false);
     }
@@ -100,22 +101,26 @@ export function Login({ onNavigate, onNeedsVerification }) {
     e.preventDefault();
     const otpCode = digits.join('');
     if (otpCode.length !== 6) {
-      setError('Please enter the complete 6-digit code.');
+      setError(t('auth.incompleteOtp', 'Please enter the complete 6-digit code.'));
       return;
     }
     try {
       setLoading(true);
       setError(null);
-      const res = await api.auth.verifyLoginOtp(email, otpCode);
+      const res = await api.auth.verifyLoginOtp(email.trim(), otpCode);
       if (res && res.success) {
         await checkAuth();
         if (onNavigate) onNavigate('dashboard');
         else window.location.hash = '#dashboard';
       } else {
-        setError(res?.error || 'Invalid verification code.');
+        const errorMsg = res?.error || t('auth.invalidOtp', 'Invalid verification code.');
+        setError(errorMsg);
+        addToast(errorMsg, 'error');
       }
     } catch (err) {
-      setError(err.message || 'OTP verification failed.');
+      const errorMsg = err?.data?.error || err.message || t('auth.otpFailed', 'OTP verification failed.');
+      setError(errorMsg);
+      addToast(errorMsg, 'error');
     } finally {
       setLoading(false);
     }
@@ -456,7 +461,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@company.com"
+                    placeholder="vaibhav@deepvision.ai"
                     required
                     style={{
                       background: 'transparent',

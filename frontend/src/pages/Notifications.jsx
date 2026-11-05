@@ -122,28 +122,28 @@ export function Notifications({ onNavigate, pageParams = {} }) {
 
   // Helper formatters
   const formatTime = (isoString) => {
-    if (!isoString) return '11:17:32 AM';
+    if (!isoString) return '--:--:--';
     try {
       const d = new Date(isoString);
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+      return isNaN(d.getTime()) ? String(isoString) : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
     } catch {
-      return isoString;
+      return String(isoString || '--:--:--');
     }
   };
 
   const formatDateLabel = (isoString) => {
-    if (!isoString) return 'Nov 01, 11:17 AM';
+    if (!isoString) return 'Recent';
     try {
       const d = new Date(isoString);
-      return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }) + ', ' +
+      return isNaN(d.getTime()) ? String(isoString) : d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }) + ', ' +
         d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
     } catch {
-      return isoString;
+      return String(isoString || 'Recent');
     }
   };
 
   const formatDuration = (seconds) => {
-    if (!seconds || isNaN(seconds)) return '00:02:14';
+    if (!seconds || isNaN(seconds)) return '00:00';
     const s = Math.round(seconds);
     const m = Math.floor(s / 60);
     const rem = s % 60;
@@ -402,7 +402,7 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                 {filteredNotifs.length > 0 ? (
                   filteredNotifs.map((n, idx) => {
                     const sev = (n.severity || n.alert?.severity || 'low').toLowerCase();
-                    const cameraName = n.camera_name || n.alert?.camera_name || (n.camera_id ? `Cam-0${n.camera_id}` : 'Cam-03');
+                    const cameraName = n.camera_name || n.alert?.camera_name || (n.camera_id ? `Cam-0${n.camera_id}` : 'Camera');
                     const title = n.title || n.alert?.title || 'Security Event Detected';
                     const timeStr = formatTime(n.created_at || n.alert?.detected_at);
 
@@ -471,48 +471,18 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                     );
                   })
                 ) : (
-                  // Canonical baseline rows matching Figure 7.1.7 when empty
-                  [
-                    { event: 'Intrusion Detected', cam: 'Cam-03', sev: 'High', time: '11:17:32 AM', color: '#EF4444' },
-                    { event: 'Unusual Activity', cam: 'Cam-02', sev: 'Medium', time: '11:09:15 AM', color: '#F59E0B' },
-                    { event: 'Person Detected', cam: 'Cam-01', sev: 'Low', time: '10:50:06 AM', color: '#10B981' },
-                    { event: 'Object Left (Bag)', cam: 'Cam-04', sev: 'Medium', time: '10:46:21 AM', color: '#F59E0B' },
-                    { event: 'Motion Detected', cam: 'Cam-02', sev: 'Low', time: '10:31:19 AM', color: '#10B981' },
-                  ].map((row, idx) => (
-                    <tr
-                      key={idx}
-                      style={{
-                        borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-                        background: idx % 2 === 0 ? 'rgba(255, 255, 255, 0.01)' : 'transparent',
-                      }}
-                    >
-                      <td style={{ padding: '14px 20px', color: '#FFFFFF', fontWeight: 600 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          {getEventIcon(row.event, '', row.sev.toLowerCase())}
-                          <span>{row.event}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '14px 20px', color: '#94A3B8' }}>{row.cam}</td>
-                      <td style={{ padding: '14px 20px' }}>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '3px 14px',
-                            borderRadius: 12,
-                            background: row.color,
-                            color: '#FFFFFF',
-                            fontWeight: 700,
-                            fontSize: '0.74rem',
-                          }}
-                        >
-                          {row.sev}
-                        </span>
-                      </td>
-                      <td style={{ padding: '14px 20px', color: '#94A3B8', fontFamily: 'monospace', fontSize: '0.82rem' }}>
-                        {row.time}
-                      </td>
-                    </tr>
-                  ))
+                  <tr>
+                    <td colSpan="4" style={{ textAlign: 'center', padding: '36px 20px', color: '#94A3B8' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5">
+                          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                        </svg>
+                        <span style={{ fontSize: '0.92rem', fontWeight: 600, color: '#E2E8F0' }}>No Security Notifications</span>
+                        <span style={{ fontSize: '0.8rem', color: '#64748B' }}>No security events or alerts match the selected criteria.</span>
+                      </div>
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
@@ -660,142 +630,153 @@ export function Notifications({ onNavigate, pageParams = {} }) {
 
           {/* Recordings List matching Figure 7.1.8 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {(recordings.length > 0 ? recordings : [
-              { id: 1, filename: 'Cam-03_20261101_111732.mp4', duration: '00:02:14', size: '58.4 MB', cam: 'Cam-03' },
-              { id: 2, filename: 'Cam-02_20261101_110915.mp4', duration: '00:01:45', size: '42.7 MB', cam: 'Cam-02' },
-              { id: 3, filename: 'Cam-01_20261101_105806.mp4', duration: '00:03:10', size: '76.9 MB', cam: 'Cam-01' },
-            ]).map((item, idx) => {
-              const filename = item.filename || `Cam-0${item.camera_id || 3}_20261101_111732.mp4`;
-              const duration = item.duration || formatDuration(item.duration_seconds);
-              const size = item.size || item.formatted_size || '58.4 MB';
+            {recordings.length > 0 ? (
+              recordings.map((item, idx) => {
+                const filename = item.filename || `Cam-0${item.camera_id || 1}_clip.mp4`;
+                const duration = item.duration || formatDuration(item.duration_seconds);
+                const size = item.size || item.formatted_size || '0 MB';
 
-              return (
-                <div
-                  key={item.id || idx}
-                  style={{
-                    background: '#0F172A',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    borderRadius: 12,
-                    padding: '12px 18px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 16,
-                    transition: 'all 0.15s ease',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)')}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
-                    {/* Thumbnail box */}
-                    <div
+                return (
+                  <div
+                    key={item.id || idx}
+                    style={{
+                      background: '#0F172A',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: 12,
+                      padding: '12px 18px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 16,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+                      {/* Thumbnail box */}
+                      <div
+                        style={{
+                          width: 90,
+                          height: 54,
+                          borderRadius: 8,
+                          background: '#1E293B',
+                          overflow: 'hidden',
+                          position: 'relative',
+                          flexShrink: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5">
+                          <rect x="2" y="3" width="20" height="14" rx="2" />
+                          <line x1="8" y1="21" x2="16" y2="21" />
+                          <line x1="12" y1="17" x2="12" y2="21" />
+                        </svg>
+                        <div
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.95))',
+                          }}
+                        />
+                        <svg
+                          width="18"
+                          height="18"
+                          viewBox="0 0 24 24"
+                          fill="rgba(255,255,255,0.7)"
+                          style={{ position: 'relative', zIndex: 1 }}
+                        >
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                      </div>
+
+                      {/* Metadata details */}
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            color: '#FFFFFF',
+                            fontWeight: 700,
+                            fontSize: '0.94rem',
+                            fontFamily: 'monospace',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {filename}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 4, color: '#94A3B8', fontSize: '0.78rem' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <circle cx="12" cy="12" r="10" />
+                              <polyline points="12 6 12 12 16 14" />
+                            </svg>
+                            {duration}
+                          </span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+                              <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                              <line x1="6" y1="6" x2="6.01" y2="6" />
+                              <line x1="6" y1="18" x2="6.01" y2="18" />
+                            </svg>
+                            {size}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Circular Play Button on Right */}
+                    <button
+                      onClick={() => setActivePlayback(item)}
                       style={{
-                        width: 90,
-                        height: 54,
-                        borderRadius: 8,
-                        background: '#1E293B',
-                        overflow: 'hidden',
-                        position: 'relative',
-                        flexShrink: 0,
+                        width: 44,
+                        height: 44,
+                        borderRadius: '50%',
+                        background: 'rgba(255, 255, 255, 0.08)',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        cursor: 'pointer',
+                        color: '#FFFFFF',
+                        flexShrink: 0,
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'linear-gradient(90deg, #6366F1 0%, #8B5CF6 100%)';
+                        e.currentTarget.style.borderColor = 'transparent';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
                       }}
                     >
-                      {/* SVG camera landscape graphic */}
-                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5">
-                        <rect x="2" y="3" width="20" height="14" rx="2" />
-                        <line x1="8" y1="21" x2="16" y2="21" />
-                        <line x1="12" y1="17" x2="12" y2="21" />
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <polygon points="6 4 20 12 6 20 6 4" />
                       </svg>
-                      {/* Live preview background if available */}
-                      <div
-                        style={{
-                          position: 'absolute',
-                          inset: 0,
-                          background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.95))',
-                        }}
-                      />
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="rgba(255,255,255,0.7)"
-                        style={{ position: 'relative', zIndex: 1 }}
-                      >
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                      </svg>
-                    </div>
-
-                    {/* Metadata details */}
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          color: '#FFFFFF',
-                          fontWeight: 700,
-                          fontSize: '0.94rem',
-                          fontFamily: 'monospace',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}
-                      >
-                        {filename}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 4, color: '#94A3B8', fontSize: '0.78rem' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="12" cy="12" r="10" />
-                            <polyline points="12 6 12 12 16 14" />
-                          </svg>
-                          {duration}
-                        </span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-                            <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-                            <line x1="6" y1="6" x2="6.01" y2="6" />
-                            <line x1="6" y1="18" x2="6.01" y2="18" />
-                          </svg>
-                          {size}
-                        </span>
-                      </div>
-                    </div>
+                    </button>
                   </div>
-
-                  {/* Circular Play Button on Right */}
-                  <button
-                    onClick={() => setActivePlayback(item)}
-                    style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: '50%',
-                      background: 'rgba(255, 255, 255, 0.08)',
-                      border: '1px solid rgba(255, 255, 255, 0.15)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      color: '#FFFFFF',
-                      flexShrink: 0,
-                      transition: 'all 0.15s ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'linear-gradient(90deg, #6366F1 0%, #8B5CF6 100%)';
-                      e.currentTarget.style.borderColor = 'transparent';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
-                      e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-                    }}
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                      <polygon points="6 4 20 12 6 20 6 4" />
-                    </svg>
-                  </button>
-                </div>
-              );
-            })}
+                );
+              })
+            ) : (
+              <div style={{ padding: '36px 20px', textAlign: 'center', backgroundColor: '#0F172A', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8' }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5" style={{ display: 'block', margin: '0 auto 8px' }}>
+                  <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                  <line x1="7" y1="2" x2="7" y2="22" />
+                  <line x1="17" y1="2" x2="17" y2="22" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <line x1="2" y1="7" x2="7" y2="7" />
+                  <line x1="2" y1="17" x2="7" y2="17" />
+                  <line x1="17" y1="17" x2="22" y2="17" />
+                  <line x1="17" y1="7" x2="22" y2="7" />
+                </svg>
+                <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#E2E8F0' }}>No Recordings Found</div>
+                <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: 4 }}>Surveillance footage captures will appear here once recorded.</div>
+              </div>
+            )}
           </div>
 
           {/* HTML5 Video Playback Modal */}
@@ -865,13 +846,13 @@ export function Notifications({ onNavigate, pageParams = {} }) {
             </p>
           </div>
 
-          {/* Filter Tabs matching Figure 7.1.9: All (24), Intrusion (5), Unusual (8), Others (11) */}
+          {/* Filter Tabs matching Figure 7.1.9: All, Intrusion, Unusual, Others */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22, flexWrap: 'wrap' }}>
             {[
-              { id: 'all', label: `All (${evidenceList.length || 24})` },
-              { id: 'intrusion', label: `Intrusion (${evidenceIntrusion.length || 5})` },
-              { id: 'unusual', label: `Unusual (${evidenceUnusual.length || 8})` },
-              { id: 'others', label: `Others (${evidenceOthers.length || 11})` },
+              { id: 'all', label: `All (${evidenceList.length})` },
+              { id: 'intrusion', label: `Intrusion (${evidenceIntrusion.length})` },
+              { id: 'unusual', label: `Unusual (${evidenceUnusual.length})` },
+              { id: 'others', label: `Others (${evidenceOthers.length})` },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -895,143 +876,149 @@ export function Notifications({ onNavigate, pageParams = {} }) {
           </div>
 
           {/* Evidence Grid matching Figure 7.1.9 */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-              gap: 18,
-            }}
-          >
-            {(displayedEvidence.length > 0 ? displayedEvidence : [
-              { id: 1, title: 'Intrusion_Cam03.jpg', time: 'Nov 01, 11:17 AM' },
-              { id: 2, title: 'UnusualActivity_Cam02.jpg', time: 'Nov 01, 11:09 AM' },
-              { id: 3, title: 'ObjectLeft_Cam04.jpg', time: 'Nov 01, 10:46 AM' },
-              { id: 4, title: 'Person_Cam01.jpg', time: 'Nov 01, 10:50 AM' },
-            ]).map((item, idx) => {
-              const filename = item.file_name || item.title || (idx === 0 ? 'Intrusion_Cam03.jpg' : idx === 1 ? 'UnusualActivity_Cam02.jpg' : idx === 2 ? 'ObjectLeft_Cam04.jpg' : 'Person_Cam01.jpg');
-              const timestamp = item.time || formatDateLabel(item.captured_at || item.created_at);
+          {displayedEvidence.length > 0 ? (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                gap: 18,
+              }}
+            >
+              {displayedEvidence.map((item, idx) => {
+                const filename = item.file_name || item.title || `evidence_${item.id || idx}.jpg`;
+                const timestamp = formatDateLabel(item.captured_at || item.created_at);
 
-              return (
-                <div
-                  key={item.id || idx}
-                  style={{
-                    background: '#0F172A',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    borderRadius: 12,
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    transition: 'transform 0.15s ease, border-color 0.15s ease',
-                    boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.5)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-                  }}
-                >
-                  {/* Image Frame */}
+                return (
                   <div
+                    key={item.id || idx}
                     style={{
-                      height: 160,
-                      background: '#131D35',
-                      position: 'relative',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
+                      background: '#0F172A',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: 12,
                       overflow: 'hidden',
-                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      transition: 'transform 0.15s ease, border-color 0.15s ease',
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
                     }}
-                    onClick={() => setActiveEvidenceModal(item)}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                      e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.5)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                    }}
                   >
-                    {item.preview_url ? (
-                      <img
-                        src={item.preview_url}
-                        alt={filename}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                      />
-                    ) : null}
-                    {/* Fallback stylized optical CCTV wireframe overlay */}
+                    {/* Image Frame */}
                     <div
                       style={{
-                        position: 'absolute',
-                        inset: 0,
+                        height: 160,
+                        background: '#131D35',
+                        position: 'relative',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.9) 100%)',
+                        overflow: 'hidden',
+                        cursor: 'pointer',
                       }}
+                      onClick={() => setActiveEvidenceModal(item)}
                     >
-                      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.2)" strokeWidth="1.5">
-                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                        <circle cx="12" cy="13" r="4" />
-                      </svg>
-                    </div>
-                  </div>
-
-                  {/* Bottom details bar matching Figure 7.1.9 */}
-                  <div
-                    style={{
-                      background: '#0B0F19',
-                      padding: '10px 14px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      borderTop: '1px solid rgba(255, 255, 255, 0.05)',
-                    }}
-                  >
-                    <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
+                      {item.preview_url ? (
+                        <img
+                          src={item.preview_url}
+                          alt={filename}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      ) : null}
+                      {/* Stylized optical CCTV wireframe overlay */}
                       <div
                         style={{
-                          color: '#FFFFFF',
-                          fontWeight: 700,
-                          fontSize: '0.84rem',
-                          fontFamily: 'monospace',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
+                          position: 'absolute',
+                          inset: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.9) 100%)',
                         }}
                       >
-                        {filename}
-                      </div>
-                      <div style={{ color: '#94A3B8', fontSize: '0.74rem', marginTop: 2 }}>
-                        {timestamp}
+                        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.2)" strokeWidth="1.5">
+                          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                          <circle cx="12" cy="13" r="4" />
+                        </svg>
                       </div>
                     </div>
 
-                    {/* Download Icon button on right */}
-                    <a
-                      href={item.download_url || `/evidence/${item.id}/download/`}
-                      download
-                      onClick={(e) => e.stopPropagation()}
+                    {/* Bottom details bar matching Figure 7.1.9 */}
+                    <div
                       style={{
-                        color: '#94A3B8',
-                        padding: 6,
-                        borderRadius: 6,
-                        display: 'inline-flex',
+                        background: '#0B0F19',
+                        padding: '10px 14px',
+                        display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        textDecoration: 'none',
-                        transition: 'color 0.15s ease',
+                        justifyContent: 'space-between',
+                        borderTop: '1px solid rgba(255, 255, 255, 0.05)',
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = '#FFFFFF')}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = '#94A3B8')}
                     >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                      </svg>
-                    </a>
+                      <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
+                        <div
+                          style={{
+                            color: '#FFFFFF',
+                            fontWeight: 700,
+                            fontSize: '0.84rem',
+                            fontFamily: 'monospace',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {filename}
+                        </div>
+                        <div style={{ color: '#94A3B8', fontSize: '0.74rem', marginTop: 2 }}>
+                          {timestamp}
+                        </div>
+                      </div>
+
+                      {/* Download Icon button on right */}
+                      <a
+                        href={item.download_url || `/evidence/${item.id}/download/`}
+                        download
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          color: '#94A3B8',
+                          padding: 6,
+                          borderRadius: 6,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          textDecoration: 'none',
+                          transition: 'color 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = '#FFFFFF')}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = '#94A3B8')}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7 10 12 15 17 10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                      </a>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ padding: '36px 20px', textAlign: 'center', backgroundColor: '#0F172A', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8' }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5" style={{ display: 'block', margin: '0 auto 8px' }}>
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+              <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#E2E8F0' }}>No Evidence Snapshots Found</div>
+              <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: 4 }}>Snapshots and clips captured during security incidents will appear here.</div>
+            </div>
+          )}
 
           {/* Lightbox Modal */}
           {activeEvidenceModal && (

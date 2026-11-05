@@ -42,31 +42,31 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index.py"
+      "destination": "https://deepvision-backend.onrender.com/api/$1"
     },
     {
       "source": "/cameras/(.*)",
-      "destination": "/api/index.py"
+      "destination": "https://deepvision-backend.onrender.com/cameras/$1"
     },
     {
       "source": "/recordings/(.*)",
-      "destination": "/api/index.py"
+      "destination": "https://deepvision-backend.onrender.com/recordings/$1"
     },
     {
       "source": "/evidence/(.*)",
-      "destination": "/api/index.py"
+      "destination": "https://deepvision-backend.onrender.com/evidence/$1"
     },
     {
       "source": "/alerts/(.*)",
-      "destination": "/api/index.py"
+      "destination": "https://deepvision-backend.onrender.com/alerts/$1"
     },
     {
       "source": "/notifications/(.*)",
-      "destination": "/api/index.py"
+      "destination": "https://deepvision-backend.onrender.com/notifications/$1"
     },
     {
       "source": "/health(.*)",
-      "destination": "/api/index.py"
+      "destination": "https://deepvision-backend.onrender.com/health$1"
     },
     {
       "source": "/(.*)",

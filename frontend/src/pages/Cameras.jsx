@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
-import { cameraService } from '../services/camera';
 import { useToast } from '../components/common/Toast';
 import { useTranslation } from '../i18n/i18nContext';
 
@@ -41,36 +40,90 @@ export function Cameras({ onNavigate, pageParams }) {
   const [isMuted, setIsMuted] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [measuredFps, setMeasuredFps] = useState(25);
+  const [streamError, setStreamError] = useState(false);
+  const [streamTimestamp, setStreamTimestamp] = useState(() => Date.now());
+
+  // Dynamic Camera Context Data (Zones and Alerts)
+  const [zones, setZones] = useState([]);
+  const [cameraAlerts, setCameraAlerts] = useState([]);
 
   // Add Camera Modal
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newCam, setNewCam] = useState({ name: '', source_type: 'webcam', source: '0', location: 'Gate-1' });
 
-  // Load cameras from backend
+  // Load cameras truthfully from backend
   const fetchCameras = useCallback(async () => {
     try {
-      setLoading(false);
+      setLoading(true);
       const res = await api.cameras.list();
-      const list = res.cameras || res || [];
+      const list = res.cameras || res.items || (Array.isArray(res) ? res : []);
       if (Array.isArray(list) && list.length > 0) {
         setCameras(list);
+        if (!selectedCameraId || !list.some((c) => c.id === selectedCameraId)) {
+          setSelectedCameraId(list[0].id);
+        }
       } else {
-        // Fallback default 4 cameras matching Figures 7.1.3
-        setCameras([
-          { id: 1, name: 'Cam-01', location: 'Main Gate', status: 'online', source_type: 'stream' },
-          { id: 2, name: 'Cam-02', location: 'Parking', status: 'online', source_type: 'stream' },
-          { id: 3, name: 'Cam-03', location: 'Restricted Zone', status: 'online', source_type: 'stream' },
-          { id: 4, name: 'Cam-04', location: 'Corridor', status: 'offline', source_type: 'webcam' },
-        ]);
+        setCameras([]);
       }
     } catch (err) {
-      console.warn('Cameras load fallback:', err);
+      console.warn('Cameras load error:', err);
+      setCameras([]);
+    } finally {
+      setLoading(false);
     }
-  }, []);
+  }, [selectedCameraId]);
 
   useEffect(() => {
     fetchCameras();
   }, [fetchCameras]);
+
+  // Selected camera object
+  const selectedCam = cameras.find((c) => c.id === Number(selectedCameraId)) || cameras[0] || null;
+
+  // Truthful live status: online in DB and stream image loaded successfully
+  const isCameraLive = Boolean(selectedCam && selectedCam.status === 'online' && !streamError);
+
+  // Load zones & scoped alerts whenever selected camera changes
+  useEffect(() => {
+    if (!selectedCam?.id) {
+      setZones([]);
+      setCameraAlerts([]);
+      return;
+    }
+    setStreamError(false);
+    setStreamTimestamp(Date.now());
+    let mounted = true;
+
+    (async () => {
+      try {
+        const [zRes, aRes] = await Promise.allSettled([
+          api.cameras.getZones(selectedCam.id),
+          api.alerts.list({ camera_id: selectedCam.id, limit: 10 }),
+        ]);
+        if (!mounted) return;
+        if (zRes.status === 'fulfilled' && zRes.value?.zones) {
+          setZones(zRes.value.zones);
+        } else {
+          setZones([]);
+        }
+        if (aRes.status === 'fulfilled') {
+          const rawAlerts = aRes.value?.alerts || aRes.value?.items || (Array.isArray(aRes.value) ? aRes.value : []);
+          setCameraAlerts(rawAlerts);
+        } else {
+          setCameraAlerts([]);
+        }
+      } catch {
+        if (mounted) {
+          setZones([]);
+          setCameraAlerts([]);
+        }
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [selectedCam?.id]);
 
   // Handle Add Camera Submit
   const handleAddCameraSubmit = async (e) => {
@@ -80,18 +133,11 @@ export function Cameras({ onNavigate, pageParams }) {
       await api.cameras.create(newCam);
       addToast(`Camera "${newCam.name}" registered successfully`, 'success');
       setIsAddModalOpen(false);
+      setNewCam({ name: '', source_type: 'webcam', source: '0', location: 'Gate-1' });
       fetchCameras();
     } catch (err) {
-      addToast(`Camera registered (saved): ${newCam.name}`, 'success');
-      setIsAddModalOpen(false);
+      addToast(err.message || `Failed to register camera ${newCam.name}`, 'error');
     }
-  };
-
-  const selectedCam = cameras.find((c) => c.id === selectedCameraId) || cameras[0] || {
-    id: 1,
-    name: 'Cam-01',
-    location: 'Main Gate',
-    status: 'online',
   };
 
   // Filtered cameras for Figure 7.1.3
@@ -103,6 +149,32 @@ export function Cameras({ onNavigate, pageParams }) {
       return (c.name || '').toLowerCase().includes(q) || (c.location || '').toLowerCase().includes(q);
     }
     return true;
+  });
+
+  // Timestamp format helper for incident cards
+  const formatAlertTime = (isoString) => {
+    if (!isoString) return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    try {
+      const d = new Date(isoString);
+      return isNaN(d.getTime())
+        ? String(isoString)
+        : d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) + ' ' +
+          d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    } catch {
+      return String(isoString);
+    }
+  };
+
+  // Find real intrusion alert for Figure 7.1.6
+  const intrusionAlert = cameraAlerts.find((a) => {
+    const text = `${a.event_type || ''} ${a.title || ''} ${a.description || ''}`.toLowerCase();
+    return text.includes('intrusion') || text.includes('restricted') || text.includes('perimeter');
+  });
+
+  // Find real anomaly alert for Figure 7.1.10
+  const anomalyAlert = cameraAlerts.find((a) => {
+    const text = `${a.event_type || ''} ${a.title || ''} ${a.anomaly_type || ''} ${a.description || ''}`.toLowerCase();
+    return text.includes('anomaly') || text.includes('fall') || text.includes('unusual') || text.includes('distress');
   });
 
   return (
@@ -118,7 +190,7 @@ export function Cameras({ onNavigate, pageParams }) {
         fontFamily: 'var(--font-sans, system-ui, -apple-system, sans-serif)',
       }}
     >
-      {/* Workspace Sub-Tab Switcher matching all 5 Figures */}
+      {/* Workspace Sub-Tab Switcher matching Figures 7.1.3 - 7.1.6 & 7.1.10 */}
       <div
         style={{
           display: 'flex',
@@ -144,7 +216,6 @@ export function Cameras({ onNavigate, pageParams }) {
               id={`tab-btn-${tab.id}`}
               onClick={() => setSubTab(tab.id)}
               style={{
-                backgroundColor: subTab === tab.id ? 'linear-gradient(90deg, #6366F1, #8B5CF6)' : 'rgba(255, 255, 255, 0.05)',
                 background: subTab === tab.id ? 'linear-gradient(90deg, #6366F1, #8B5CF6)' : 'transparent',
                 color: subTab === tab.id ? '#FFFFFF' : '#94A3B8',
                 border: subTab === tab.id ? 'none' : '1px solid rgba(255, 255, 255, 0.08)',
@@ -192,7 +263,6 @@ export function Cameras({ onNavigate, pageParams }) {
           ========================================================================= */}
       {subTab === 'inventory' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Header & Subtitle matching Figure 7.1.3 */}
           <div>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#FFFFFF', margin: '0 0 4px 0' }}>
               Cameras
@@ -256,102 +326,115 @@ export function Cameras({ onNavigate, pageParams }) {
             </select>
           </div>
 
-          {/* 2x2 Grid of Camera Cards matching Figure 7.1.3 */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
-              gap: '20px',
-              marginTop: '8px',
-            }}
-          >
-            {filteredCameras.map((cam) => {
-              const isOnline = cam.status === 'online';
-              return (
-                <div
-                  key={cam.id}
-                  onClick={() => {
-                    setSelectedCameraId(cam.id);
-                    setSubTab('yolo');
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  style={{
-                    backgroundColor: '#0F172A',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    borderRadius: '12px',
-                    overflow: 'hidden',
-                    cursor: 'pointer',
-                    transition: 'border-color 0.15s',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#38BDF8')}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)')}
-                >
-                  {/* Camera Snapshot / Video Poster */}
-                  <div style={{ position: 'relative', width: '100%', height: '200px', backgroundColor: '#090E1A' }}>
-                    <div
-                      style={{
-                        position: 'absolute',
-                        inset: 0,
-                        background: 'linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.6) 100%)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5">
-                        <path d="M23 7l-7 5 7 5V7z" />
-                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                      </svg>
-                    </div>
-
-                    {/* Top Right: Status Pill matching Figure 7.1.3 */}
-                    <div style={{ position: 'absolute', top: '12px', right: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span
+          {/* Grid of Camera Cards matching Figure 7.1.3 */}
+          {filteredCameras.length > 0 ? (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+                gap: '20px',
+                marginTop: '8px',
+              }}
+            >
+              {filteredCameras.map((cam) => {
+                const isOnline = cam.status === 'online';
+                return (
+                  <div
+                    key={cam.id}
+                    onClick={() => {
+                      setSelectedCameraId(cam.id);
+                      setSubTab('yolo');
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    style={{
+                      backgroundColor: '#0F172A',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      cursor: 'pointer',
+                      transition: 'border-color 0.15s',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#38BDF8')}
+                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)')}
+                  >
+                    {/* Camera Snapshot / Video Poster */}
+                    <div style={{ position: 'relative', width: '100%', height: '200px', backgroundColor: '#090E1A' }}>
+                      <div
                         style={{
-                          backgroundColor: isOnline ? '#10B981' : '#EF4444',
-                          color: '#FFFFFF',
-                          fontSize: '0.72rem',
-                          fontWeight: 700,
-                          padding: '3px 10px',
-                          borderRadius: '12px',
-                        }}
-                      >
-                        {isOnline ? 'Online' : 'Offline'}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          background: 'rgba(0, 0, 0, 0.5)',
-                          border: 'none',
-                          color: '#FFFFFF',
-                          borderRadius: '50%',
-                          width: '24px',
-                          height: '24px',
+                          position: 'absolute',
+                          inset: 0,
+                          background: 'linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.6) 100%)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          cursor: 'pointer',
                         }}
                       >
-                        ⋮
-                      </button>
-                    </div>
-                  </div>
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5">
+                          <path d="M23 7l-7 5 7 5V7z" />
+                          <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                        </svg>
+                      </div>
 
-                  {/* Card Footer: Camera Name & Location matching Figure 7.1.3 */}
-                  <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
-                      <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#FFFFFF' }}>{cam.name}</div>
-                      <div style={{ fontSize: '0.8rem', color: '#94A3B8' }}>{cam.location}</div>
+                      {/* Top Right: Status Pill matching Figure 7.1.3 */}
+                      <div style={{ position: 'absolute', top: '12px', right: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span
+                          style={{
+                            backgroundColor: isOnline ? '#10B981' : '#EF4444',
+                            color: '#FFFFFF',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            padding: '3px 10px',
+                            borderRadius: '12px',
+                          }}
+                        >
+                          {isOnline ? 'Online' : 'Offline'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            background: 'rgba(0, 0, 0, 0.5)',
+                            border: 'none',
+                            color: '#FFFFFF',
+                            borderRadius: '50%',
+                            width: '24px',
+                            height: '24px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ⋮
+                        </button>
+                      </div>
                     </div>
-                    <span style={{ fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600 }}>Open Stream →</span>
+
+                    {/* Card Footer: Camera Name & Location matching Figure 7.1.3 */}
+                    <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#FFFFFF' }}>{cam.name}</div>
+                        <div style={{ fontSize: '0.8rem', color: '#94A3B8' }}>{cam.location}</div>
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600 }}>Open Stream →</span>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ padding: '48px 24px', textAlign: 'center', backgroundColor: '#0F172A', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8' }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5" style={{ display: 'block', margin: '0 auto 12px' }}>
+                <path d="M23 7l-7 5 7 5V7z" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#E2E8F0' }}>No Cameras Found</div>
+              <div style={{ fontSize: '0.84rem', color: '#64748B', marginTop: 4 }}>
+                {loading ? 'Connecting to camera inventory...' : 'No camera sources match the selected criteria.'}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -381,14 +464,22 @@ export function Cameras({ onNavigate, pageParams }) {
                   <option key={c.id} value={c.id}>{c.name} ({c.location})</option>
                 ))}
               </select>
-              <span style={{ backgroundColor: '#10B981', color: '#FFFFFF', fontSize: '0.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: '12px' }}>
-                Live
+              <span
+                style={{
+                  backgroundColor: isCameraLive ? '#10B981' : '#64748B',
+                  color: '#FFFFFF',
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  padding: '3px 10px',
+                  borderRadius: '12px',
+                }}
+              >
+                {isCameraLive ? 'Live' : 'Offline'}
               </span>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <span style={{ fontSize: '0.85rem', color: '#CBD5E1', fontWeight: 600 }}>Detection</span>
-              {/* Toggle switch */}
               <button
                 type="button"
                 onClick={() => setDetectionEnabled(!detectionEnabled)}
@@ -421,7 +512,7 @@ export function Cameras({ onNavigate, pageParams }) {
             </div>
           </div>
 
-          {/* Surveillance Viewport with YOLO Bounding Box Overlays matching Figure 7.1.4 */}
+          {/* Surveillance Viewport */}
           <div
             style={{
               position: 'relative',
@@ -433,42 +524,45 @@ export function Cameras({ onNavigate, pageParams }) {
               border: '1px solid rgba(255, 255, 255, 0.08)',
             }}
           >
-            {/* Live Camera Stream Image */}
-            <img
-              src={`/cameras/${selectedCameraId}/stream/?t=${Date.now()}`}
-              alt="Live Surveillance"
-              onError={(e) => {
-                e.target.style.display = 'none';
-              }}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
+            {selectedCam && isPlaying ? (
+              <img
+                src={`/api/cameras/${selectedCam.id}/stream/?mode=${detectionEnabled ? 'tracking' : 'raw'}&t=${streamTimestamp}`}
+                alt={selectedCam.name}
+                onError={() => setStreamError(true)}
+                onLoad={() => setStreamError(false)}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : null}
 
-            {/* YOLO Bounding Box Overlays matching Figure 7.1.4 */}
-            {detectionEnabled && (
-              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-                {/* Person 1 Box */}
-                <div style={{ position: 'absolute', top: '35%', left: '18%', width: '12%', height: '48%', border: '2px solid #10B981' }}>
-                  <span style={{ position: 'absolute', top: '-22px', left: '-2px', backgroundColor: '#10B981', color: '#000', fontSize: '0.72rem', fontWeight: 800, padding: '1px 6px', borderRadius: '2px' }}>
-                    person 0.94
-                  </span>
+            {/* Offline or Error State Display */}
+            {(!selectedCam || !isCameraLive || !isPlaying) && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: 'rgba(9, 14, 26, 0.94)',
+                  color: '#94A3B8',
+                  gap: 12,
+                  padding: 20,
+                  textAlign: 'center',
+                }}
+              >
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5">
+                  <path d="M23 7l-7 5 7 5V7z" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                  <line x1="1" y1="1" x2="23" y2="23" stroke="#EF4444" strokeWidth="2" />
+                </svg>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
+                  {!isPlaying ? 'Surveillance Stream Paused' : `${selectedCam?.name || 'Camera'} is Offline`}
                 </div>
-                {/* Person 2 Box */}
-                <div style={{ position: 'absolute', top: '36%', left: '38%', width: '11%', height: '46%', border: '2px solid #10B981' }}>
-                  <span style={{ position: 'absolute', top: '-22px', left: '-2px', backgroundColor: '#10B981', color: '#000', fontSize: '0.72rem', fontWeight: 800, padding: '1px 6px', borderRadius: '2px' }}>
-                    person 0.91
-                  </span>
-                </div>
-                {/* Person 3 Box */}
-                <div style={{ position: 'absolute', top: '39%', left: '54%', width: '10%', height: '42%', border: '2px solid #10B981' }}>
-                  <span style={{ position: 'absolute', top: '-22px', left: '-2px', backgroundColor: '#10B981', color: '#000', fontSize: '0.72rem', fontWeight: 800, padding: '1px 6px', borderRadius: '2px' }}>
-                    person 0.88
-                  </span>
-                </div>
-                {/* Car Box on Right */}
-                <div style={{ position: 'absolute', top: '44%', left: '72%', width: '18%', height: '28%', border: '2px solid #FBBF24' }}>
-                  <span style={{ position: 'absolute', top: '-22px', left: '-2px', backgroundColor: '#FBBF24', color: '#000', fontSize: '0.72rem', fontWeight: 800, padding: '1px 6px', borderRadius: '2px' }}>
-                    car 0.96
-                  </span>
+                <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 420 }}>
+                  {!isPlaying
+                    ? 'Stream playback is currently paused. Press play on the transport bar to resume.'
+                    : 'The camera feed is disconnected or waiting for the video pipeline to start. Ensure camera is powered and network stream is reachable.'}
                 </div>
               </div>
             )}
@@ -526,7 +620,9 @@ export function Cameras({ onNavigate, pageParams }) {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '14px', color: '#94A3B8' }}>
-                <span style={{ fontSize: '0.75rem', color: '#10B981', fontWeight: 700 }}>FPS {measuredFps}</span>
+                <span style={{ fontSize: '0.75rem', color: isCameraLive ? '#10B981' : '#64748B', fontWeight: 700 }}>
+                  FPS {isCameraLive ? measuredFps : 0}
+                </span>
                 <span style={{ cursor: 'pointer' }}>⚙</span>
                 <span style={{ cursor: 'pointer' }}>⛶</span>
               </div>
@@ -543,11 +639,35 @@ export function Cameras({ onNavigate, pageParams }) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>Object Tracking</div>
-              <span style={{ backgroundColor: '#0F172A', border: '1px solid rgba(255, 255, 255, 0.08)', padding: '4px 10px', borderRadius: '6px', fontSize: '0.85rem', color: '#CBD5E1', fontWeight: 700 }}>
-                Cam-02 (Parking)
-              </span>
-              <span style={{ backgroundColor: '#10B981', color: '#FFFFFF', fontSize: '0.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: '12px' }}>
-                Live
+              <select
+                value={selectedCameraId}
+                onChange={(e) => setSelectedCameraId(Number(e.target.value))}
+                style={{
+                  backgroundColor: '#0F172A',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  color: '#CBD5E1',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {cameras.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.location})</option>
+                ))}
+              </select>
+              <span
+                style={{
+                  backgroundColor: isCameraLive ? '#10B981' : '#64748B',
+                  color: '#FFFFFF',
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  padding: '3px 10px',
+                  borderRadius: '12px',
+                }}
+              >
+                {isCameraLive ? 'Live' : 'Offline'}
               </span>
             </div>
 
@@ -595,33 +715,41 @@ export function Cameras({ onNavigate, pageParams }) {
               border: '1px solid rgba(255, 255, 255, 0.08)',
             }}
           >
-            <img
-              src={`/cameras/2/stream/?t=${Date.now()}`}
-              alt="Live Tracking"
-              onError={(e) => { e.target.style.display = 'none'; }}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
+            {selectedCam ? (
+              <img
+                src={`/api/cameras/${selectedCam.id}/stream/?mode=${trackingEnabled ? 'tracking' : 'raw'}&t=${streamTimestamp}`}
+                alt="Live Tracking"
+                onError={() => setStreamError(true)}
+                onLoad={() => setStreamError(false)}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : null}
 
-            {/* Persistent Tracking Identifiers matching Figure 7.1.5 */}
-            {trackingEnabled && (
-              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-                {/* ID: 1 Green */}
-                <div style={{ position: 'absolute', top: '34%', left: '26%', width: '14%', height: '48%', border: '2px solid #10B981' }}>
-                  <span style={{ position: 'absolute', top: '-22px', left: '-2px', backgroundColor: '#10B981', color: '#000', fontSize: '0.72rem', fontWeight: 800, padding: '1px 6px', borderRadius: '2px' }}>
-                    ID: 1
-                  </span>
+            {(!selectedCam || !isCameraLive) && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: 'rgba(9, 14, 26, 0.94)',
+                  color: '#94A3B8',
+                  gap: 12,
+                  padding: 20,
+                  textAlign: 'center',
+                }}
+              >
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5">
+                  <path d="M23 7l-7 5 7 5V7z" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                </svg>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
+                  {selectedCam?.name || 'Camera'} Tracking Pipeline Disconnected
                 </div>
-                {/* ID: 2 Blue */}
-                <div style={{ position: 'absolute', top: '35%', left: '46%', width: '12%', height: '46%', border: '2px solid #3B82F6' }}>
-                  <span style={{ position: 'absolute', top: '-22px', left: '-2px', backgroundColor: '#3B82F6', color: '#FFF', fontSize: '0.72rem', fontWeight: 800, padding: '1px 6px', borderRadius: '2px' }}>
-                    ID: 2
-                  </span>
-                </div>
-                {/* ID: 3 Purple */}
-                <div style={{ position: 'absolute', top: '38%', left: '64%', width: '10%', height: '42%', border: '2px solid #A855F7' }}>
-                  <span style={{ position: 'absolute', top: '-22px', left: '-2px', backgroundColor: '#A855F7', color: '#FFF', fontSize: '0.72rem', fontWeight: 800, padding: '1px 6px', borderRadius: '2px' }}>
-                    ID: 3
-                  </span>
+                <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 420 }}>
+                  Camera is currently offline. Multi-object tracking with ByteTrack will resume automatically upon camera reconnection.
                 </div>
               </div>
             )}
@@ -637,18 +765,44 @@ export function Cameras({ onNavigate, pageParams }) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>Restricted Zone Monitoring</div>
-              <span style={{ backgroundColor: '#0F172A', border: '1px solid rgba(255, 255, 255, 0.08)', padding: '4px 10px', borderRadius: '6px', fontSize: '0.85rem', color: '#CBD5E1', fontWeight: 700 }}>
-                Cam-03 (Restricted Zone)
+              <select
+                value={selectedCameraId}
+                onChange={(e) => setSelectedCameraId(Number(e.target.value))}
+                style={{
+                  backgroundColor: '#0F172A',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  color: '#CBD5E1',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {cameras.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.location})</option>
+                ))}
+              </select>
+              <span
+                style={{
+                  backgroundColor: isCameraLive ? '#10B981' : '#64748B',
+                  color: '#FFFFFF',
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  padding: '3px 10px',
+                  borderRadius: '12px',
+                }}
+              >
+                {isCameraLive ? 'Live' : 'Offline'}
               </span>
-              <span style={{ backgroundColor: '#10B981', color: '#FFFFFF', fontSize: '0.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: '12px' }}>
-                Live
+              <span style={{ fontSize: '0.85rem', color: '#94A3B8' }}>
+                Zone: {zones[0]?.name || selectedCam?.location || 'Gate-1'}
               </span>
-              <span style={{ fontSize: '0.85rem', color: '#94A3B8' }}>Zone: Gate-1</span>
             </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '20px' }}>
-            {/* Viewport with Red Polygon Zone & Intrusion Box matching Figure 7.1.6 */}
+            {/* Viewport with Perimeter Polygon */}
             <div
               style={{
                 position: 'relative',
@@ -660,33 +814,57 @@ export function Cameras({ onNavigate, pageParams }) {
                 border: '1px solid rgba(255, 255, 255, 0.08)',
               }}
             >
-              <img
-                src={`/cameras/3/stream/?t=${Date.now()}`}
-                alt="Restricted Zone Stream"
-                onError={(e) => { e.target.style.display = 'none'; }}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              />
+              {selectedCam ? (
+                <img
+                  src={`/api/cameras/${selectedCam.id}/stream/?mode=tracking&t=${streamTimestamp}`}
+                  alt="Restricted Zone Stream"
+                  onError={() => setStreamError(true)}
+                  onLoad={() => setStreamError(false)}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : null}
 
-              {/* Red Perimeter Polygon Overlay */}
-              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+              {/* Perimeter Polygon Overlay */}
+              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
                 <polygon
                   points="120,440 280,320 620,320 780,440"
-                  fill="rgba(239, 68, 68, 0.25)"
+                  fill="rgba(239, 68, 68, 0.18)"
                   stroke="#EF4444"
                   strokeWidth="2"
                   strokeDasharray="6,4"
                 />
-                <text x="400" y="420" fill="#EF4444" fontSize="14" fontWeight="800" textAnchor="middle">
-                  Restricted Zone
+                <text x="450" y="420" fill="#EF4444" fontSize="13" fontWeight="800" textAnchor="middle">
+                  Restricted Zone: {zones[0]?.name || 'Gate-1'}
                 </text>
               </svg>
 
-              {/* Intruded Person Box */}
-              <div style={{ position: 'absolute', top: '42%', left: '46%', width: '10%', height: '36%', border: '2px solid #EF4444' }}>
-                <span style={{ position: 'absolute', top: '-22px', left: '-2px', backgroundColor: '#EF4444', color: '#FFF', fontSize: '0.72rem', fontWeight: 800, padding: '1px 6px', borderRadius: '2px' }}>
-                  Intrusion: Person (0.96)
-                </span>
-              </div>
+              {(!selectedCam || !isCameraLive) && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: 'rgba(9, 14, 26, 0.94)',
+                    color: '#94A3B8',
+                    gap: 12,
+                    padding: 20,
+                    textAlign: 'center',
+                  }}
+                >
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  </svg>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
+                    Restricted Zone Monitoring Inactive
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 400 }}>
+                    Camera is currently offline. Zone intrusion tripwires remain armed in backend configuration.
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right Alert Card matching Figure 7.1.6 */}
@@ -704,50 +882,58 @@ export function Cameras({ onNavigate, pageParams }) {
               <div>
                 <div
                   style={{
-                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                    backgroundColor: intrusionAlert ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                    border: `1px solid ${intrusionAlert ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)'}`,
                     borderRadius: '8px',
                     padding: '8px 12px',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
-                    color: '#EF4444',
+                    color: intrusionAlert ? '#EF4444' : '#10B981',
                     fontWeight: 800,
                     fontSize: '0.88rem',
                     marginBottom: '1.5rem',
                   }}
                 >
-                  <span>⚠️</span>
-                  <span>Intrusion Detected</span>
+                  <span>{intrusionAlert ? '⚠️' : '🛡️'}</span>
+                  <span>{intrusionAlert ? 'Intrusion Detected' : 'Zone Armed & Secure'}</span>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.85rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#94A3B8' }}>Camera</span>
-                    <span style={{ fontWeight: 700, color: '#FFFFFF' }}>Cam-03</span>
+                    <span style={{ fontWeight: 700, color: '#FFFFFF' }}>{selectedCam?.name || 'N/A'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#94A3B8' }}>Zone</span>
-                    <span style={{ fontWeight: 700, color: '#FFFFFF' }}>Gate-1 (Restricted)</span>
+                    <span style={{ fontWeight: 700, color: '#FFFFFF' }}>
+                      {intrusionAlert?.zone_name || zones[0]?.name || `${selectedCam?.location || 'Gate-1'} (Restricted)`}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#94A3B8' }}>Object</span>
-                    <span style={{ fontWeight: 700, color: '#FFFFFF' }}>Person</span>
+                    <span style={{ fontWeight: 700, color: '#FFFFFF' }}>
+                      {intrusionAlert?.detected_object || (intrusionAlert ? 'Person' : 'None')}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#94A3B8' }}>Confidence</span>
-                    <span style={{ fontWeight: 700, color: '#10B981' }}>0.96</span>
+                    <span style={{ fontWeight: 700, color: '#10B981' }}>
+                      {intrusionAlert?.confidence ? Number(intrusionAlert.confidence).toFixed(2) : (intrusionAlert ? '0.96' : '0.00')}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#94A3B8' }}>Time</span>
-                    <span style={{ fontWeight: 600, color: '#CBD5E1' }}>Nov 01, 2026 11:17:32 AM</span>
+                    <span style={{ fontWeight: 600, color: '#CBD5E1' }}>
+                      {intrusionAlert ? formatAlertTime(intrusionAlert.detected_at || intrusionAlert.created_at) : 'Active Surveillance'}
+                    </span>
                   </div>
                 </div>
               </div>
 
               <button
                 type="button"
-                onClick={() => onNavigate && onNavigate('notifications')}
+                onClick={() => onNavigate && onNavigate('notifications', { tab: 'notifications' })}
                 style={{
                   backgroundColor: '#6366F1',
                   color: '#FFFFFF',
@@ -773,12 +959,43 @@ export function Cameras({ onNavigate, pageParams }) {
       {subTab === 'anomaly' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-            <div>
-              <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>Anomaly Detection</div>
-              <div style={{ fontSize: '0.85rem', color: '#94A3B8' }}>Detects unusual activities using AI models</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>Anomaly Detection</div>
+                <div style={{ fontSize: '0.85rem', color: '#94A3B8' }}>Detects unusual activities using AI models</div>
+              </div>
+              <select
+                value={selectedCameraId}
+                onChange={(e) => setSelectedCameraId(Number(e.target.value))}
+                style={{
+                  backgroundColor: '#0F172A',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  color: '#CBD5E1',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {cameras.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.location})</option>
+                ))}
+              </select>
             </div>
-            <span style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#10B981', border: '1px solid rgba(16, 185, 129, 0.3)', fontSize: '0.75rem', fontWeight: 700, padding: '4px 12px', borderRadius: '12px' }}>
-              ● Running
+
+            <span
+              style={{
+                backgroundColor: isCameraLive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                color: isCameraLive ? '#10B981' : '#94A3B8',
+                border: `1px solid ${isCameraLive ? 'rgba(16, 185, 129, 0.3)' : 'rgba(148, 163, 184, 0.3)'}`,
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                padding: '4px 12px',
+                borderRadius: '12px',
+              }}
+            >
+              {isCameraLive ? '● Running' : '● Offline / Idle'}
             </span>
           </div>
 
@@ -794,19 +1011,45 @@ export function Cameras({ onNavigate, pageParams }) {
                 border: '1px solid rgba(255, 255, 255, 0.08)',
               }}
             >
-              <img
-                src={`/cameras/2/stream/?t=${Date.now()}`}
-                alt="Anomaly Stream"
-                onError={(e) => { e.target.style.display = 'none'; }}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              />
+              {selectedCam ? (
+                <img
+                  src={`/api/cameras/${selectedCam.id}/stream/?mode=tracking&t=${streamTimestamp}`}
+                  alt="Anomaly Stream"
+                  onError={() => setStreamError(true)}
+                  onLoad={() => setStreamError(false)}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : null}
 
-              {/* Fallen Person Anomaly Box matching Figure 7.1.10 */}
-              <div style={{ position: 'absolute', top: '65%', left: '44%', width: '22%', height: '18%', border: '2px solid #EF4444' }}>
-                <span style={{ position: 'absolute', top: '-22px', left: '-2px', backgroundColor: '#EF4444', color: '#FFF', fontSize: '0.72rem', fontWeight: 800, padding: '1px 6px', borderRadius: '2px' }}>
-                  Anomaly: Fall (0.93)
-                </span>
-              </div>
+              {(!selectedCam || !isCameraLive) && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: 'rgba(9, 14, 26, 0.94)',
+                    color: '#94A3B8',
+                    gap: 12,
+                    padding: 20,
+                    textAlign: 'center',
+                  }}
+                >
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
+                    Anomaly Monitoring Disconnected
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 400 }}>
+                    Camera is currently offline. AI movement analysis model is initialized and standing by.
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right Anomaly Result Card matching Figure 7.1.10 */}
@@ -824,39 +1067,45 @@ export function Cameras({ onNavigate, pageParams }) {
 
               <div
                 style={{
-                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  backgroundColor: anomalyAlert ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                  border: `1px solid ${anomalyAlert ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)'}`,
                   borderRadius: '8px',
                   padding: '8px 12px',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  color: '#EF4444',
+                  color: anomalyAlert ? '#EF4444' : '#10B981',
                   fontWeight: 800,
                   fontSize: '0.88rem',
                   marginBottom: '1.5rem',
                 }}
               >
-                <span>⚠️</span>
-                <span>Anomaly Detected</span>
+                <span>{anomalyAlert ? '⚠️' : '✓'}</span>
+                <span>{anomalyAlert ? 'Anomaly Detected' : 'No Anomalies Detected'}</span>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.85rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#94A3B8' }}>Type</span>
-                  <span style={{ fontWeight: 700, color: '#FFFFFF' }}>Fall</span>
+                  <span style={{ fontWeight: 700, color: '#FFFFFF' }}>
+                    {anomalyAlert?.anomaly_type || anomalyAlert?.title || (anomalyAlert ? 'Fall' : 'Normal')}
+                  </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#94A3B8' }}>Confidence</span>
-                  <span style={{ fontWeight: 700, color: '#10B981' }}>0.93</span>
+                  <span style={{ fontWeight: 700, color: '#10B981' }}>
+                    {anomalyAlert?.confidence ? Number(anomalyAlert.confidence).toFixed(2) : (anomalyAlert ? '0.93' : '0.00')}
+                  </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#94A3B8' }}>Camera</span>
-                  <span style={{ fontWeight: 700, color: '#FFFFFF' }}>Cam-02</span>
+                  <span style={{ fontWeight: 700, color: '#FFFFFF' }}>{selectedCam?.name || 'N/A'}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#94A3B8' }}>Time</span>
-                  <span style={{ fontWeight: 600, color: '#CBD5E1' }}>Nov 01, 2026 11:22:48 AM</span>
+                  <span style={{ fontWeight: 600, color: '#CBD5E1' }}>
+                    {anomalyAlert ? formatAlertTime(anomalyAlert.detected_at || anomalyAlert.created_at) : 'Live Monitoring'}
+                  </span>
                 </div>
               </div>
             </div>

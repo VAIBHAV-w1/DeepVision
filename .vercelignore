@@ -18,3 +18,16 @@
 memory.md
 s
 *.session.sql
+
+# Backend Exclusions to prevent Vercel Serverless Function collisions
+/api/
+/deepvision_django/
+/requirements.txt
+/Dockerfile
+/docker-compose.yml
+/scripts/
+/scratch/
+/dataset/
+/videos/
+/outputs/
+/Ultralytics/

@@ -28,33 +28,39 @@ export function Dashboard({ onNavigate }) {
     return () => clearInterval(timer);
   }, [fetchStats]);
 
-  // Derived metrics matching Figure 7.1.2
-  const totalCameras = stats?.total_cameras ?? stats?.cameras?.length ?? 8;
-  const onlineCameras = stats?.online_cameras ?? stats?.cameras?.filter((c) => c.status === 'online').length ?? 6;
-  const offlineCameras = stats?.offline_cameras ?? Math.max(0, totalCameras - onlineCameras);
-  const events24h = stats?.events_24h ?? stats?.new_alerts_count ?? 24;
-  const onlinePct = totalCameras > 0 ? Math.round((onlineCameras / totalCameras) * 100) : 75;
+  // Derived metrics from genuine backend API
+  const totalCameras = stats ? (stats.total_cameras ?? stats.cameras?.length ?? 0) : 0;
+  const onlineCameras = stats ? (stats.online_cameras ?? stats.cameras?.filter((c) => c.status === 'online').length ?? 0) : 0;
+  const offlineCameras = stats ? (stats.offline_cameras ?? Math.max(0, totalCameras - onlineCameras)) : 0;
+  const events24h = stats ? (stats.events_24h ?? stats.new_alerts_count ?? 0) : 0;
+  const onlinePct = totalCameras > 0 ? Math.round((onlineCameras / totalCameras) * 100) : 0;
 
   // System Health telemetry
-  const cpuVal = stats?.system_health?.cpu ?? 32;
-  const memVal = stats?.system_health?.memory ?? 56;
-  const storageVal = stats?.system_health?.storage ?? 68;
-  const fpsVal = stats?.system_health?.fps ?? 28;
+  const cpuVal = stats?.system_health?.cpu ?? 0;
+  const memVal = stats?.system_health?.memory ?? 0;
+  const storageVal = stats?.system_health?.storage ?? 0;
+  const fpsVal = stats?.system_health?.fps ?? 0;
 
-  // Recent Events list matching Figure 7.1.2
-  const recentEvents = stats?.recent_alerts && stats.recent_alerts.length > 0
-    ? stats.recent_alerts.slice(0, 3).map((a) => ({
-        id: a.id,
-        title: a.event_type === 'intrusion' ? 'Intrusion Detected' : (a.title || a.event_type || 'Unusual Activity'),
-        camera: a.camera_name || 'Cam-03',
-        time: a.relative_time || '2 min ago',
-        severity: a.severity || 'high',
-      }))
-    : [
-        { id: 1, title: 'Intrusion Detected', camera: 'Cam-03', time: '2 min ago', severity: 'high' },
-        { id: 2, title: 'Unusual Activity', camera: 'Cam-02', time: '8 min ago', severity: 'medium' },
-        { id: 3, title: 'Person Detected', camera: 'Cam-01', time: '15 min ago', severity: 'low' },
-      ];
+  // Genuine Recent Events list from backend
+  const recentEvents = (stats?.recent_alerts || []).slice(0, 5).map((a) => {
+    let relativeTime = 'Just now';
+    if (a.detected_at) {
+      try {
+        const diffMs = Date.now() - new Date(a.detected_at).getTime();
+        const diffMin = Math.max(1, Math.floor(diffMs / 60000));
+        relativeTime = diffMin < 60 ? `${diffMin} min ago` : `${Math.floor(diffMin / 60)}h ago`;
+      } catch (_) {
+        relativeTime = 'Recent';
+      }
+    }
+    return {
+      id: a.id,
+      title: a.title || (a.event_type ? a.event_type.replace(/_/g, ' ') : 'Security Event'),
+      camera: a.camera_name || (a.camera_id ? `Cam-0${a.camera_id}` : 'System'),
+      time: a.relative_time || relativeTime,
+      severity: (a.severity || 'medium').toLowerCase(),
+    };
+  });
 
   // SVG Donut Calculations
   const radius = 50;
@@ -443,66 +449,77 @@ export function Dashboard({ onNavigate }) {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {recentEvents.map((ev) => (
-              <div
-                key={ev.id}
-                onClick={handleNavigateAlerts}
-                role="button"
-                tabIndex={0}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '10px 12px',
-                  backgroundColor: '#090E1A',
-                  border: '1px solid rgba(255, 255, 255, 0.04)',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  transition: 'background-color 0.15s',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#090E1A')}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  {ev.severity === 'high' ? (
-                    <span style={{ color: '#EF4444' }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                        <line x1="12" y1="9" x2="12" y2="13" />
-                        <line x1="12" y1="17" x2="12.01" y2="17" />
-                      </svg>
+            {recentEvents.length > 0 ? (
+              recentEvents.map((ev) => (
+                <div
+                  key={ev.id}
+                  onClick={handleNavigateAlerts}
+                  role="button"
+                  tabIndex={0}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 12px',
+                    backgroundColor: '#090E1A',
+                    border: '1px solid rgba(255, 255, 255, 0.04)',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.15s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#090E1A')}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {ev.severity === 'high' ? (
+                      <span style={{ color: '#EF4444' }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                          <line x1="12" y1="9" x2="12" y2="13" />
+                          <line x1="12" y1="17" x2="12.01" y2="17" />
+                        </svg>
+                      </span>
+                    ) : ev.severity === 'medium' ? (
+                      <span style={{ color: '#F59E0B' }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="8" x2="12" y2="12" />
+                          <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                      </span>
+                    ) : (
+                      <span style={{ color: '#38BDF8' }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                          <circle cx="12" cy="7" r="4" />
+                        </svg>
+                      </span>
+                    )}
+                    <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#F8FAFC' }}>
+                      {ev.title}
                     </span>
-                  ) : ev.severity === 'medium' ? (
-                    <span style={{ color: '#F59E0B' }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="12" y1="8" x2="12" y2="12" />
-                        <line x1="12" y1="16" x2="12.01" y2="16" />
-                      </svg>
-                    </span>
-                  ) : (
-                    <span style={{ color: '#38BDF8' }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                        <circle cx="12" cy="7" r="4" />
-                      </svg>
-                    </span>
-                  )}
-                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#F8FAFC' }}>
-                    {ev.title}
-                  </span>
-                </div>
+                  </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <span style={{ fontSize: '0.82rem', color: '#94A3B8', fontWeight: 500 }}>
-                    {ev.camera}
-                  </span>
-                  <span style={{ fontSize: '0.78rem', color: '#64748B' }}>
-                    {ev.time}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <span style={{ fontSize: '0.82rem', color: '#94A3B8', fontWeight: 500 }}>
+                      {ev.camera}
+                    </span>
+                    <span style={{ fontSize: '0.78rem', color: '#64748B' }}>
+                      {ev.time}
+                    </span>
+                  </div>
                 </div>
+              ))
+            ) : (
+              <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94A3B8', fontSize: '0.86rem' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5" style={{ display: 'block', margin: '0 auto 8px' }}>
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                <span>{t('dashboard.noEvents', 'No recent security events recorded in the last 24 hours.')}</span>
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>
