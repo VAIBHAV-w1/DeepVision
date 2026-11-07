@@ -12,9 +12,9 @@ for p in [str(django_dir), str(root_dir)]:
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
-# Ensure Django secret key is present in serverless environment if not set
-if not os.environ.get('DJANGO_SECRET_KEY'):
-    os.environ['DJANGO_SECRET_KEY'] = 'dv-vercel-serverless-runtime-key-e7c8b9a1d2f34567890abcdef1234567'
+# Never embed a production Django signing secret in source code.
+if not os.environ.get('DJANGO_SECRET_KEY', '').strip():
+    raise RuntimeError('DJANGO_SECRET_KEY must be configured as a protected production environment variable.')
 
 from django.core.wsgi import get_wsgi_application
 

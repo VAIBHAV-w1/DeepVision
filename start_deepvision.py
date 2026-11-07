@@ -314,33 +314,26 @@ def ensure_database():
     is_production = is_production_environment()
 
     # Check if PostgreSQL / Supabase is configured
-    use_postgres = os.getenv("USE_POSTGRES", "").lower() in ("true", "1") or bool(os.getenv("DATABASE_URL", "").startswith("postgres")) or bool(os.getenv("SUPABASE_DB_URL", "").startswith("postgres"))
+    postgres_url = (os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or "").strip()
+    use_postgres = (
+        os.getenv("USE_POSTGRES", "").lower() in ("true", "1")
+        or postgres_url.startswith(("postgres://", "postgresql://"))
+    )
     if use_postgres:
+        if not postgres_url.startswith(("postgres://", "postgresql://")):
+            logger.critical("FATAL: PostgreSQL mode is enabled but DATABASE_URL/SUPABASE_DB_URL is missing or invalid.")
+            raise RuntimeError("PostgreSQL is configured but no valid PostgreSQL connection URL is available.")
         logger.info("Database preflight: PostgreSQL / Supabase configured. Bypassing SQLite file preflight validation.")
         return
-
-    schema_file = DJANGO_DIR / "schema.sql"
 
     if is_production:
         # Production mode: Strict fail-closed database validation
         logger.info("Production mode detected: Running preflight database validation on %s...", db_path)
         if not db_path.exists():
-            allow_init = os.getenv("INIT_DB_IF_MISSING", "true").lower() in ("true", "1") or os.getenv("ALLOW_EMPTY_DB_INIT", "true").lower() in ("true", "1")
-            if allow_init and schema_file.exists():
-                logger.warning("Database at %s does not exist. Initializing fresh production schema from %s...", db_path, schema_file)
-                db_dir.mkdir(parents=True, exist_ok=True)
-                with open(schema_file, "r", encoding="utf-8") as f:
-                    schema_sql = f.read()
-                conn = sqlite3.connect(str(db_path))
-                conn.executescript(schema_sql)
-                conn.commit()
-                conn.close()
-                logger.info("Fresh database schema successfully initialized (18 tables).")
-            else:
-                logger.critical("FATAL: Database preflight validation FAILED in production mode: Database file does not exist at '%s'", db_path)
-                logger.critical("DeepVision production launcher refuses to silently create or overwrite databases to prevent data loss.")
-                logger.critical("Ensure host volume 'instance' containing 'deepvision.db' is correctly mounted, or set INIT_DB_IF_MISSING=true.")
-                raise RuntimeError(f"Database preflight validation failed: Database file does not exist at '{db_path}'")
+            logger.critical("FATAL: Production database file is missing at '%s'.", db_path)
+            logger.critical("Production startup will not create or initialize an empty database.")
+            logger.critical("Configure a valid PostgreSQL DATABASE_URL/SUPABASE_DB_URL, or attach the existing persistent database volume.")
+            raise RuntimeError(f"Production database is unavailable: '{db_path}' does not exist")
 
         valid, detail = validate_sqlite_database(db_path)
         if not valid:
