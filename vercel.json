@@ -42,31 +42,31 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://deepvision-backend.onrender.com/api/$1"
+      "destination": "https://deepvision-6ie7.onrender.com/api/$1"
     },
     {
       "source": "/cameras/(.*)",
-      "destination": "https://deepvision-backend.onrender.com/cameras/$1"
+      "destination": "https://deepvision-6ie7.onrender.com/cameras/$1"
     },
     {
       "source": "/recordings/(.*)",
-      "destination": "https://deepvision-backend.onrender.com/recordings/$1"
+      "destination": "https://deepvision-6ie7.onrender.com/recordings/$1"
     },
     {
       "source": "/evidence/(.*)",
-      "destination": "https://deepvision-backend.onrender.com/evidence/$1"
+      "destination": "https://deepvision-6ie7.onrender.com/evidence/$1"
     },
     {
       "source": "/alerts/(.*)",
-      "destination": "https://deepvision-backend.onrender.com/alerts/$1"
+      "destination": "https://deepvision-6ie7.onrender.com/alerts/$1"
     },
     {
       "source": "/notifications/(.*)",
-      "destination": "https://deepvision-backend.onrender.com/notifications/$1"
+      "destination": "https://deepvision-6ie7.onrender.com/notifications/$1"
     },
     {
       "source": "/health(.*)",
-      "destination": "https://deepvision-backend.onrender.com/health$1"
+      "destination": "https://deepvision-6ie7.onrender.com/health$1"
     },
     {
       "source": "/(.*)",
