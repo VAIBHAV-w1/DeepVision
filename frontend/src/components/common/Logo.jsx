@@ -14,15 +14,7 @@ export function Logo({
   subtext = '',
   style = {},
 }) {
-  let t = (k, d) => d;
-  try {
-    const ctx = useTranslation();
-    if (ctx && ctx.t) {
-      t = ctx.t;
-    }
-  } catch (_) {
-    // Graceful fallback when outside i18n context
-  }
+  const { t } = useTranslation();
 
   const sizes = {
     xs: { box: 22, icon: 14, text: '0.85rem', sub: '0.55rem', gap: '6px' },
