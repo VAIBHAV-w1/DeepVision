@@ -277,7 +277,7 @@ export function Settings({ onNavigate }) {
             <polyline points="20 6 9 17 4 12" />
           </svg>
           <span>
-            {saving ? "Saving..." : t("settings.save", "Save Settings")}
+            {saving ? t("settings.saving", "Saving...") : t("settings.save", "Save Settings")}
           </span>
         </button>
       </div>
@@ -334,7 +334,7 @@ export function Settings({ onNavigate }) {
               color: "var(--text-muted, #64748B)",
             }}
           >
-            Choose the language for the entire surveillance application:
+            {t("settings.languageDesc", "Choose the language for the entire surveillance application:")}
           </p>
 
           <div
@@ -433,7 +433,7 @@ export function Settings({ onNavigate }) {
               color: "var(--text-muted, #64748B)",
             }}
           >
-            Select your preferred display theme for the workstation:
+            {t("settings.appearanceDesc", "Select your preferred display theme for the workstation:")}
           </p>
 
           <div
@@ -531,7 +531,7 @@ export function Settings({ onNavigate }) {
                   marginBottom: "6px",
                 }}
               >
-                Default Camera View Mode
+                {t("settings.defaultModeLabel", "Default Camera View Mode")}
               </label>
               <select
                 id="select-default-mode"
@@ -548,10 +548,10 @@ export function Settings({ onNavigate }) {
                 }}
               >
                 <option value="tracking">
-                  {t("monitor.modeTracking", "DETECTION & TRACKING")}
+                  {t("settings.modeDetectionTracking", "Detection & Tracking")}
                 </option>
                 <option value="raw">
-                  {t("monitor.modeRaw", "RAW STREAM")}
+                  {t("settings.modeRawStream", "Raw Stream")}
                 </option>
               </select>
             </div>
@@ -566,7 +566,7 @@ export function Settings({ onNavigate }) {
                   marginBottom: "6px",
                 }}
               >
-                Live Digital Clock Format
+                {t("settings.clockFormatLabel", "Live Digital Clock Format")}
               </label>
               <select
                 id="select-clock-format"
@@ -582,8 +582,8 @@ export function Settings({ onNavigate }) {
                   fontSize: "0.82rem",
                 }}
               >
-                <option value="24h">24-Hour (14:30:00)</option>
-                <option value="12h">12-Hour (02:30:00 PM)</option>
+                <option value="24h">{t("settings.format24h", "24-Hour (14:30:00)")}</option>
+                <option value="12h">{t("settings.format12h", "12-Hour (02:30:00 PM)")}</option>
               </select>
             </div>
           </div>
@@ -782,15 +782,15 @@ export function Settings({ onNavigate }) {
                 fontWeight: 600,
               }}
             >
-              Active Behavior & Perimeter Rules:
+              {t("settings.anomalyRulesLabel", "Active Behavior & Perimeter Rules:")}
             </span>
             {[
-              { key: 'restrictedEntry', label: 'Perimeter / Restricted Zone Intrusion' },
-              { key: 'loitering', label: 'Loitering & Extended Linger Time' },
-              { key: 'crowding', label: 'Congestion & Crowd Density' },
-              { key: 'unusualMovement', label: 'Unusual / Erratic Movement' },
-              { key: 'rapidMovement', label: 'Rapid Movement / High-Velocity Dash' },
-              { key: 'abandonedObject', label: 'Unattended / Abandoned Object' },
+              { key: 'restrictedEntry', label: t('settings.ruleRestricted', 'Perimeter / Restricted Zone Intrusion') },
+              { key: 'loitering', label: t('settings.ruleLoitering', 'Loitering & Extended Linger Time') },
+              { key: 'crowding', label: t('settings.ruleCrowding', 'Congestion & Crowd Density') },
+              { key: 'unusualMovement', label: t('settings.ruleUnusual', 'Unusual / Erratic Movement') },
+              { key: 'rapidMovement', label: t('settings.ruleRapid', 'Rapid Movement / High-Velocity Dash') },
+              { key: 'abandonedObject', label: t('settings.ruleAbandoned', 'Unattended / Abandoned Object') },
             ].map((rule) => (
               <label
                 key={rule.key}
@@ -856,26 +856,26 @@ export function Settings({ onNavigate }) {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.82rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-muted, #64748B)' }}>Operator:</span>
-              <span style={{ color: 'var(--text-main, #F8FAFC)', fontWeight: 600 }}>{user?.full_name || user?.username || 'Security Operator'}</span>
+              <span style={{ color: 'var(--text-muted, #64748B)' }}>{t('settings.operatorLabel', 'Operator:')}</span>
+              <span style={{ color: 'var(--text-main, #F8FAFC)', fontWeight: 600 }}>{user?.full_name || user?.username || t('app.operator', 'Security Operator')}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ color: "var(--text-muted, #64748B)" }}>
-                Email:
+                {t('settings.emailLabel', 'Email:')}
               </span>
               <span style={{ color: "var(--text-main, #F8FAFC)" }}>
-                {user?.email || "Authenticated Session"}
+                {user?.email || t('settings.authSession', 'Authenticated Session')}
               </span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ color: "var(--text-muted, #64748B)" }}>
-                Authentication:
+                {t('settings.authLabel', 'Authentication:')}
               </span>
               <span
                 className="status-pill status-live"
                 style={{ fontSize: "0.7rem", padding: "1px 8px" }}
               >
-                OTP Verified
+                {t('settings.otpVerified', 'OTP Verified')}
               </span>
             </div>
           </div>
@@ -955,7 +955,7 @@ export function Settings({ onNavigate }) {
                     marginBottom: "4px",
                   }}
                 >
-                  Surveillance Capture Engine
+                  {t('settings.engineStatusLabel', 'Surveillance Capture Engine')}
                 </div>
                 <div
                   style={{
@@ -983,7 +983,7 @@ export function Settings({ onNavigate }) {
                     marginBottom: "4px",
                   }}
                 >
-                  Inference & Tracking Pipeline
+                  {t('settings.yoloModelLabel', 'Inference & Tracking Pipeline')}
                 </div>
                 <div
                   style={{
@@ -1008,7 +1008,7 @@ export function Settings({ onNavigate }) {
                     marginBottom: "4px",
                   }}
                 >
-                  Database Pipeline
+                  {t('settings.databaseStatus', 'Database Pipeline')}
                 </div>
                 <div
                   style={{

@@ -1,8 +1,17 @@
 /**
  * DeepVision Internationalization Context (i18nContext.jsx)
- * Supports all 22 Scheduled Indian Languages + English.
- * Provides fallback to English, RTL layout for Urdu/Kashmiri/Sindhi,
- * locale-aware date/number formatting, and persistent language selection.
+ * Supports strictly three enterprise languages:
+ * 1. English ('en') - Default
+ * 2. हिंदी ('hi')
+ * 3. ಕನ್ನಡ ('kn')
+ *
+ * Provides:
+ * - Reactive global language switching without page reloads
+ * - LocalStorage persistence across browser refreshes
+ * - Interpolation for dynamic placeholders ({name}, {count}, etc.)
+ * - Locale-aware date, time, and number formatting
+ * - Document attribute updates (lang, dir)
+ * - Missing-translation detection and auditing
  */
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
@@ -10,6 +19,11 @@ import { SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE } from './languages';
 import { translations } from './translations';
 
 const I18nContext = createContext(null);
+
+// Global audit set for missing translations
+if (typeof window !== 'undefined') {
+  window.__deepvision_missing_keys = window.__deepvision_missing_keys || new Set();
+}
 
 export function LanguageProvider({ children }) {
   const [language, setLanguageState] = useState(() => {
@@ -35,11 +49,7 @@ export function LanguageProvider({ children }) {
     try {
       document.documentElement.lang = language;
       document.documentElement.dir = dir;
-      if (dir === 'rtl') {
-        document.documentElement.classList.add('rtl-layout');
-      } else {
-        document.documentElement.classList.remove('rtl-layout');
-      }
+      document.documentElement.setAttribute('data-language', language);
     } catch {
       // ignore in non-DOM environments
     }
@@ -54,6 +64,10 @@ export function LanguageProvider({ children }) {
       localStorage.setItem('deepvision_lang', code);
     } catch {
       // ignore
+    }
+    // Dispatch custom event for non-react listeners if needed
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('deepvision:language-changed', { detail: { code } }));
     }
   }, []);
 
@@ -70,27 +84,55 @@ export function LanguageProvider({ children }) {
   }, [setLanguage]);
 
   /**
-   * Safe string translation helper with fallback chain:
+   * Safe string translation helper with fallback chain and parameter interpolation:
    * 1. translations[language][key]
    * 2. translations['en'][key]
    * 3. fallback (if provided)
    * 4. key itself
    */
-  const t = useCallback((key, fallback) => {
+  const t = useCallback((key, fallback, params) => {
     if (!key) return '';
+
+    // Handle (key, params) where fallback was omitted
+    if (fallback && typeof fallback === 'object' && params === undefined) {
+      params = fallback;
+      fallback = undefined;
+    }
+
+    let translatedStr = undefined;
     const langDict = translations[language];
+
     if (langDict && langDict[key] !== undefined) {
-      return langDict[key];
+      translatedStr = langDict[key];
+    } else {
+      // Track missing key in active language
+      if (typeof window !== 'undefined' && window.__deepvision_missing_keys) {
+        window.__deepvision_missing_keys.add(`${language}:${key}`);
+      }
+
+      const defaultDict = translations[DEFAULT_LANGUAGE];
+      if (defaultDict && defaultDict[key] !== undefined) {
+        translatedStr = defaultDict[key];
+      }
     }
-    const defaultDict = translations[DEFAULT_LANGUAGE];
-    if (defaultDict && defaultDict[key] !== undefined) {
-      return defaultDict[key];
+
+    if (translatedStr === undefined) {
+      translatedStr = fallback !== undefined ? fallback : key;
     }
-    return fallback !== undefined ? fallback : key;
+
+    // Parameter interpolation: {varName}
+    if (params && typeof params === 'object' && typeof translatedStr === 'string') {
+      Object.keys(params).forEach((paramKey) => {
+        const val = params[paramKey] !== undefined && params[paramKey] !== null ? params[paramKey] : '';
+        translatedStr = translatedStr.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), String(val));
+      });
+    }
+
+    return translatedStr;
   }, [language]);
 
   /**
-   * Format dates in Asia/Kolkata timezone with IST indicator.
+   * Format dates in Asia/Kolkata timezone with IST indicator or customized locale format.
    */
   const formatDateIST = useCallback((dateInput, options = {}) => {
     if (!dateInput) return '-';

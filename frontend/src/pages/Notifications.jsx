@@ -155,6 +155,28 @@ export function Notifications({ onNavigate, pageParams = {} }) {
     return `00:${String(m).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
   };
 
+  const formatAlertTitle = (rawTitle) => {
+    if (!rawTitle) return t('notifications.modalAlertDetails', 'Security Alert');
+    const s = String(rawTitle).trim();
+    const l = s.toLowerCase();
+    if (l.includes('unusual movement')) return t('alerts.unusualMovementPerson', 'Unusual Movement Detected (Person)');
+    if (l.includes('loitering')) return t('alerts.loiteringPerson', 'Loitering Detected (Person)');
+    if (l.includes('unusual activity')) return t('alerts.unusualActivityPerson', 'Unusual Activity Detected (Person)');
+    if (l.includes('intrusion')) return t('dashboard.intrusionDetected', 'Intrusion Detected');
+    if (l.includes('person detected')) return t('alerts.personDetected', 'Person Detected');
+    if (l.includes('object left') || l.includes('bag')) return t('alerts.objectLeftBag', 'Object Left (Bag)');
+    if (l.includes('motion detected') || l.includes('motion')) return t('alerts.motionDetected', 'Motion Detected');
+    if (l.includes('fall')) return t('dashboard.fallDetected', 'Fall Detected');
+    return s;
+  };
+
+  const formatCameraName = (rawName) => {
+    if (!rawName) return 'Channel 01';
+    const s = String(rawName).trim();
+    if (s.toLowerCase() === 'webcam 0') return t('cameras.webcam0', 'Webcam 0');
+    return s;
+  };
+
   // Filter notifications according to dropdowns
   const filteredNotifs = notifications.filter((n) => {
     const title = (n.title || n.alert?.title || '').toLowerCase();
@@ -345,12 +367,12 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                   backgroundPosition: 'right 10px center',
                 }}
               >
-                <option value="all">All Events</option>
-                <option value="intrusion">Intrusions</option>
-                <option value="unusual">Unusual Activity</option>
-                <option value="person">Person Detected</option>
-                <option value="object">Object Left (Bag)</option>
-                <option value="motion">Motion Detected</option>
+                <option value="all">{t('notifications.filterAll', 'All Events')}</option>
+                <option value="intrusion">{t('notifications.filterIntrusion', 'Intrusions')}</option>
+                <option value="unusual">{t('notifications.filterUnusual', 'Unusual Activity')}</option>
+                <option value="person">{t('notifications.filterPerson', 'Person Detected')}</option>
+                <option value="object">{t('notifications.filterObject', 'Object Left (Bag)')}</option>
+                <option value="motion">{t('notifications.filterMotion', 'Motion Detected')}</option>
               </select>
 
               <select
@@ -371,10 +393,10 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                   backgroundPosition: 'right 10px center',
                 }}
               >
-                <option value="today">Today</option>
-                <option value="yesterday">Yesterday</option>
-                <option value="week">Last 7 Days</option>
-                <option value="all">All Time</option>
+                <option value="today">{t('notifications.dateToday', 'Today')}</option>
+                <option value="yesterday">{t('notifications.dateYesterday', 'Yesterday')}</option>
+                <option value="week">{t('notifications.dateWeek', 'Last 7 Days')}</option>
+                <option value="all">{t('notifications.dateAll', 'All Time')}</option>
               </select>
             </div>
           </div>
@@ -392,10 +414,10 @@ export function Notifications({ onNavigate, pageParams = {} }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
               <thead>
                 <tr style={{ background: '#131D35', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                  <th style={{ padding: '14px 20px', color: '#94A3B8', fontWeight: 600, width: '38%' }}>Event</th>
-                  <th style={{ padding: '14px 20px', color: '#94A3B8', fontWeight: 600, width: '22%' }}>Camera</th>
-                  <th style={{ padding: '14px 20px', color: '#94A3B8', fontWeight: 600, width: '20%' }}>Severity</th>
-                  <th style={{ padding: '14px 20px', color: '#94A3B8', fontWeight: 600, width: '20%' }}>Time</th>
+                  <th style={{ padding: '14px 20px', color: '#94A3B8', fontWeight: 600, width: '38%' }}>{t('notifications.thEvent', 'Event')}</th>
+                  <th style={{ padding: '14px 20px', color: '#94A3B8', fontWeight: 600, width: '22%' }}>{t('notifications.thCamera', 'Camera')}</th>
+                  <th style={{ padding: '14px 20px', color: '#94A3B8', fontWeight: 600, width: '20%' }}>{t('notifications.thSeverity', 'Severity')}</th>
+                  <th style={{ padding: '14px 20px', color: '#94A3B8', fontWeight: 600, width: '20%' }}>{t('notifications.thTime', 'Time')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -408,13 +430,13 @@ export function Notifications({ onNavigate, pageParams = {} }) {
 
                     // Severity pill colors matching Figure 7.1.7
                     let sevBg = '#10B981';
-                    let sevLabel = 'Low';
+                    let sevLabel = t('alerts.low', 'Low');
                     if (sev === 'high' || sev === 'critical') {
                       sevBg = '#EF4444';
-                      sevLabel = 'High';
+                      sevLabel = t('alerts.high', 'High');
                     } else if (sev === 'medium') {
                       sevBg = '#F59E0B';
-                      sevLabel = 'Medium';
+                      sevLabel = t('alerts.medium', 'Medium');
                     }
 
                     return (
@@ -434,13 +456,13 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                         <td style={{ padding: '14px 20px', color: '#FFFFFF', fontWeight: 600 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                             {getEventIcon(title, n.alert?.event_type, sev)}
-                            <span>{title}</span>
+                            <span>{formatAlertTitle(title)}</span>
                           </div>
                         </td>
 
                         {/* Camera Cell */}
                         <td style={{ padding: '14px 20px', color: '#94A3B8', fontWeight: 500 }}>
-                          {cameraName}
+                          {formatCameraName(cameraName)}
                         </td>
 
                         {/* Severity Pill Cell */}
@@ -478,8 +500,8 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
                           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
                         </svg>
-                        <span style={{ fontSize: '0.92rem', fontWeight: 600, color: '#E2E8F0' }}>No Security Notifications</span>
-                        <span style={{ fontSize: '0.8rem', color: '#64748B' }}>No security events or alerts match the selected criteria.</span>
+                        <span style={{ fontSize: '0.92rem', fontWeight: 600, color: '#E2E8F0' }}>{t('notifications.noNotifications', 'No Security Notifications')}</span>
+                        <span style={{ fontSize: '0.8rem', color: '#64748B' }}>{t('notifications.noMatchingEvents', 'No security events or alerts match the selected criteria.')}</span>
                       </div>
                     </td>
                   </tr>
@@ -516,7 +538,7 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                 onClick={(e) => e.stopPropagation()}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-                  <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>{selectedNotif.title || 'Security Alert'}</h3>
+                  <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>{formatAlertTitle(selectedNotif.title)}</h3>
                   <button
                     onClick={() => setSelectedNotif(null)}
                     style={{ background: 'transparent', border: 'none', color: '#94A3B8', fontSize: '1.2rem', cursor: 'pointer' }}
@@ -524,11 +546,11 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                     ×
                   </button>
                 </div>
-                <p style={{ color: '#94A3B8', fontSize: '0.9rem', marginBottom: 16 }}>{selectedNotif.message || 'No additional message details.'}</p>
+                <p style={{ color: '#94A3B8', fontSize: '0.9rem', marginBottom: 16 }}>{selectedNotif.message || t('notifications.modalNoDetails', 'No additional message details.')}</p>
                 <div style={{ background: '#131D35', borderRadius: 8, padding: 12, marginBottom: 20, fontSize: '0.85rem' }}>
-                  <div style={{ marginBottom: 6 }}><strong style={{ color: '#E2E8F0' }}>Camera:</strong> {selectedNotif.camera_name || 'N/A'}</div>
-                  <div style={{ marginBottom: 6 }}><strong style={{ color: '#E2E8F0' }}>Time:</strong> {formatDateLabel(selectedNotif.created_at)}</div>
-                  <div><strong style={{ color: '#E2E8F0' }}>Severity:</strong> {selectedNotif.severity || 'low'}</div>
+                  <div style={{ marginBottom: 6 }}><strong style={{ color: '#E2E8F0' }}>{t('notifications.thCamera', 'Camera')}:</strong> {formatCameraName(selectedNotif.camera_name || 'N/A')}</div>
+                  <div style={{ marginBottom: 6 }}><strong style={{ color: '#E2E8F0' }}>{t('notifications.thTime', 'Time')}:</strong> {formatDateLabel(selectedNotif.created_at)}</div>
+                  <div><strong style={{ color: '#E2E8F0' }}>{t('notifications.thSeverity', 'Severity')}:</strong> {selectedNotif.severity || t('alerts.low', 'low')}</div>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
                   <button
@@ -546,7 +568,7 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                       cursor: 'pointer',
                     }}
                   >
-                    View Related Evidence
+                    {t('notifications.modalViewEvidence', 'View Related Evidence')}
                   </button>
                 </div>
               </div>
@@ -576,7 +598,7 @@ export function Notifications({ onNavigate, pageParams = {} }) {
               <div style={{ position: 'relative' }}>
                 <input
                   type="text"
-                  placeholder="Search recordings..."
+                  placeholder={t('recordings.searchPlaceholder', 'Search recordings...')}
                   value={recSearch}
                   onChange={(e) => setRecSearch(e.target.value)}
                   style={{
@@ -617,7 +639,7 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                   gap: 8,
                 }}
               >
-                <span>{recDate ? 'Nov 01, 2026' : 'Select Date'}</span>
+                <span>{recDate ? 'Nov 01, 2026' : t('recordings.selectDate', 'Select Date')}</span>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="2">
                   <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
                   <line x1="16" y1="2" x2="16" y2="6" />
@@ -773,8 +795,8 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                   <line x1="17" y1="17" x2="22" y2="17" />
                   <line x1="17" y1="7" x2="22" y2="7" />
                 </svg>
-                <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#E2E8F0' }}>No Recordings Found</div>
-                <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: 4 }}>Surveillance footage captures will appear here once recorded.</div>
+                <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#E2E8F0' }}>{t('recordings.noRecordings', 'No Recordings Found')}</div>
+                <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: 4 }}>{t('recordings.noRecordingsDesc', 'Surveillance footage captures will appear here once recorded.')}</div>
               </div>
             )}
           </div>
@@ -808,7 +830,7 @@ export function Notifications({ onNavigate, pageParams = {} }) {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <div style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: '0.95rem' }}>
-                    {activePlayback.filename || 'Playback'}
+                    {activePlayback.filename || t('recordings.playback', 'Playback')}
                   </div>
                   <button
                     onClick={() => setActivePlayback(null)}
@@ -849,10 +871,10 @@ export function Notifications({ onNavigate, pageParams = {} }) {
           {/* Filter Tabs matching Figure 7.1.9: All, Intrusion, Unusual, Others */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22, flexWrap: 'wrap' }}>
             {[
-              { id: 'all', label: `All (${evidenceList.length})` },
-              { id: 'intrusion', label: `Intrusion (${evidenceIntrusion.length})` },
-              { id: 'unusual', label: `Unusual (${evidenceUnusual.length})` },
-              { id: 'others', label: `Others (${evidenceOthers.length})` },
+              { id: 'all', label: `${t('evidence.tabAll', 'All')} (${evidenceList.length})` },
+              { id: 'intrusion', label: `${t('evidence.tabIntrusion', 'Intrusion')} (${evidenceIntrusion.length})` },
+              { id: 'unusual', label: `${t('evidence.tabUnusual', 'Unusual')} (${evidenceUnusual.length})` },
+              { id: 'others', label: `${t('evidence.tabOthers', 'Others')} (${evidenceOthers.length})` },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -928,11 +950,20 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                         <img
                           src={item.preview_url}
                           alt={filename}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          loading="lazy"
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            display: 'block',
+                            zIndex: 1,
+                          }}
                           onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         />
                       ) : null}
-                      {/* Stylized optical CCTV wireframe overlay */}
+                      {/* Stylized optical CCTV wireframe placeholder */}
                       <div
                         style={{
                           position: 'absolute',
@@ -941,6 +972,7 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                           alignItems: 'center',
                           justifyContent: 'center',
                           background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.9) 100%)',
+                          zIndex: 0,
                         }}
                       >
                         <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.2)" strokeWidth="1.5">
@@ -1015,8 +1047,8 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                 <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                 <circle cx="12" cy="13" r="4" />
               </svg>
-              <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#E2E8F0' }}>No Evidence Snapshots Found</div>
-              <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: 4 }}>Snapshots and clips captured during security incidents will appear here.</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#E2E8F0' }}>{t('evidence.noEvidence', 'No Evidence Snapshots Found')}</div>
+              <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: 4 }}>{t('evidence.noEvidenceDesc', 'Snapshots and clips captured during security incidents will appear here.')}</div>
             </div>
           )}
 
@@ -1049,7 +1081,7 @@ export function Notifications({ onNavigate, pageParams = {} }) {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <div style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: '0.95rem' }}>
-                    {activeEvidenceModal.file_name || activeEvidenceModal.title || 'Evidence Preview'}
+                    {activeEvidenceModal.file_name || activeEvidenceModal.title || t('evidence.snapshots', 'Evidence Preview')}
                   </div>
                   <button
                     onClick={() => setActiveEvidenceModal(null)}
@@ -1062,7 +1094,7 @@ export function Notifications({ onNavigate, pageParams = {} }) {
                   {activeEvidenceModal.preview_url ? (
                     <img src={activeEvidenceModal.preview_url} alt="Evidence" style={{ maxWidth: '100%', maxHeight: 500, objectFit: 'contain' }} />
                   ) : (
-                    <div style={{ color: '#94A3B8', padding: 40, textAlign: 'center' }}>Forensic Evidence Preview</div>
+                    <div style={{ color: '#94A3B8', padding: 40, textAlign: 'center' }}>{t('evidence.modalForensicDetails', 'Forensic Evidence Preview')}</div>
                   )}
                 </div>
               </div>

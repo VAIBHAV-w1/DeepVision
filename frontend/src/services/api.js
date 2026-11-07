@@ -172,6 +172,7 @@ export const api = {
     getTrackingStreamUrl: (id) => `${API_BASE_URL}/api/cameras/${id}/stream/tracking/`,
     getSnapshotUrl: (id) => `${API_BASE_URL}/api/cameras/${id}/snapshot/`,
     captureSnapshot: (id) => request(`/api/cameras/${id}/snapshot/`, { method: 'POST' }),
+    snapshot: (id) => request(`/api/cameras/${id}/snapshot/`, { method: 'POST' }),
     // Detection Rules, Presets & Security Zones
     getRules: (id) => request(`/api/cameras/${id}/rules/`),
     saveRules: (id, data) => request(`/api/cameras/${id}/rules/`, { method: 'POST', body: data }),

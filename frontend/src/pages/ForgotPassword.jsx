@@ -2,8 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { api } from '../services/api';
 import AuthLayout from '../layouts/AuthLayout';
 import { useToast } from '../components/common/Toast';
+import { useTranslation } from '../i18n/i18nContext';
 
 export function ForgotPassword({ onNavigate }) {
+  const { t } = useTranslation();
   // Step 1: email, Step 2: otp, Step 3: new password
   const [step, setStep] = useState(() => {
     try {
@@ -272,19 +274,19 @@ export function ForgotPassword({ onNavigate }) {
       {step === 1 && (
         <>
           <div className="auth-header">
-            <h2 className="auth-title">Reset Your Password</h2>
-            <p className="auth-subtitle">Enter your registered email address to receive password recovery instructions.</p>
+            <h2 className="auth-title">{t('auth.resetPasswordTitle', 'Reset Your Password')}</h2>
+            <p className="auth-subtitle">{t('auth.resetPasswordSubtitle', 'Enter your registered email address to receive password recovery instructions.')}</p>
           </div>
 
           <form onSubmit={handleEmailSubmit} noValidate>
             <div className="form-group">
-              <label className="form-label" htmlFor="email">Email Address</label>
+              <label className="form-label" htmlFor="email">{t('auth.email', 'Email Address')}</label>
               <input
                 type="email"
                 id="email"
                 name="email"
                 className="form-control"
-                placeholder="operator@deepvision.local"
+                placeholder={t('auth.emailPlaceholder', 'operator@deepvision.local')}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -298,17 +300,17 @@ export function ForgotPassword({ onNavigate }) {
               className="btn btn-primary btn-lg"
               style={{ width: '100%', marginTop: '0.5rem' }}
             >
-              {loading ? 'Sending...' : 'Send Recovery Email'}
+              {loading ? t('auth.sending', 'Sending...') : t('auth.sendResetLink', 'Send Recovery Email')}
             </button>
 
             <div className="auth-footer-text">
-              Remember your credentials?{' '}
+              {t('auth.alreadyHaveAccount', 'Remember your credentials? ')}{' '}
               <a
                 href="#login"
                 onClick={(e) => { e.preventDefault(); onNavigate('login'); }}
                 style={{ fontWeight: 600 }}
               >
-                Back to sign in
+                {t('auth.backToSignIn', 'Back to sign in')}
               </a>
             </div>
           </form>
@@ -318,9 +320,9 @@ export function ForgotPassword({ onNavigate }) {
       {step === 2 && (
         <>
           <div className="auth-header">
-            <h2 className="auth-title">Reset Verification Code</h2>
+            <h2 className="auth-title">{t('auth.resetPasswordTitle', 'Reset Verification Code')}</h2>
             <p className="auth-subtitle">
-              Enter the 6-digit recovery code sent to<br />
+              {t('auth.enterOtp', 'Enter the 6-digit recovery code sent to')}<br />
               <strong style={{ color: 'var(--text-main)', fontFamily: 'var(--font-mono)', fontSize: '0.95rem' }}>
                 {email}
               </strong>
@@ -330,7 +332,7 @@ export function ForgotPassword({ onNavigate }) {
           <form onSubmit={handleOtpSubmit} id="reset-otp-form" noValidate>
             <div className="form-group" style={{ marginBottom: '0.75rem' }}>
               <label className="form-label" style={{ textAlign: 'center', display: 'block', marginBottom: '0.25rem' }}>
-                Enter 6-Digit Code
+                {t('login.otpLabel', 'Enter 6-Digit Code')}
               </label>
 
               <div className="otp-boxes-grid" id="otpBoxes">
@@ -362,13 +364,13 @@ export function ForgotPassword({ onNavigate }) {
               id="btn-verify"
               style={{ width: '100%', marginTop: '0.25rem' }}
             >
-              Verify Code
+              {t('auth.verifyCode', 'Verify Code')}
             </button>
           </form>
 
           {/* Resend Action with Cooldown Timer */}
           <div style={{ marginTop: '1.5rem', textAlign: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '1.25rem' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Didn't receive code? </span>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{t('auth.didntReceiveCode', "Didn't receive code? ")}</span>
             {cooldown > 0 ? (
               <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                 Please wait <strong style={{ color: 'var(--color-primary)' }}>{cooldown}s</strong> before requesting another code
@@ -389,7 +391,7 @@ export function ForgotPassword({ onNavigate }) {
                   padding: '0 0.35rem',
                 }}
               >
-                {resending ? 'Sending...' : 'Resend Code'}
+                {resending ? t('auth.sending', 'Sending...') : t('auth.resend', 'Resend Code')}
               </button>
             )}
           </div>
@@ -399,13 +401,13 @@ export function ForgotPassword({ onNavigate }) {
       {step === 3 && (
         <>
           <div className="auth-header">
-            <h2 className="auth-title">Set New Password</h2>
-            <p className="auth-subtitle">Create a secure new password for your account.</p>
+            <h2 className="auth-title">{t('auth.resetPasswordTitle', 'Set New Password')}</h2>
+            <p className="auth-subtitle">{t('auth.resetPasswordSubtitle', 'Create a secure new password for your account.')}</p>
           </div>
 
           <form onSubmit={handleResetSubmit} id="reset-pw-form" noValidate>
             <div className="form-group">
-              <label className="form-label" htmlFor="password">New Password</label>
+              <label className="form-label" htmlFor="password">{t('auth.password', 'New Password')}</label>
               <div style={{ position: 'relative' }}>
                 <input
                   type={showPassword ? 'text' : 'password'}
@@ -457,7 +459,7 @@ export function ForgotPassword({ onNavigate }) {
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="confirm_password">Confirm New Password</label>
+              <label className="form-label" htmlFor="confirm_password">{t('auth.confirmPassword', 'Confirm New Password')}</label>
               <div style={{ position: 'relative' }}>
                 <input
                   type={showConfirmPassword ? 'text' : 'password'}
@@ -496,7 +498,7 @@ export function ForgotPassword({ onNavigate }) {
               </div>
               {passwordsMatch !== null && (
                 <span style={{ fontSize: '0.74rem', marginTop: '0.2rem', display: 'block', color: passwordsMatch ? '#10b981' : '#ef4444' }}>
-                  {passwordsMatch ? '✓ Passwords match' : '✕ Passwords do not match'}
+                  {passwordsMatch ? `✓ ${t('auth.passwordsMatch', 'Passwords match')}` : `✕ ${t('auth.passwordsDoNotMatch', 'Passwords do not match')}`}
                 </span>
               )}
             </div>
@@ -507,7 +509,7 @@ export function ForgotPassword({ onNavigate }) {
               className="btn btn-primary btn-lg"
               style={{ width: '100%', marginTop: '0.5rem' }}
             >
-              {loading ? 'Updating Password...' : 'Update Password & Sign In'}
+              {loading ? t('auth.sending', 'Updating Password...') : t('auth.resetPasswordTitle', 'Update Password & Sign In')}
             </button>
           </form>
         </>

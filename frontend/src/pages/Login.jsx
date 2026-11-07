@@ -126,6 +126,11 @@ export function Login({ onNavigate, onNeedsVerification }) {
     }
   };
 
+  useEffect(() => {
+    const brand = t('brand.name', 'DeepVision');
+    document.title = `${brand} — ${t('auth.loginTitle', 'Sign In to DeepVision')}`;
+  }, [t]);
+
   return (
     <div
       className="deepvision-auth-page"
@@ -193,13 +198,17 @@ export function Login({ onNavigate, onNeedsVerification }) {
                 boxShadow: '0 0 16px rgba(0, 201, 255, 0.5)',
               }}
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.2">
-                <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" />
-                <circle cx="12" cy="12" r="3" stroke="#00F5D4" strokeWidth="2" />
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-label="DeepVision Surveillance Camera Emblem">
+                <path d="M4 17.5v3.5h5" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2.5 7.5h13l4.5 3" stroke="#00F5D4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2.5 9h11.5l4 3v3l-4 3H2.5a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 2.5 9z" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="7.5" cy="13.5" r="2.2" stroke="#00F5D4" strokeWidth="1.8" />
+                <circle cx="7.5" cy="13.5" r="0.8" fill="#00F5D4" />
+                <line x1="19.5" y1="13.5" x2="22.5" y2="13.5" stroke="#00F5D4" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </div>
             <span style={{ fontSize: '1.4rem', fontWeight: 800, color: '#FFFFFF', letterSpacing: '-0.02em' }}>
-              DeepVision
+              {t('brand.name', 'DeepVision')}
             </span>
           </div>
 
@@ -277,7 +286,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
               margin: '0 0 10px 0',
             }}
           >
-            AI-Based Intelligent Surveillance System
+            {t('auth.brandTitle', 'AI-Based Intelligent Surveillance System')}
           </h1>
           <p
             style={{
@@ -287,7 +296,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
               margin: '0 0 2rem 0',
             }}
           >
-            Real-time monitoring, object detection, tracking and intelligent security.
+            {t('auth.brandSubtitle', 'Real-time monitoring, object detection, tracking and intelligent security.')}
           </p>
 
           {/* 4 Feature Badges in horizontal row matching Figure 7.1.1 */}
@@ -302,7 +311,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
           >
             {[
               {
-                title: 'Live Monitoring',
+                title: t('auth.liveMonitoring', 'Live Monitoring'),
                 icon: (
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" strokeWidth="2">
                     <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
@@ -312,7 +321,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                 ),
               },
               {
-                title: 'Object Detection',
+                title: t('auth.objectDetection', 'Object Detection'),
                 icon: (
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" strokeWidth="2">
                     <circle cx="12" cy="12" r="10" />
@@ -324,7 +333,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                 ),
               },
               {
-                title: 'Anomaly Detection',
+                title: t('auth.anomalyDetection', 'Anomaly Detection'),
                 icon: (
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" strokeWidth="2">
                     <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
@@ -334,7 +343,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                 ),
               },
               {
-                title: 'Security Alerts',
+                title: t('auth.securityAlerts', 'Security Alerts'),
                 icon: (
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" strokeWidth="2">
                     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -376,7 +385,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
             backdropFilter: 'blur(16px)',
           }}
         >
-          {/* Top Shield Emblem */}
+          {/* Top Surveillance Camera Emblem */}
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.25rem' }}>
             <div
               style={{
@@ -390,9 +399,13 @@ export function Login({ onNavigate, onNeedsVerification }) {
                 boxShadow: '0 0 20px rgba(0, 201, 255, 0.45)',
               }}
             >
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.2">
-                <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" />
-                <circle cx="12" cy="12" r="3" stroke="#00F5D4" strokeWidth="2" />
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-label="DeepVision Surveillance Camera Emblem">
+                <path d="M4 17.5v3.5h5" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2.5 7.5h13l4.5 3" stroke="#00F5D4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2.5 9h11.5l4 3v3l-4 3H2.5a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 2.5 9z" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="7.5" cy="13.5" r="2.2" stroke="#00F5D4" strokeWidth="1.8" />
+                <circle cx="7.5" cy="13.5" r="0.8" fill="#00F5D4" />
+                <line x1="19.5" y1="13.5" x2="22.5" y2="13.5" stroke="#00F5D4" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </div>
           </div>
@@ -407,7 +420,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
               letterSpacing: '-0.02em',
             }}
           >
-            Welcome to DeepVision
+            {t('auth.welcomeTitle', 'Welcome to DeepVision')}
           </h2>
           <p
             style={{
@@ -417,7 +430,9 @@ export function Login({ onNavigate, onNeedsVerification }) {
               margin: '0 0 1.75rem 0',
             }}
           >
-            {step === 'credentials' ? 'Sign in to your account' : 'Enter 6-digit verification code'}
+            {step === 'credentials'
+              ? t('auth.welcomeSubtitle', 'Sign in to your account')
+              : t('auth.enterOtp', 'Enter 6-digit verification code')}
           </p>
 
           {error && (
@@ -461,7 +476,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="vaibhav@deepvision.ai"
+                    placeholder={t('auth.emailPlaceholder', 'vaibhav@deepvision.ai')}
                     required
                     style={{
                       background: 'transparent',
@@ -497,7 +512,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder={t('auth.passwordPlaceholder', '••••••••')}
                     required
                     style={{
                       background: 'transparent',
@@ -543,7 +558,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                     onChange={(e) => setRemember(e.target.checked)}
                     style={{ accentColor: '#2563EB', cursor: 'pointer' }}
                   />
-                  <span>Remember me</span>
+                  <span>{t('auth.rememberMe', 'Remember me')}</span>
                 </label>
                 <a
                   href="#forgot-password"
@@ -554,7 +569,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                   }}
                   style={{ color: '#38BDF8', textDecoration: 'none', fontWeight: 600 }}
                 >
-                  Forgot password?
+                  {t('auth.forgotPassword', 'Forgot password?')}
                 </a>
               </div>
 
@@ -587,13 +602,13 @@ export function Login({ onNavigate, onNeedsVerification }) {
                   if (!loading) e.currentTarget.style.backgroundColor = '#2563EB';
                 }}
               >
-                <span>{loading ? 'Signing In...' : 'Sign In'}</span>
+                <span>{loading ? t('auth.signingIn', 'Signing In...') : t('auth.signIn', 'Sign In')}</span>
                 <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>→</span>
               </button>
 
               {/* Create Account Link Footer */}
               <div style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.84rem', color: '#94A3B8' }}>
-                <span>Don't have an account? </span>
+                <span>{t('auth.dontHaveAccount', "Don't have an account?")} </span>
                 <a
                   href="#signup"
                   onClick={(e) => {
@@ -603,7 +618,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                   }}
                   style={{ color: '#38BDF8', textDecoration: 'none', fontWeight: 700 }}
                 >
-                  Create Account
+                  {t('auth.createAccount', 'Create Account')}
                 </a>
               </div>
             </form>
@@ -651,7 +666,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
                   marginTop: '0.5rem',
                 }}
               >
-                {loading ? 'Verifying...' : 'Verify Code'}
+                {loading ? t('auth.verifying', 'Verifying...') : t('auth.verifyCode', 'Verify Code')}
               </button>
             </form>
           )}

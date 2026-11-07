@@ -72,11 +72,11 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
             className="form-select"
             style={{ width: 'auto', height: '38px', fontSize: '0.84rem', padding: '0.2rem 1.8rem 0.2rem 0.8rem' }}
           >
-            <option value="">All Statuses</option>
-            <option value="OPEN">Open</option>
-            <option value="INVESTIGATING">Investigating</option>
-            <option value="RESOLVED">Resolved</option>
-            <option value="CLOSED">Closed</option>
+            <option value="">{t('filters.allStatuses', 'All Statuses')}</option>
+            <option value="OPEN">{t('cases.open', 'Open')}</option>
+            <option value="INVESTIGATING">{t('cases.investigating', 'Investigating')}</option>
+            <option value="RESOLVED">{t('alerts.resolved', 'Resolved')}</option>
+            <option value="CLOSED">{t('cases.closed', 'Closed')}</option>
           </select>
 
           {/* Priority Filter */}
@@ -86,11 +86,11 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
             className="form-select"
             style={{ width: 'auto', height: '38px', fontSize: '0.84rem', padding: '0.2rem 1.8rem 0.2rem 0.8rem' }}
           >
-            <option value="">All Priorities</option>
-            <option value="CRITICAL">Critical</option>
-            <option value="HIGH">High</option>
-            <option value="MEDIUM">Medium</option>
-            <option value="LOW">Low</option>
+            <option value="">{t('filters.allPriorities', 'All Priorities')}</option>
+            <option value="CRITICAL">{t('alerts.critical', 'Critical')}</option>
+            <option value="HIGH">{t('alerts.high', 'High')}</option>
+            <option value="MEDIUM">{t('alerts.medium', 'Medium')}</option>
+            <option value="LOW">{t('alerts.low', 'Low')}</option>
           </select>
 
           {/* Search Input */}
@@ -99,7 +99,7 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search case number or title..."
+              placeholder={t('cases.searchPlaceholder', 'Search cases...')}
               className="form-control"
               style={{ height: '38px', fontSize: '0.84rem', paddingLeft: '2.2rem' }}
             />
@@ -109,7 +109,7 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
             </svg>
           </div>
 
-          <button type="submit" className="btn btn-secondary btn-sm" style={{ height: '38px' }}>Filter</button>
+          <button type="submit" className="btn btn-secondary btn-sm" style={{ height: '38px' }}>{t('common.filter', 'Filter')}</button>
           {(status || priority || alertId || search) && (
             <button
               type="button"
@@ -117,13 +117,13 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
               className="btn btn-ghost btn-sm"
               style={{ height: '38px' }}
             >
-              Reset
+              {t('common.reset', 'Reset')}
             </button>
           )}
         </form>
 
         <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-          Total Registered Cases: <strong style={{ color: 'var(--text-main)' }}>{totalCount}</strong>
+          {t('cases.totalRegistered', 'Total Registered Cases')}: <strong style={{ color: 'var(--text-main)' }}>{totalCount}</strong>
         </div>
       </div>
 
@@ -133,13 +133,13 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
           <table className="cctv-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-surface-raised)' }}>
-                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>Case Number</th>
-                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>Title &amp; Summary</th>
-                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>Priority</th>
-                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>Status</th>
-                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>Investigator</th>
-                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>Created Time</th>
-                <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Action</th>
+                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>{t('cases.caseNumberCol', 'Case Number')}</th>
+                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>{t('cases.titleSummary', 'Title & Summary')}</th>
+                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>{t('cases.priorityCol', 'Priority')}</th>
+                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>{t('cases.statusCol', 'Status')}</th>
+                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>{t('cases.investigatorCol', 'Investigator')}</th>
+                <th style={{ padding: '0.75rem 1rem', textAlignment: 'left' }}>{t('cases.createdTimeCol', 'Created Time')}</th>
+                <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>{t('common.actions', 'Action')}</th>
               </tr>
             </thead>
             <tbody>
@@ -167,7 +167,7 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
                     </span>
                   </td>
                   <td style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)' }}>
-                    {c.assigned_to || 'Unassigned'}
+                    {c.assigned_to || t('cases.unassigned', 'Unassigned')}
                   </td>
                   <td style={{ padding: '0.75rem 1rem', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     {formatDate(c.created_at)}
@@ -179,7 +179,7 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
                       className="btn btn-secondary btn-sm"
                       style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
                     >
-                      Inspect
+                      {t('cases.inspect', 'Inspect')}
                     </button>
                   </td>
                 </tr>
@@ -190,7 +190,7 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
       ) : (
         <div className="empty-state-card" style={{ textAlign: 'center', padding: '4rem 1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)' }}>
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-            {loading ? 'Retrieving active forensic cases...' : 'No incident cases registered in system.'}
+            {loading ? t('cases.loadingCases', 'Retrieving active forensic cases...') : t('cases.noCases', 'No incident cases registered in system.')}
           </p>
         </div>
       )}

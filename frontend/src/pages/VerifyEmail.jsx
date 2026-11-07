@@ -2,8 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { api } from '../services/api';
 import AuthLayout from '../layouts/AuthLayout';
 import { useToast } from '../components/common/Toast';
+import { useTranslation } from '../i18n/i18nContext';
 
 export function VerifyEmail({ email, onVerified, onNavigate, deliveryWarning = false }) {
+  const { t } = useTranslation();
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
@@ -104,9 +106,9 @@ export function VerifyEmail({ email, onVerified, onNavigate, deliveryWarning = f
   return (
     <AuthLayout>
       <div className="auth-header">
-        <h2 className="auth-title">Verify Your Email</h2>
+        <h2 className="auth-title">{t('auth.verifyEmailTitle', 'Verify Your Email')}</h2>
         <p className="auth-subtitle">
-          Enter the 6-digit code sent to<br />
+          {t('auth.enterOtp', 'Enter the 6-digit code sent to')}<br />
           <strong style={{ color: 'var(--text-main)', fontFamily: 'var(--font-mono)', fontSize: '0.95rem' }}>
             {email}
           </strong>
@@ -128,7 +130,7 @@ export function VerifyEmail({ email, onVerified, onNavigate, deliveryWarning = f
       <form onSubmit={handleVerify} id="otp-form" noValidate>
         <div className="form-group" style={{ marginBottom: '0.75rem' }}>
           <label className="form-label" style={{ textAlign: 'center', display: 'block', marginBottom: '0.25rem' }}>
-            Enter 6-Digit Code
+            {t('login.otpLabel', 'Enter 6-Digit Code')}
           </label>
 
           <div className="otp-boxes-grid" id="otpBoxes">
@@ -160,13 +162,13 @@ export function VerifyEmail({ email, onVerified, onNavigate, deliveryWarning = f
           id="btn-verify"
           style={{ width: '100%', marginTop: '0.25rem' }}
         >
-          {loading ? 'Verifying...' : 'Verify Code'}
+          {loading ? t('auth.verifying', 'Verifying...') : t('auth.verifyCode', 'Verify Code')}
         </button>
       </form>
 
       {/* Resend OTP Action with Cooldown Timer */}
       <div style={{ marginTop: '1.5rem', textAlign: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '1.25rem' }}>
-        <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Didn't receive it? </span>
+        <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{t('auth.didntReceiveCode', "Didn't receive it? ")}</span>
         {cooldown > 0 ? (
           <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
             Please wait <strong style={{ color: 'var(--color-primary)' }}>{cooldown}s</strong> before requesting another code
@@ -187,7 +189,7 @@ export function VerifyEmail({ email, onVerified, onNavigate, deliveryWarning = f
               padding: '0 0.35rem',
             }}
           >
-            {resending ? 'Sending...' : 'Resend Code'}
+            {resending ? t('auth.sending', 'Sending...') : t('auth.resend', 'Resend Code')}
           </button>
         )}
       </div>
@@ -199,7 +201,7 @@ export function VerifyEmail({ email, onVerified, onNavigate, deliveryWarning = f
           onClick={(e) => { e.preventDefault(); onNavigate('signup'); }}
           style={{ fontWeight: 600 }}
         >
-          Sign up with another email
+          {t('auth.createAccount', 'Sign up with another email')}
         </a>
       </div>
     </AuthLayout>

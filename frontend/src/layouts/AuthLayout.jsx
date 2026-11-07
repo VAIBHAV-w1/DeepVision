@@ -1,8 +1,16 @@
 import React from 'react';
 import LanguageSelector from '../components/common/LanguageSelector';
 import ThemeToggle from '../components/common/ThemeToggle';
+import { useTranslation } from '../i18n/i18nContext';
 
 export function AuthLayout({ children }) {
+  const { t } = useTranslation();
+
+  React.useEffect(() => {
+    const brand = t('brand.name', 'DeepVision');
+    document.title = `${brand} — ${t('brand.tagline', 'AI-Based Intelligent Surveillance System')}`;
+  }, [t]);
+
   return (
     <div
       className="auth-split-wrapper"
@@ -74,27 +82,32 @@ export function AuthLayout({ children }) {
 
         {/* Content Container */}
         <div style={{ maxWidth: '460px', width: '100%', textAlign: 'left', zIndex: 2 }}>
-          {/* Logo Brand Header */}
+          {/* Logo Brand Header matching canonical DeepVision surveillance camera identity */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '2.5rem' }}>
             <div
               style={{
                 width: '42px',
                 height: '42px',
                 borderRadius: '10px',
-                background: 'linear-gradient(135deg, #2563eb, #38bdf8)',
+                background: 'linear-gradient(135deg, #00C9FF 0%, #0072FF 100%)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 4px 16px rgba(37, 99, 235, 0.45)',
+                boxShadow: '0 0 16px rgba(0, 201, 255, 0.45)',
+                flexShrink: 0,
               }}
             >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2">
-                <path d="M23 7l-7 5 7 5V7z" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-label="DeepVision Surveillance Camera Emblem">
+                <path d="M4 17.5v3.5h5" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2.5 7.5h13l4.5 3" stroke="#00F5D4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2.5 9h11.5l4 3v3l-4 3H2.5a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 2.5 9z" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="7.5" cy="13.5" r="2.2" stroke="#00F5D4" strokeWidth="1.8" />
+                <circle cx="7.5" cy="13.5" r="0.8" fill="#00F5D4" />
+                <line x1="19.5" y1="13.5" x2="22.5" y2="13.5" stroke="#00F5D4" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </div>
-            <span style={{ fontSize: '1.85rem', fontWeight: 800, letterSpacing: '-0.03em', color: '#fff' }}>
-              DeepVision
+            <span style={{ fontSize: '1.85rem', fontWeight: 800, letterSpacing: '-0.03em', color: '#FFFFFF' }}>
+              {t('brand.name', 'DeepVision')}
             </span>
           </div>
 
@@ -183,9 +196,9 @@ export function AuthLayout({ children }) {
               letterSpacing: '-0.02em',
             }}
           >
-            AI-Based Intelligent
+            {t('login.brandSubtitle1', 'AI-Based Intelligent')}
             <br />
-            Surveillance System
+            {t('login.brandSubtitle2', 'Surveillance System')}
           </h2>
 
           {/* Four feature pills matching Figure 7.1.1 */}
@@ -204,7 +217,7 @@ export function AuthLayout({ children }) {
                 fontWeight: 600,
               }}
             >
-              <span style={{ color: '#38BDF8' }}>📷</span> Real-time Monitoring
+              <span style={{ color: '#38BDF8' }}>📷</span> {t('login.featureLiveMonitoring', 'Live Monitoring')}
             </div>
             <div
               style={{
@@ -220,7 +233,7 @@ export function AuthLayout({ children }) {
                 fontWeight: 600,
               }}
             >
-              <span style={{ color: '#10B981' }}>🔍</span> Object Detection
+              <span style={{ color: '#10B981' }}>🔍</span> {t('login.featureObjectDetection', 'Object Detection')}
             </div>
             <div
               style={{
@@ -236,7 +249,7 @@ export function AuthLayout({ children }) {
                 fontWeight: 600,
               }}
             >
-              <span style={{ color: '#F59E0B' }}>⚡</span> Anomaly Detection
+              <span style={{ color: '#F59E0B' }}>⚡</span> {t('login.featureAnomalyDetection', 'Anomaly Detection')}
             </div>
             <div
               style={{
@@ -252,7 +265,7 @@ export function AuthLayout({ children }) {
                 fontWeight: 600,
               }}
             >
-              <span style={{ color: '#EF4444' }}>🚨</span> Security Alerts
+              <span style={{ color: '#EF4444' }}>🚨</span> {t('login.featureSecurityAlerts', 'Security Alerts')}
             </div>
           </div>
         </div>

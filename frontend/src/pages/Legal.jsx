@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from '../i18n/i18nContext';
 
 export function Legal({ initialTab = 'privacy', onNavigate }) {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState(initialTab);
 
   useEffect(() => {
@@ -14,13 +16,13 @@ export function Legal({ initialTab = 'privacy', onNavigate }) {
       {/* Header */}
       <div style={{ marginBottom: '1.75rem' }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#10b981', padding: '4px 12px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', marginBottom: '8px' }}>
-          <span>SECURITY &amp; COMPLIANCE DISCLOSURE</span>
+          <span>{t('legal.compliance', 'SECURITY & COMPLIANCE DISCLOSURE')}</span>
         </div>
         <h1 style={{ fontSize: '1.65rem', fontWeight: 700, margin: '2px 0 6px 0', letterSpacing: '-0.02em', color: 'var(--text-main)' }}>
-          Legal, Privacy &amp; Operational Governance
+          {t('legal.title', 'Legal, Privacy & Operational Governance')}
         </h1>
         <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: 0 }}>
-          Authoritative technical specifications for surveillance media retention, telemetry handling, and service conditions.
+          {t('legal.subtitle', 'Authoritative technical specifications for surveillance media retention, telemetry handling, and service conditions.')}
         </p>
       </div>
 
@@ -40,7 +42,7 @@ export function Legal({ initialTab = 'privacy', onNavigate }) {
             fontSize: '0.88rem'
           }}
         >
-          Privacy Policy
+          {t('legal.privacyTab', 'Privacy Policy')}
         </button>
         <button
           type="button"
@@ -56,7 +58,7 @@ export function Legal({ initialTab = 'privacy', onNavigate }) {
             fontSize: '0.88rem'
           }}
         >
-          Terms of Service
+          {t('legal.termsTab', 'Terms of Service')}
         </button>
         <button
           type="button"
@@ -72,7 +74,7 @@ export function Legal({ initialTab = 'privacy', onNavigate }) {
             fontSize: '0.88rem'
           }}
         >
-          Cookies &amp; Local Storage
+          {t('legal.cookiesTab', 'Cookies & Local Storage')}
         </button>
       </div>
 
@@ -156,10 +158,10 @@ export function Legal({ initialTab = 'privacy', onNavigate }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-secondary)' }}>
-                  <th style={{ padding: '8px 12px' }}>Key / Cookie</th>
-                  <th style={{ padding: '8px 12px' }}>Type</th>
-                  <th style={{ padding: '8px 12px' }}>Purpose</th>
-                  <th style={{ padding: '8px 12px' }}>Lifespan</th>
+                  <th style={{ padding: '8px 12px' }}>{t('legal.colKey', 'Key / Cookie')}</th>
+                  <th style={{ padding: '8px 12px' }}>{t('legal.colType', 'Type')}</th>
+                  <th style={{ padding: '8px 12px' }}>{t('legal.colPurpose', 'Purpose')}</th>
+                  <th style={{ padding: '8px 12px' }}>{t('legal.colLifespan', 'Lifespan')}</th>
                 </tr>
               </thead>
               <tbody>

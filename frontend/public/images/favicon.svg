@@ -1,15 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
-  <!-- Outer Hexagonal Reticle -->
-  <polygon points="24,3 41,13 41,35 24,45 7,35 7,13" stroke="#10b981" stroke-width="3" stroke-linejoin="round" fill="#080c14" />
-  <!-- Optical Ring -->
-  <circle cx="24" cy="24" r="13" stroke="#94a3b8" stroke-width="2" stroke-dasharray="4 2" />
-  <!-- Inner Aperture Ring -->
-  <circle cx="24" cy="24" r="7.5" stroke="#10b981" stroke-width="2.5" fill="#10b981" fill-opacity="0.2" />
-  <!-- Central Pupil / Focal Point -->
-  <circle cx="24" cy="24" r="3.5" fill="#10b981" />
-  <!-- Reticle Crosshair Ticks -->
-  <line x1="24" y1="5" x2="24" y2="10" stroke="#10b981" stroke-width="3" stroke-linecap="round" />
-  <line x1="24" y1="38" x2="24" y2="43" stroke="#10b981" stroke-width="3" stroke-linecap="round" />
-  <line x1="9" y1="24" x2="14" y2="24" stroke="#10b981" stroke-width="3" stroke-linecap="round" />
-  <line x1="34" y1="24" x2="39" y2="24" stroke="#10b981" stroke-width="3" stroke-linecap="round" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" width="32" height="32">
+  <defs>
+    <linearGradient id="cctvGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00C9FF"/>
+      <stop offset="100%" stop-color="#0072FF"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="url(#cctvGrad)"/>
+  <g transform="translate(4, 4)">
+    <path d="M4 17.5v3.5h5" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M2.5 7.5h13l4.5 3" stroke="#00F5D4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M2.5 9h11.5l4 3v3l-4 3H2.5a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 2.5 9z" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="7.5" cy="13.5" r="2.2" stroke="#00F5D4" stroke-width="1.8"/>
+    <circle cx="7.5" cy="13.5" r="0.8" fill="#00F5D4"/>
+    <line x1="19.5" y1="13.5" x2="22.5" y2="13.5" stroke="#00F5D4" stroke-width="2" stroke-linecap="round"/>
+  </g>
 </svg>

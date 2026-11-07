@@ -1,0 +1,79 @@
+{
+  "totalKeys": {
+    "en": 598,
+    "hi": 598,
+    "kn": 598
+  },
+  "missingInHi": [],
+  "missingInKn": [],
+  "emptyTranslations": [],
+  "usedKeys": {},
+  "unregisteredKeys": [],
+  "pageAudits": {
+    "frontend/src/pages/Login.jsx": {
+      "totalTCalls": 46,
+      "untranslatedNodes": []
+    },
+    "frontend/src/pages/Dashboard.jsx": {
+      "totalTCalls": 43,
+      "untranslatedNodes": []
+    },
+    "frontend/src/pages/Cameras.jsx": {
+      "totalTCalls": 104,
+      "untranslatedNodes": []
+    },
+    "frontend/src/pages/Notifications.jsx": {
+      "totalTCalls": 84,
+      "untranslatedNodes": []
+    },
+    "frontend/src/pages/Settings.jsx": {
+      "totalTCalls": 56,
+      "untranslatedNodes": []
+    },
+    "frontend/src/pages/Help.jsx": {
+      "totalTCalls": 23,
+      "untranslatedNodes": []
+    },
+    "frontend/src/pages/Signup.jsx": {
+      "totalTCalls": 31,
+      "untranslatedNodes": []
+    },
+    "frontend/src/pages/VerifyEmail.jsx": {
+      "totalTCalls": 18,
+      "untranslatedNodes": []
+    },
+    "frontend/src/pages/ForgotPassword.jsx": {
+      "totalTCalls": 46,
+      "untranslatedNodes": []
+    },
+    "frontend/src/pages/Legal.jsx": {
+      "totalTCalls": 11,
+      "untranslatedNodes": [
+        "deepvision_django_session",
+        "HTTP Cookie (Signed)",
+        "Maintains operator authenticated session state",
+        "Session / 14 Days",
+        "csrftoken",
+        "HTTP Cookie",
+        "Cross-Site Request Forgery (CSRF) protection token",
+        "1 Year",
+        "deepvision_theme",
+        "localStorage",
+        "Stores operator theme choice ('dark', 'light', 'system')",
+        "Persistent",
+        "deepvision_lang",
+        "localStorage",
+        "Stores selected operator interface language (22 languages)",
+        "Persistent"
+      ]
+    },
+    "frontend/src/layouts/AppLayout.jsx": {
+      "totalTCalls": 33,
+      "untranslatedNodes": []
+    },
+    "frontend/src/layouts/AuthLayout.jsx": {
+      "totalTCalls": 15,
+      "untranslatedNodes": []
+    }
+  }
+}

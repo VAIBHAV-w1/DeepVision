@@ -43,19 +43,38 @@ export function Dashboard({ onNavigate }) {
 
   // Genuine Recent Events list from backend
   const recentEvents = (stats?.recent_alerts || []).slice(0, 5).map((a) => {
-    let relativeTime = 'Just now';
+    let relativeTime = t('dashboard.justNow', 'Just now');
     if (a.detected_at) {
       try {
         const diffMs = Date.now() - new Date(a.detected_at).getTime();
         const diffMin = Math.max(1, Math.floor(diffMs / 60000));
-        relativeTime = diffMin < 60 ? `${diffMin} min ago` : `${Math.floor(diffMin / 60)}h ago`;
+        relativeTime = diffMin < 60
+          ? t('dashboard.minAgo', '{count} min ago', { count: diffMin })
+          : t('dashboard.hAgo', '{count}h ago', { count: Math.floor(diffMin / 60) });
       } catch (_) {
-        relativeTime = 'Recent';
+        relativeTime = t('dashboard.recent', 'Recent');
       }
     }
+
+    let title = a.title || 'Security Event Detected';
+    const lower = (a.title || a.event_type || '').toLowerCase();
+    if (lower.includes('intrusion') || lower.includes('restricted')) {
+      title = t('dashboard.intrusionDetected', 'Intrusion Detected');
+    } else if (lower.includes('unusual') || lower.includes('fall')) {
+      title = t('dashboard.unusualActivity', 'Unusual Activity');
+    } else if (lower.includes('person') || lower.includes('loitering')) {
+      title = t('dashboard.personDetected', 'Person Detected');
+    } else if (lower.includes('motion') || lower.includes('movement')) {
+      title = t('dashboard.motionDetected', 'Motion Detected');
+    } else if (lower.includes('object') || lower.includes('bag')) {
+      title = t('dashboard.objectLeft', 'Object Left (Bag)');
+    } else {
+      title = t('dashboard.securityEventDetected', 'Security Event Detected');
+    }
+
     return {
       id: a.id,
-      title: a.title || (a.event_type ? a.event_type.replace(/_/g, ' ') : 'Security Event'),
+      title,
       camera: a.camera_name || (a.camera_id ? `Cam-0${a.camera_id}` : 'System'),
       time: a.relative_time || relativeTime,
       severity: (a.severity || 'medium').toLowerCase(),
@@ -67,6 +86,28 @@ export function Dashboard({ onNavigate }) {
   const circumference = 2 * Math.PI * radius;
   const onlineStroke = (onlinePct / 100) * circumference;
   const offlineStroke = circumference - onlineStroke;
+
+  const formatEventTitle = (rawTitle) => {
+    if (!rawTitle) return t('notifications.modalAlertDetails', 'Security Alert');
+    const s = String(rawTitle).trim();
+    const l = s.toLowerCase();
+    if (l.includes('unusual movement')) return t('alerts.unusualMovementPerson', 'Unusual Movement Detected (Person)');
+    if (l.includes('loitering')) return t('alerts.loiteringPerson', 'Loitering Detected (Person)');
+    if (l.includes('unusual activity')) return t('alerts.unusualActivityPerson', 'Unusual Activity Detected (Person)');
+    if (l.includes('intrusion')) return t('dashboard.intrusionDetected', 'Intrusion Detected');
+    if (l.includes('person detected')) return t('alerts.personDetected', 'Person Detected');
+    if (l.includes('object left') || l.includes('bag')) return t('alerts.objectLeftBag', 'Object Left (Bag)');
+    if (l.includes('motion detected') || l.includes('motion')) return t('alerts.motionDetected', 'Motion Detected');
+    if (l.includes('fall')) return t('dashboard.fallDetected', 'Fall Detected');
+    return s;
+  };
+
+  const formatCameraName = (rawName) => {
+    if (!rawName) return 'Cam-01';
+    const s = String(rawName).trim();
+    if (s.toLowerCase() === 'webcam 0') return t('cameras.webcam0', 'Webcam 0');
+    return s;
+  };
 
   const handleNavigateCameras = () => {
     if (onNavigate) onNavigate('cameras');
@@ -392,7 +433,7 @@ export function Dashboard({ onNavigate }) {
                   {onlinePct}%
                 </span>
                 <span style={{ fontSize: '0.72rem', color: '#10B981', fontWeight: 700, marginTop: '2px' }}>
-                  Online
+                  {t('common.online', 'Online')}
                 </span>
               </div>
             </div>
@@ -402,13 +443,13 @@ export function Dashboard({ onNavigate }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#10B981' }} />
                 <span style={{ fontSize: '0.88rem', color: '#CBD5E1', fontWeight: 600 }}>
-                  Online ({onlineCameras})
+                  {t('dashboard.onlineCount', 'Online ({count})', { count: onlineCameras })}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#EF4444' }} />
                 <span style={{ fontSize: '0.88rem', color: '#CBD5E1', fontWeight: 600 }}>
-                  Offline ({offlineCameras})
+                  {t('dashboard.offlineCount', 'Offline ({count})', { count: offlineCameras })}
                 </span>
               </div>
             </div>
@@ -444,7 +485,7 @@ export function Dashboard({ onNavigate }) {
                 padding: 0,
               }}
             >
-              View All
+              {t('dashboard.viewAll', 'View All')}
             </button>
           </div>
 
@@ -496,13 +537,13 @@ export function Dashboard({ onNavigate }) {
                       </span>
                     )}
                     <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#F8FAFC' }}>
-                      {ev.title}
+                      {formatEventTitle(ev.title)}
                     </span>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <span style={{ fontSize: '0.82rem', color: '#94A3B8', fontWeight: 500 }}>
-                      {ev.camera}
+                      {formatCameraName(ev.camera)}
                     </span>
                     <span style={{ fontSize: '0.78rem', color: '#64748B' }}>
                       {ev.time}
@@ -560,7 +601,7 @@ export function Dashboard({ onNavigate }) {
             </svg>
             <div style={{ flex: 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '4px' }}>
-                <span style={{ color: '#94A3B8' }}>CPU</span>
+                <span style={{ color: '#94A3B8' }}>{t('dashboard.cpu', 'CPU')}</span>
                 <span style={{ color: '#F8FAFC', fontWeight: 600 }}>{cpuVal}%</span>
               </div>
               <div style={{ height: '4px', backgroundColor: '#1E293B', borderRadius: '2px', overflow: 'hidden' }}>
@@ -580,7 +621,7 @@ export function Dashboard({ onNavigate }) {
             </svg>
             <div style={{ flex: 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '4px' }}>
-                <span style={{ color: '#94A3B8' }}>Memory</span>
+                <span style={{ color: '#94A3B8' }}>{t('dashboard.memory', 'Memory')}</span>
                 <span style={{ color: '#F8FAFC', fontWeight: 600 }}>{memVal}%</span>
               </div>
               <div style={{ height: '4px', backgroundColor: '#1E293B', borderRadius: '2px', overflow: 'hidden' }}>
@@ -598,7 +639,7 @@ export function Dashboard({ onNavigate }) {
             </svg>
             <div style={{ flex: 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '4px' }}>
-                <span style={{ color: '#94A3B8' }}>Storage</span>
+                <span style={{ color: '#94A3B8' }}>{t('dashboard.storage', 'Storage')}</span>
                 <span style={{ color: '#F8FAFC', fontWeight: 600 }}>{storageVal}%</span>
               </div>
               <div style={{ height: '4px', backgroundColor: '#1E293B', borderRadius: '2px', overflow: 'hidden' }}>
@@ -613,7 +654,7 @@ export function Dashboard({ onNavigate }) {
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-              <span style={{ fontSize: '0.84rem', color: '#94A3B8', fontWeight: 600 }}>Inference FPS</span>
+              <span style={{ fontSize: '0.84rem', color: '#94A3B8', fontWeight: 600 }}>{t('dashboard.fpsGauge', 'Inference FPS')}</span>
               <span
                 id="gauge-fps"
                 style={{
@@ -625,7 +666,7 @@ export function Dashboard({ onNavigate }) {
                   borderRadius: '6px',
                 }}
               >
-                FPS {fpsVal}
+                {t('dashboard.fps', 'FPS')} {fpsVal}
               </span>
             </div>
           </div>

@@ -27,6 +27,14 @@ export function Cameras({ onNavigate, pageParams }) {
     return 'inventory'; // Default Figure 7.1.3
   });
 
+  useEffect(() => {
+    if (pageParams?.mode === 'tracking') setSubTab('tracking');
+    else if (pageParams?.mode === 'zone' || pageParams?.mode === 'perimeter') setSubTab('zone');
+    else if (pageParams?.mode === 'anomaly') setSubTab('anomaly');
+    else if (pageParams?.mode === 'yolo' || pageParams?.tab === 'live') setSubTab('yolo');
+    else if (pageParams?.tab === 'management' || pageParams?.tab === 'inventory') setSubTab('inventory');
+  }, [pageParams?.mode, pageParams?.tab]);
+
   const [cameras, setCameras] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -42,6 +50,21 @@ export function Cameras({ onNavigate, pageParams }) {
   const [measuredFps, setMeasuredFps] = useState(25);
   const [streamError, setStreamError] = useState(false);
   const [streamTimestamp, setStreamTimestamp] = useState(() => Date.now());
+  const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
+
+  const handleCaptureSnapshot = async () => {
+    if (!selectedCam?.id) return;
+    try {
+      setIsCapturingSnapshot(true);
+      await api.cameras.snapshot(selectedCam.id);
+      addToast(t('surveillance.snapshotSaved', 'Snapshot captured and saved'), 'success');
+    } catch (err) {
+      console.warn('Snapshot error:', err);
+      addToast(t('common.error', 'Error') + ': ' + (err.message || 'Snapshot failed'), 'error');
+    } finally {
+      setIsCapturingSnapshot(false);
+    }
+  };
 
   // Dynamic Camera Context Data (Zones and Alerts)
   const [zones, setZones] = useState([]);
@@ -177,6 +200,93 @@ export function Cameras({ onNavigate, pageParams }) {
     return text.includes('anomaly') || text.includes('fall') || text.includes('unusual') || text.includes('distress');
   });
 
+  const renderTransportBar = () => (
+    <div
+      style={{
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: '48px',
+        backgroundColor: 'rgba(15, 23, 42, 0.92)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 16px',
+        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+        zIndex: 10,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <button
+          type="button"
+          onClick={() => setIsPlaying(!isPlaying)}
+          style={{ background: 'transparent', border: 'none', color: '#FFFFFF', cursor: 'pointer', padding: 0 }}
+          title={isPlaying ? t('common.pause', 'Pause') : t('common.play', 'Play')}
+        >
+          {isPlaying ? '⏸' : '▶'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setIsMuted(!isMuted)}
+          style={{ background: 'transparent', border: 'none', color: '#FFFFFF', cursor: 'pointer', padding: 0 }}
+          title={isMuted ? t('common.unmute', 'Unmute') : t('common.mute', 'Mute')}
+        >
+          {isMuted ? '🔇' : '🔊'}
+        </button>
+        <button
+          type="button"
+          onClick={handleCaptureSnapshot}
+          disabled={isCapturingSnapshot}
+          title={t('surveillance.takeSnapshot', 'Take Snapshot')}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: isCapturingSnapshot ? '#38BDF8' : '#FFFFFF',
+            cursor: 'pointer',
+            padding: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: isCapturingSnapshot ? 0.6 : 1,
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+            <circle cx="12" cy="13" r="4" />
+          </svg>
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span
+          style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            backgroundColor: isRecording ? '#EF4444' : '#64748B',
+            boxShadow: isRecording ? '0 0 6px #EF4444' : 'none',
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setIsRecording(!isRecording)}
+          style={{ background: 'transparent', border: 'none', color: isRecording ? '#EF4444' : '#94A3B8', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
+        >
+          REC
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', color: '#94A3B8' }}>
+        <span style={{ fontSize: '0.75rem', color: isCameraLive ? '#10B981' : '#64748B', fontWeight: 700 }}>
+          {t('dashboard.fps', 'FPS')} {isCameraLive ? measuredFps : 0}
+        </span>
+        <span style={{ cursor: 'pointer' }}>⚙</span>
+        <span style={{ cursor: 'pointer' }}>⛶</span>
+      </div>
+    </div>
+  );
+
   return (
     <div
       className="cameras-page-container"
@@ -204,11 +314,11 @@ export function Cameras({ onNavigate, pageParams }) {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           {[
-            { id: 'inventory', label: 'Camera Management (Fig 7.1.3)' },
-            { id: 'yolo', label: 'Real-Time YOLO (Fig 7.1.4)' },
-            { id: 'tracking', label: 'Object Tracking (Fig 7.1.5)' },
-            { id: 'zone', label: 'Restricted Zone (Fig 7.1.6)' },
-            { id: 'anomaly', label: 'Anomaly Detection (Fig 7.1.10)' },
+            { id: 'inventory', label: t('cameras.subtabInventory', 'Camera Management (Fig 7.1.3)') },
+            { id: 'yolo', label: t('cameras.subtabYolo', 'Real-Time YOLO (Fig 7.1.4)') },
+            { id: 'tracking', label: t('cameras.subtabTracking', 'Object Tracking (Fig 7.1.5)') },
+            { id: 'zone', label: t('cameras.subtabZone', 'Restricted Zone (Fig 7.1.6)') },
+            { id: 'anomaly', label: t('cameras.subtabAnomaly', 'Anomaly Detection (Fig 7.1.10)') },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -253,7 +363,7 @@ export function Cameras({ onNavigate, pageParams }) {
             }}
           >
             <span>+</span>
-            <span>Add Camera</span>
+            <span>{t('cameras.addCamera', 'Add Camera')}</span>
           </button>
         )}
       </div>
@@ -265,10 +375,10 @@ export function Cameras({ onNavigate, pageParams }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#FFFFFF', margin: '0 0 4px 0' }}>
-              Cameras
+              {t('cameras.title', 'Cameras')}
             </h1>
             <p style={{ fontSize: '0.88rem', color: '#94A3B8', margin: 0 }}>
-              Manage and monitor your camera sources
+              {t('cameras.subtitle', 'Manage and monitor your camera sources')}
             </p>
           </div>
 
@@ -294,7 +404,7 @@ export function Cameras({ onNavigate, pageParams }) {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search cameras..."
+                placeholder={t('cameras.searchPlaceholder', 'Search cameras...')}
                 style={{
                   background: 'transparent',
                   border: 'none',
@@ -320,9 +430,9 @@ export function Cameras({ onNavigate, pageParams }) {
                 cursor: 'pointer',
               }}
             >
-              <option value="all">All Status</option>
-              <option value="online">Online</option>
-              <option value="offline">Offline</option>
+              <option value="all">{t('cameras.allStatus', 'All Status')}</option>
+              <option value="online">{t('common.online', 'Online')}</option>
+              <option value="offline">{t('common.offline', 'Offline')}</option>
             </select>
           </div>
 
@@ -359,7 +469,24 @@ export function Cameras({ onNavigate, pageParams }) {
                     onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)')}
                   >
                     {/* Camera Snapshot / Video Poster */}
-                    <div style={{ position: 'relative', width: '100%', height: '200px', backgroundColor: '#090E1A' }}>
+                    <div style={{ position: 'relative', width: '100%', height: '200px', backgroundColor: '#090E1A', overflow: 'hidden' }}>
+                      <img
+                        src={`/api/cameras/${cam.id}/snapshot/`}
+                        alt={cam.name}
+                        loading="lazy"
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          display: 'block',
+                          zIndex: 1,
+                        }}
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
                       <div
                         style={{
                           position: 'absolute',
@@ -368,6 +495,7 @@ export function Cameras({ onNavigate, pageParams }) {
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
+                          zIndex: 0,
                         }}
                       >
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5">
@@ -377,7 +505,7 @@ export function Cameras({ onNavigate, pageParams }) {
                       </div>
 
                       {/* Top Right: Status Pill matching Figure 7.1.3 */}
-                      <div style={{ position: 'absolute', top: '12px', right: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ position: 'absolute', top: '12px', right: '12px', display: 'flex', alignItems: 'center', gap: '8px', zIndex: 2 }}>
                         <span
                           style={{
                             backgroundColor: isOnline ? '#10B981' : '#EF4444',
@@ -388,7 +516,7 @@ export function Cameras({ onNavigate, pageParams }) {
                             borderRadius: '12px',
                           }}
                         >
-                          {isOnline ? 'Online' : 'Offline'}
+                          {isOnline ? t('common.online', 'Online') : t('common.offline', 'Offline')}
                         </span>
                         <button
                           type="button"
@@ -417,7 +545,7 @@ export function Cameras({ onNavigate, pageParams }) {
                         <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#FFFFFF' }}>{cam.name}</div>
                         <div style={{ fontSize: '0.8rem', color: '#94A3B8' }}>{cam.location}</div>
                       </div>
-                      <span style={{ fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600 }}>Open Stream →</span>
+                      <span style={{ fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600 }}>{t('cameras.openStream', 'Open Stream →')}</span>
                     </div>
                   </div>
                 );
@@ -429,9 +557,9 @@ export function Cameras({ onNavigate, pageParams }) {
                 <path d="M23 7l-7 5 7 5V7z" />
                 <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
               </svg>
-              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#E2E8F0' }}>No Cameras Found</div>
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#E2E8F0' }}>{t('cameras.noCamerasFound', 'No Cameras Found')}</div>
               <div style={{ fontSize: '0.84rem', color: '#64748B', marginTop: 4 }}>
-                {loading ? 'Connecting to camera inventory...' : 'No camera sources match the selected criteria.'}
+                {loading ? t('cameras.connectingInventory', 'Connecting to camera inventory...') : t('cameras.noMatchingCameras', 'No camera sources match the selected criteria.')}
               </div>
             </div>
           )}
@@ -474,12 +602,12 @@ export function Cameras({ onNavigate, pageParams }) {
                   borderRadius: '12px',
                 }}
               >
-                {isCameraLive ? 'Live' : 'Offline'}
+                {isCameraLive ? t('cameras.live', 'Live') : t('cameras.offline', 'Offline')}
               </span>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span style={{ fontSize: '0.85rem', color: '#CBD5E1', fontWeight: 600 }}>Detection</span>
+              <span style={{ fontSize: '0.85rem', color: '#CBD5E1', fontWeight: 600 }}>{t('cameras.detection', 'Detection')}</span>
               <button
                 type="button"
                 onClick={() => setDetectionEnabled(!detectionEnabled)}
@@ -507,7 +635,7 @@ export function Cameras({ onNavigate, pageParams }) {
                 />
               </button>
               <span style={{ backgroundColor: '#1E293B', color: '#94A3B8', fontSize: '0.75rem', fontWeight: 700, padding: '4px 10px', borderRadius: '6px' }}>
-                YOLOv11
+                {t('cameras.yoloModel', 'YOLOv11')}
               </span>
             </div>
           </div>
@@ -557,76 +685,20 @@ export function Cameras({ onNavigate, pageParams }) {
                   <line x1="1" y1="1" x2="23" y2="23" stroke="#EF4444" strokeWidth="2" />
                 </svg>
                 <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
-                  {!isPlaying ? 'Surveillance Stream Paused' : `${selectedCam?.name || 'Camera'} is Offline`}
+                  {!isPlaying
+                    ? t('cameras.streamPaused', 'Surveillance Stream Paused')
+                    : t('cameras.cameraOfflineTitle', '{name} is Offline', { name: selectedCam?.name || 'Camera' })}
                 </div>
                 <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 420 }}>
                   {!isPlaying
-                    ? 'Stream playback is currently paused. Press play on the transport bar to resume.'
-                    : 'The camera feed is disconnected or waiting for the video pipeline to start. Ensure camera is powered and network stream is reachable.'}
+                    ? t('cameras.streamPausedDesc', 'Stream playback is currently paused. Press play on the transport bar to resume.')
+                    : t('cameras.cameraOfflineDesc', 'The camera feed is disconnected or waiting for the video pipeline to start. Ensure camera is powered and network stream is reachable.')}
                 </div>
               </div>
             )}
 
             {/* Bottom Transport Controls Bar matching Figure 7.1.4 */}
-            <div
-              style={{
-                position: 'absolute',
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: '48px',
-                backgroundColor: 'rgba(15, 23, 42, 0.92)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '0 16px',
-                borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsPlaying(!isPlaying)}
-                  style={{ background: 'transparent', border: 'none', color: '#FFFFFF', cursor: 'pointer', padding: 0 }}
-                >
-                  {isPlaying ? '⏸' : '▶'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsMuted(!isMuted)}
-                  style={{ background: 'transparent', border: 'none', color: '#FFFFFF', cursor: 'pointer', padding: 0 }}
-                >
-                  {isMuted ? '🔇' : '🔊'}
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span
-                  style={{
-                    width: '8px',
-                    height: '8px',
-                    borderRadius: '50%',
-                    backgroundColor: isRecording ? '#EF4444' : '#64748B',
-                    boxShadow: isRecording ? '0 0 6px #EF4444' : 'none',
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setIsRecording(!isRecording)}
-                  style={{ background: 'transparent', border: 'none', color: isRecording ? '#EF4444' : '#94A3B8', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
-                >
-                  REC
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', color: '#94A3B8' }}>
-                <span style={{ fontSize: '0.75rem', color: isCameraLive ? '#10B981' : '#64748B', fontWeight: 700 }}>
-                  FPS {isCameraLive ? measuredFps : 0}
-                </span>
-                <span style={{ cursor: 'pointer' }}>⚙</span>
-                <span style={{ cursor: 'pointer' }}>⛶</span>
-              </div>
-            </div>
+            {renderTransportBar()}
           </div>
         </div>
       )}
@@ -638,7 +710,7 @@ export function Cameras({ onNavigate, pageParams }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>Object Tracking</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>{t('cameras.subtabTracking', 'Object Tracking')}</div>
               <select
                 value={selectedCameraId}
                 onChange={(e) => setSelectedCameraId(Number(e.target.value))}
@@ -667,12 +739,12 @@ export function Cameras({ onNavigate, pageParams }) {
                   borderRadius: '12px',
                 }}
               >
-                {isCameraLive ? 'Live' : 'Offline'}
+                {isCameraLive ? t('cameras.live', 'Live') : t('cameras.offline', 'Offline')}
               </span>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span style={{ fontSize: '0.85rem', color: '#CBD5E1', fontWeight: 600 }}>Tracking</span>
+              <span style={{ fontSize: '0.85rem', color: '#CBD5E1', fontWeight: 600 }}>{t('cameras.tracking', 'Tracking')}</span>
               <button
                 type="button"
                 onClick={() => setTrackingEnabled(!trackingEnabled)}
@@ -699,7 +771,7 @@ export function Cameras({ onNavigate, pageParams }) {
                 />
               </button>
               <span style={{ backgroundColor: '#1E293B', color: '#A78BFA', fontSize: '0.75rem', fontWeight: 700, padding: '4px 10px', borderRadius: '6px' }}>
-                ByteTrack
+                {t('cameras.byteTrack', 'ByteTrack')}
               </span>
             </div>
           </div>
@@ -746,13 +818,16 @@ export function Cameras({ onNavigate, pageParams }) {
                   <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
                 </svg>
                 <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
-                  {selectedCam?.name || 'Camera'} Tracking Pipeline Disconnected
+                  {t('cameras.trackingDisconnectedTitle', '{name} Tracking Pipeline Disconnected', { name: selectedCam?.name || 'Camera' })}
                 </div>
                 <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 420 }}>
-                  Camera is currently offline. Multi-object tracking with ByteTrack will resume automatically upon camera reconnection.
+                  {t('cameras.trackingDisconnectedDesc', 'Camera is currently offline. Multi-object tracking with ByteTrack will resume automatically upon camera reconnection.')}
                 </div>
               </div>
             )}
+
+            {/* Bottom Transport Controls Bar matching Figure 7.1.5 */}
+            {renderTransportBar()}
           </div>
         </div>
       )}
@@ -764,7 +839,7 @@ export function Cameras({ onNavigate, pageParams }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>Restricted Zone Monitoring</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>{t('cameras.zoneMonitoringTitle', 'Restricted Zone Monitoring')}</div>
               <select
                 value={selectedCameraId}
                 onChange={(e) => setSelectedCameraId(Number(e.target.value))}
@@ -793,10 +868,10 @@ export function Cameras({ onNavigate, pageParams }) {
                   borderRadius: '12px',
                 }}
               >
-                {isCameraLive ? 'Live' : 'Offline'}
+                {isCameraLive ? t('cameras.live', 'Live') : t('cameras.offline', 'Offline')}
               </span>
               <span style={{ fontSize: '0.85rem', color: '#94A3B8' }}>
-                Zone: {zones[0]?.name || selectedCam?.location || 'Gate-1'}
+                {t('cameras.zoneLabel', 'Zone: {name}', { name: zones[0]?.name || selectedCam?.location || 'Gate-1' })}
               </span>
             </div>
           </div>
@@ -834,7 +909,7 @@ export function Cameras({ onNavigate, pageParams }) {
                   strokeDasharray="6,4"
                 />
                 <text x="450" y="420" fill="#EF4444" fontSize="13" fontWeight="800" textAnchor="middle">
-                  Restricted Zone: {zones[0]?.name || 'Gate-1'}
+                  {t('cameras.zoneTextOverlay', 'Restricted Zone: {name}', { name: zones[0]?.name || 'Gate-1' })}
                 </text>
               </svg>
 
@@ -858,13 +933,16 @@ export function Cameras({ onNavigate, pageParams }) {
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                   </svg>
                   <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
-                    Restricted Zone Monitoring Inactive
+                    {t('cameras.zoneInactiveTitle', 'Restricted Zone Monitoring Inactive')}
                   </div>
                   <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 400 }}>
-                    Camera is currently offline. Zone intrusion tripwires remain armed in backend configuration.
+                    {t('cameras.zoneInactiveDesc', 'Camera is currently offline. Zone intrusion tripwires remain armed in backend configuration.')}
                   </div>
                 </div>
               )}
+
+              {/* Bottom Transport Controls Bar matching Figure 7.1.6 */}
+              {renderTransportBar()}
             </div>
 
             {/* Right Alert Card matching Figure 7.1.6 */}
@@ -896,36 +974,36 @@ export function Cameras({ onNavigate, pageParams }) {
                   }}
                 >
                   <span>{intrusionAlert ? '⚠️' : '🛡️'}</span>
-                  <span>{intrusionAlert ? 'Intrusion Detected' : 'Zone Armed & Secure'}</span>
+                  <span>{intrusionAlert ? t('cameras.intrusionDetected', 'Intrusion Detected') : t('cameras.zoneArmedSecure', 'Zone Armed & Secure')}</span>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.85rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94A3B8' }}>Camera</span>
+                    <span style={{ color: '#94A3B8' }}>{t('cameras.cameraLabel', 'Camera')}</span>
                     <span style={{ fontWeight: 700, color: '#FFFFFF' }}>{selectedCam?.name || 'N/A'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94A3B8' }}>Zone</span>
+                    <span style={{ color: '#94A3B8' }}>{t('cameras.zoneHeader', 'Zone')}</span>
                     <span style={{ fontWeight: 700, color: '#FFFFFF' }}>
-                      {intrusionAlert?.zone_name || zones[0]?.name || `${selectedCam?.location || 'Gate-1'} (Restricted)`}
+                      {intrusionAlert?.zone_name || zones[0]?.name || `${selectedCam?.location || 'Gate-1'} (${t('cameras.subtabZone', 'Restricted')})`}
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94A3B8' }}>Object</span>
+                    <span style={{ color: '#94A3B8' }}>{t('cameras.objectLabel', 'Object')}</span>
                     <span style={{ fontWeight: 700, color: '#FFFFFF' }}>
-                      {intrusionAlert?.detected_object || (intrusionAlert ? 'Person' : 'None')}
+                      {intrusionAlert?.detected_object || (intrusionAlert ? t('cameras.personObject', 'Person') : t('cameras.noneObject', 'None'))}
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94A3B8' }}>Confidence</span>
+                    <span style={{ color: '#94A3B8' }}>{t('cameras.confidenceLabel', 'Confidence')}</span>
                     <span style={{ fontWeight: 700, color: '#10B981' }}>
                       {intrusionAlert?.confidence ? Number(intrusionAlert.confidence).toFixed(2) : (intrusionAlert ? '0.96' : '0.00')}
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94A3B8' }}>Time</span>
+                    <span style={{ color: '#94A3B8' }}>{t('cameras.timeLabel', 'Time')}</span>
                     <span style={{ fontWeight: 600, color: '#CBD5E1' }}>
-                      {intrusionAlert ? formatAlertTime(intrusionAlert.detected_at || intrusionAlert.created_at) : 'Active Surveillance'}
+                      {intrusionAlert ? formatAlertTime(intrusionAlert.detected_at || intrusionAlert.created_at) : t('cameras.activeSurveillance', 'Active Surveillance')}
                     </span>
                   </div>
                 </div>
@@ -946,7 +1024,7 @@ export function Cameras({ onNavigate, pageParams }) {
                   width: '100%',
                 }}
               >
-                View Event
+                {t('cameras.viewEvent', 'View Event')}
               </button>
             </div>
           </div>
@@ -961,8 +1039,8 @@ export function Cameras({ onNavigate, pageParams }) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
               <div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>Anomaly Detection</div>
-                <div style={{ fontSize: '0.85rem', color: '#94A3B8' }}>Detects unusual activities using AI models</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>{t('cameras.anomalyTitle', 'Anomaly Detection')}</div>
+                <div style={{ fontSize: '0.85rem', color: '#94A3B8' }}>{t('cameras.anomalySubtitle', 'Detects unusual activities using AI models')}</div>
               </div>
               <select
                 value={selectedCameraId}
@@ -995,7 +1073,7 @@ export function Cameras({ onNavigate, pageParams }) {
                 borderRadius: '12px',
               }}
             >
-              {isCameraLive ? '● Running' : '● Offline / Idle'}
+              {isCameraLive ? t('cameras.runningStatus', '● Running') : t('cameras.offlineIdleStatus', '● Offline / Idle')}
             </span>
           </div>
 
@@ -1043,13 +1121,16 @@ export function Cameras({ onNavigate, pageParams }) {
                     <line x1="12" y1="16" x2="12.01" y2="16" />
                   </svg>
                   <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
-                    Anomaly Monitoring Disconnected
+                    {t('cameras.anomalyDisconnectedTitle', 'Anomaly Monitoring Disconnected')}
                   </div>
                   <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 400 }}>
-                    Camera is currently offline. AI movement analysis model is initialized and standing by.
+                    {t('cameras.anomalyDisconnectedDesc', 'Camera is currently offline. AI movement analysis model is initialized and standing by.')}
                   </div>
                 </div>
               )}
+
+              {/* Bottom Transport Controls Bar matching Figure 7.1.10 */}
+              {renderTransportBar()}
             </div>
 
             {/* Right Anomaly Result Card matching Figure 7.1.10 */}
@@ -1062,7 +1143,7 @@ export function Cameras({ onNavigate, pageParams }) {
               }}
             >
               <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#FFFFFF', margin: '0 0 1rem 0' }}>
-                Anomaly Result
+                {t('cameras.anomalyResult', 'Anomaly Result')}
               </h3>
 
               <div
@@ -1081,30 +1162,30 @@ export function Cameras({ onNavigate, pageParams }) {
                 }}
               >
                 <span>{anomalyAlert ? '⚠️' : '✓'}</span>
-                <span>{anomalyAlert ? 'Anomaly Detected' : 'No Anomalies Detected'}</span>
+                <span>{anomalyAlert ? t('cameras.anomalyDetected', 'Anomaly Detected') : t('cameras.noAnomaliesDetected', 'No Anomalies Detected')}</span>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.85rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94A3B8' }}>Type</span>
+                  <span style={{ color: '#94A3B8' }}>{t('cameras.typeLabel', 'Type')}</span>
                   <span style={{ fontWeight: 700, color: '#FFFFFF' }}>
-                    {anomalyAlert?.anomaly_type || anomalyAlert?.title || (anomalyAlert ? 'Fall' : 'Normal')}
+                    {anomalyAlert?.anomaly_type || anomalyAlert?.title || (anomalyAlert ? t('cameras.fallAnomaly', 'Fall') : t('cameras.normalAnomaly', 'Normal'))}
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94A3B8' }}>Confidence</span>
+                  <span style={{ color: '#94A3B8' }}>{t('cameras.confidenceLabel', 'Confidence')}</span>
                   <span style={{ fontWeight: 700, color: '#10B981' }}>
                     {anomalyAlert?.confidence ? Number(anomalyAlert.confidence).toFixed(2) : (anomalyAlert ? '0.93' : '0.00')}
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94A3B8' }}>Camera</span>
+                  <span style={{ color: '#94A3B8' }}>{t('cameras.cameraLabel', 'Camera')}</span>
                   <span style={{ fontWeight: 700, color: '#FFFFFF' }}>{selectedCam?.name || 'N/A'}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94A3B8' }}>Time</span>
+                  <span style={{ color: '#94A3B8' }}>{t('cameras.timeLabel', 'Time')}</span>
                   <span style={{ fontWeight: 600, color: '#CBD5E1' }}>
-                    {anomalyAlert ? formatAlertTime(anomalyAlert.detected_at || anomalyAlert.created_at) : 'Live Monitoring'}
+                    {anomalyAlert ? formatAlertTime(anomalyAlert.detected_at || anomalyAlert.created_at) : t('cameras.liveMonitoringLabel', 'Live Monitoring')}
                   </span>
                 </div>
               </div>
@@ -1140,16 +1221,16 @@ export function Cameras({ onNavigate, pageParams }) {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF', margin: '0 0 1.25rem 0' }}>
-              Add New Camera
+              {t('cameras.modalAddTitle', 'Add New Camera')}
             </h2>
             <form onSubmit={handleAddCameraSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>Camera Name</label>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>{t('cameras.modalCameraName', 'Camera Name')}</label>
                 <input
                   type="text"
                   value={newCam.name}
                   onChange={(e) => setNewCam({ ...newCam, name: e.target.value })}
-                  placeholder="e.g. Cam-05 North Gate"
+                  placeholder={t('cameras.modalCameraNamePlaceholder', 'e.g. Cam-05 North Gate')}
                   required
                   style={{
                     width: '100%',
@@ -1164,7 +1245,7 @@ export function Cameras({ onNavigate, pageParams }) {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>Source Type</label>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>{t('cameras.modalSourceType', 'Source Type')}</label>
                 <select
                   value={newCam.source_type}
                   onChange={(e) => setNewCam({ ...newCam, source_type: e.target.value })}
@@ -1178,19 +1259,19 @@ export function Cameras({ onNavigate, pageParams }) {
                     outline: 'none',
                   }}
                 >
-                  <option value="webcam">USB / DirectShow Webcam</option>
-                  <option value="rtsp">IP Camera / RTSP Stream</option>
-                  <option value="stream">Video Loopback File</option>
+                  <option value="webcam">{t('cameras.modalSourceWebcam', 'USB / DirectShow Webcam')}</option>
+                  <option value="rtsp">{t('cameras.modalSourceRtsp', 'IP Camera / RTSP Stream')}</option>
+                  <option value="stream">{t('cameras.modalSourceLoopback', 'Video Loopback File')}</option>
                 </select>
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>Location</label>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>{t('cameras.modalLocation', 'Location')}</label>
                 <input
                   type="text"
                   value={newCam.location}
                   onChange={(e) => setNewCam({ ...newCam, location: e.target.value })}
-                  placeholder="e.g. Building B Entrance"
+                  placeholder={t('cameras.modalLocationPlaceholder', 'e.g. Building B Entrance')}
                   style={{
                     width: '100%',
                     backgroundColor: '#090E1A',
@@ -1209,13 +1290,13 @@ export function Cameras({ onNavigate, pageParams }) {
                   onClick={() => setIsAddModalOpen(false)}
                   style={{ backgroundColor: 'transparent', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#94A3B8', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}
                 >
-                  Cancel
+                  {t('cameras.modalCancel', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   style={{ backgroundColor: '#2563EB', border: 'none', color: '#FFFFFF', padding: '8px 18px', borderRadius: '6px', fontWeight: 700, cursor: 'pointer' }}
                 >
-                  Save Camera
+                  {t('cameras.modalSave', 'Save Camera')}
                 </button>
               </div>
             </form>

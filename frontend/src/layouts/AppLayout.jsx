@@ -18,7 +18,7 @@ import useNotifications from '../hooks/useNotifications';
  */
 export function AppLayout({ children, activePage, pageParams, setActivePage }) {
   const { user, logout } = useAuth();
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const { unreadCount } = useNotifications();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -30,6 +30,17 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
   useEffect(() => {
     const updateClock = () => {
       const now = new Date();
+      if (language === 'hi' || language === 'kn') {
+        try {
+          const locale = language === 'hi' ? 'hi-IN' : 'kn-IN';
+          const dateStr = now.toLocaleDateString(locale, { month: 'short', day: '2-digit', year: 'numeric' });
+          const timeStr = now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: true });
+          setClockStr(`${dateStr} | ${timeStr}`);
+          return;
+        } catch (_) {
+          // fallback
+        }
+      }
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const mon = months[now.getMonth()];
       const day = String(now.getDate()).padStart(2, '0');
@@ -43,7 +54,14 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
     updateClock();
     const timer = setInterval(updateClock, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [language]);
+
+  // Update browser document title dynamically with localized brand and active page
+  useEffect(() => {
+    const brand = t('brand.name', 'DeepVision');
+    const page = t('nav.' + activePage, activePage);
+    document.title = `${brand} — ${page}`;
+  }, [activePage, language, t]);
 
   // Close profile dropdown when clicking outside
   useEffect(() => {
@@ -149,34 +167,10 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
   const userInitial = (user?.full_name || user?.email || 'V')[0].toUpperCase();
 
   return (
-    <div
-      className="deepvision-enterprise-shell"
-      style={{
-        display: 'flex',
-        minHeight: '100vh',
-        backgroundColor: '#080C14',
-        color: '#F8FAFC',
-        fontFamily: 'var(--font-sans, system-ui, -apple-system, sans-serif)',
-      }}
-    >
+    <div className="deepvision-enterprise-shell">
       {/* 1. Left Vertical Sidebar (Desktop) matching Figure 7.1.2 */}
-      <aside
-        className="enterprise-sidebar"
-        style={{
-          width: '220px',
-          backgroundColor: '#0B0F19',
-          borderRight: '1px solid rgba(255, 255, 255, 0.08)',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          flexShrink: 0,
-          position: 'sticky',
-          top: 0,
-          height: '100vh',
-          zIndex: 50,
-        }}
-      >
-        <div>
+      <aside className="enterprise-sidebar">
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflowY: 'auto' }}>
           {/* Logo Brand Header matching Figure 7.1.2 */}
           <div
             onClick={() => setActivePage('dashboard')}
@@ -189,9 +183,10 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
               padding: '1.25rem 1.25rem 1.5rem 1.25rem',
               cursor: 'pointer',
               borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+              flexShrink: 0,
             }}
           >
-            {/* Shield Logo with glowing optical reticle */}
+            {/* Surveillance Camera Logo with optical reticle */}
             <div
               style={{
                 width: '34px',
@@ -202,11 +197,16 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 boxShadow: '0 0 14px rgba(0, 201, 255, 0.4)',
+                flexShrink: 0,
               }}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.2">
-                <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" />
-                <circle cx="12" cy="12" r="3" stroke="#00F5D4" strokeWidth="2" />
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-label="DeepVision Surveillance Camera Emblem">
+                <path d="M4 17.5v3.5h5" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2.5 7.5h13l4.5 3" stroke="#00F5D4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2.5 9h11.5l4 3v3l-4 3H2.5a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 2.5 9z" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="7.5" cy="13.5" r="2.2" stroke="#00F5D4" strokeWidth="1.8" />
+                <circle cx="7.5" cy="13.5" r="0.8" fill="#00F5D4" />
+                <line x1="19.5" y1="13.5" x2="22.5" y2="13.5" stroke="#00F5D4" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </div>
             <span
@@ -217,7 +217,7 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
                 color: '#FFFFFF',
               }}
             >
-              DeepVision
+              {t('brand.name', 'DeepVision')}
             </span>
           </div>
 
@@ -289,7 +289,7 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
           </nav>
         </div>
 
-        {/* User Account Bar at Bottom */}
+        {/* User Account Bar Permanently Anchored at Bottom */}
         <div
           style={{
             padding: '1rem',
@@ -298,6 +298,9 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: '10px',
+            flexShrink: 0,
+            marginTop: 'auto',
+            backgroundColor: '#0B0F19',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
@@ -329,10 +332,10 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
                   overflow: 'hidden',
                 }}
               >
-                {user?.full_name || 'Operator'}
+                {user?.full_name || t('common.operator', 'Operator')}
               </div>
               <div style={{ fontSize: '0.7rem', color: '#64748B', textTransform: 'capitalize' }}>
-                {user?.role || 'Surveillance'}
+                {user?.role === 'admin' ? t('common.admin', 'Administrator') : t('common.surveillance', 'Surveillance')}
               </div>
             </div>
           </div>
@@ -350,6 +353,7 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              flexShrink: 0,
             }}
             onMouseEnter={(e) => (e.currentTarget.style.color = '#EF4444')}
             onMouseLeave={(e) => (e.currentTarget.style.color = '#64748B')}
@@ -364,38 +368,16 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
       </aside>
 
       {/* 2. Main Content Area */}
-      <div
-        className="enterprise-main-viewport"
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          minWidth: 0,
-          backgroundColor: '#080C14',
-        }}
-      >
+      <div className="enterprise-main-viewport">
         {/* Top Header Row matching Figure 7.1.2 */}
-        <header
-          style={{
-            height: '64px',
-            backgroundColor: '#0B0F19',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0 1.5rem',
-            position: 'sticky',
-            top: 0,
-            zIndex: 40,
-          }}
-        >
+        <header className="enterprise-header">
           {/* Mobile hamburger menu trigger */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
               type="button"
               id="btn-mobile-menu-toggle"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="lg:hidden"
+              className="mobile-nav-toggle"
               style={{
                 background: 'transparent',
                 border: 'none',
@@ -414,10 +396,10 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
               </svg>
             </button>
             <div style={{ fontSize: '0.9rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ color: '#94A3B8' }}>DeepVision</span>
+              <span style={{ color: '#94A3B8' }}>{t('brand.name', 'DeepVision')}</span>
               <span>/</span>
-              <span style={{ color: '#F8FAFC', fontWeight: 600, textTransform: 'capitalize' }}>
-                {activePage}
+              <span style={{ color: '#F8FAFC', fontWeight: 600 }}>
+                {t('nav.' + activePage, activePage)}
               </span>
             </div>
           </div>
@@ -528,14 +510,8 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
           </div>
         </header>
 
-        {/* Page Body Viewport */}
-        <main
-          style={{
-            flex: 1,
-            padding: '1.5rem',
-            overflowY: 'auto',
-          }}
-        >
+        {/* Page Body Viewport — Independently Scrolling Right Content */}
+        <main className="enterprise-main-content">
           {children}
         </main>
       </div>
@@ -554,63 +530,187 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
         >
           <div
             style={{
-              width: '260px',
+              width: '270px',
               backgroundColor: '#0B0F19',
               height: '100%',
-              padding: '1.5rem 1rem',
+              padding: '1.25rem 1rem 1rem 1rem',
               display: 'flex',
               flexDirection: 'column',
-              gap: '12px',
+              justifyContent: 'space-between',
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1rem' }}>
-              <div
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      background: 'linear-gradient(135deg, #00C9FF, #0072FF)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 0 12px rgba(0, 201, 255, 0.4)',
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-label="DeepVision Surveillance Camera Emblem">
+                      <path d="M4 17.5v3.5h5" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M2.5 7.5h13l4.5 3" stroke="#00F5D4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M2.5 9h11.5l4 3v3l-4 3H2.5a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 2.5 9z" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <circle cx="7.5" cy="13.5" r="2.2" stroke="#00F5D4" strokeWidth="1.8" />
+                      <circle cx="7.5" cy="13.5" r="0.8" fill="#00F5D4" />
+                      <line x1="19.5" y1="13.5" x2="22.5" y2="13.5" stroke="#00F5D4" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  </div>
+                  <span style={{ fontSize: '1.15rem', fontWeight: 800, color: '#FFFFFF' }}>
+                    {t('brand.name', 'DeepVision')}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen(false)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#94A3B8',
+                    cursor: 'pointer',
+                    padding: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  aria-label="Close menu"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {navItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={item.onClick}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: item.active
+                        ? 'linear-gradient(90deg, #6366F1 0%, #8B5CF6 100%)'
+                        : 'transparent',
+                      color: item.active ? '#FFFFFF' : '#94A3B8',
+                      fontSize: '0.9rem',
+                      fontWeight: item.active ? 700 : 500,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    {item.icon}
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                    {Boolean(item.badge && item.badge > 0) && (
+                      <span
+                        style={{
+                          background: '#EF4444',
+                          color: '#FFFFFF',
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: '10px',
+                        }}
+                      >
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Mobile User Account Bar permanently anchored at bottom */}
+            <div
+              style={{
+                paddingTop: '1rem',
+                borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px',
+                flexShrink: 0,
+                marginTop: 'auto',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #3B82F6, #1E40AF)',
+                    color: '#FFFFFF',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    flexShrink: 0,
+                  }}
+                >
+                  {userInitial}
+                </div>
+                <div style={{ overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      color: '#F8FAFC',
+                      whiteSpace: 'nowrap',
+                      textOverflow: 'ellipsis',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {user?.full_name || t('common.operator', 'Operator')}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#64748B', textTransform: 'capitalize' }}>
+                    {user?.role === 'admin' ? t('common.admin', 'Administrator') : t('common.surveillance', 'Surveillance')}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  logout();
+                }}
+                title={t('auth.signOut', 'Sign Out')}
                 style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
-                  background: 'linear-gradient(135deg, #00C9FF, #0072FF)',
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#64748B',
+                  cursor: 'pointer',
+                  padding: '6px',
+                  borderRadius: '6px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  flexShrink: 0,
                 }}
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.2">
-                  <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" />
-                  <circle cx="12" cy="12" r="3" stroke="#00F5D4" strokeWidth="2" />
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
                 </svg>
-              </div>
-              <span style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>DeepVision</span>
-            </div>
-
-            {navItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={item.onClick}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  background: item.active
-                    ? 'linear-gradient(90deg, #6366F1 0%, #8B5CF6 100%)'
-                    : 'transparent',
-                  color: item.active ? '#FFFFFF' : '#94A3B8',
-                  fontSize: '0.9rem',
-                  fontWeight: item.active ? 700 : 500,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                }}
-              >
-                {item.icon}
-                <span>{item.label}</span>
               </button>
-            ))}
+            </div>
           </div>
         </div>
       )}

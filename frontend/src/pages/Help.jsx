@@ -14,7 +14,7 @@ export function Help({ onNavigate }) {
         'help.monitorGuideText',
         'Open Cameras and choose a camera to view its live feed. Switch between RAW STREAM and DETECTION & TRACKING from the camera controls.'
       ),
-      actionLabel: 'Open Cameras →',
+      actionLabel: `${t('help.actionOpenCameras', 'Open Cameras')} →`,
       targetPage: 'cameras',
       accentBg: 'rgba(0, 229, 255, 0.12)',
       accentColor: 'var(--dv-cyan-500, #00E5FF)',
@@ -27,9 +27,12 @@ export function Help({ onNavigate }) {
       ),
     },
     {
-      title: 'Managing Hardware & IP Cameras',
-      body: 'Open Cameras to register USB/DirectShow webcams, RTSP/ONVIF cameras, or mobile IP streams, run live connection diagnostics, edit locations, or remove retired sensors.',
-      actionLabel: 'Manage Cameras →',
+      title: t('help.hardwareGuide', 'Managing Hardware & IP Cameras'),
+      body: t(
+        'help.hardwareGuideText',
+        'Open Cameras to register USB/DirectShow webcams, RTSP/ONVIF cameras, or mobile IP streams, run live connection diagnostics, edit locations, or remove retired sensors.'
+      ),
+      actionLabel: `${t('help.actionManageCameras', 'Manage Cameras')} →`,
       targetPage: 'cameras',
       accentBg: 'rgba(56, 189, 248, 0.12)',
       accentColor: '#38BDF8',
@@ -46,7 +49,7 @@ export function Help({ onNavigate }) {
         'help.recordingsGuideText',
         'Open Recordings for archived MP4 video clips and manual captures, or Evidence for forensic snapshots and SHA-256 verified artifacts. Filter by camera, type, or search terms.'
       ),
-      actionLabel: 'Browse Recordings →',
+      actionLabel: `${t('help.actionBrowseRecordings', 'Browse Recordings')} →`,
       targetPage: 'recordings',
       accentBg: 'rgba(0, 230, 118, 0.12)',
       accentColor: 'var(--dv-status-online, #00E676)',
@@ -62,7 +65,7 @@ export function Help({ onNavigate }) {
         'help.alertsGuideText',
         'Open Notifications and choose View Incident to inspect the event, camera, and available evidence. From the incident, create or review its linked investigation case.'
       ),
-      actionLabel: 'Open Notifications →',
+      actionLabel: `${t('help.actionOpenNotifications', 'Open Notifications')} →`,
       targetPage: 'notifications',
       accentBg: 'rgba(255, 179, 0, 0.12)',
       accentColor: 'var(--dv-status-warning, #FFB300)',
@@ -75,9 +78,12 @@ export function Help({ onNavigate }) {
       ),
     },
     {
-      title: 'Drawing Restricted Perimeter Zones',
-      body: 'In Cameras, choose a camera and switch to DETECTION & TRACKING. Use its zone controls to define restricted boundaries for that camera.',
-      actionLabel: 'Open Cameras →',
+      title: t('help.zoneGuide', 'Drawing Restricted Perimeter Zones'),
+      body: t(
+        'help.zoneGuideText',
+        'In Cameras, choose a camera and switch to DETECTION & TRACKING. Use its zone controls to define restricted boundaries for that camera.'
+      ),
+      actionLabel: `${t('help.actionOpenCameras', 'Open Cameras')} →`,
       targetPage: 'cameras',
       accentBg: 'rgba(244, 63, 94, 0.12)',
       accentColor: '#F43F5E',
@@ -89,9 +95,12 @@ export function Help({ onNavigate }) {
       ),
     },
     {
-      title: 'Detection Sensitivity, Themes & Languages',
-      body: 'Open Settings to adjust YOLO11n detection confidence thresholds, toggle active behavior rules (loitering, restricted entry, crowding, rapid motion, unattended object), or switch between Dark/Light themes and English, Hindi, or Kannada.',
-      actionLabel: 'Open Settings →',
+      title: t('help.settingsGuide', 'Detection Sensitivity, Themes & Languages'),
+      body: t(
+        'help.settingsGuideText',
+        'Open Settings to adjust YOLO11n detection confidence thresholds, toggle active behavior rules (loitering, restricted entry, crowding, rapid motion, unattended object), or switch between Dark/Light themes and English, Hindi, or Kannada.'
+      ),
+      actionLabel: `${t('help.actionOpenSettings', 'Open Settings')} →`,
       targetPage: 'settings',
       accentBg: 'rgba(168, 85, 247, 0.12)',
       accentColor: '#A855F7',
@@ -126,7 +135,7 @@ export function Help({ onNavigate }) {
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(0, 229, 255, 0.12)', border: '1px solid rgba(0, 229, 255, 0.28)', color: 'var(--dv-cyan-500, #00E5FF)', padding: '3px 10px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em' }}>
-            <span>OPERATOR GUIDANCE</span>
+            <span>{t('help.badgeGuidance', 'OPERATOR GUIDANCE')}</span>
           </div>
           <a
             href="/api/health/"
@@ -134,7 +143,7 @@ export function Help({ onNavigate }) {
             rel="noopener noreferrer"
             style={{ fontSize: '0.78rem', color: 'var(--dv-cyan-500, #00E5FF)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}
           >
-            <span>View Health Diagnostics</span>
+            <span>{t('help.viewHealth', 'View Health Diagnostics')}</span>
             <span>&rarr;</span>
           </a>
         </div>
@@ -142,7 +151,7 @@ export function Help({ onNavigate }) {
           {t('help.subtitle', 'Simple instructions for operating the DeepVision surveillance platform')}
         </h1>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary, #94A3B8)', margin: 0, lineHeight: 1.5 }}>
-          Practical reference for watching live cameras, recording clips, managing perimeter zones, investigating alerts, and configuring system preferences.
+          {t('help.leadDescription', 'Practical reference for watching live cameras, recording clips, managing perimeter zones, investigating alerts, and configuring system preferences.')}
         </p>
       </div>
 

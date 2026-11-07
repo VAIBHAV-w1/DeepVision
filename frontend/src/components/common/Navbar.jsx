@@ -118,7 +118,7 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
       <aside className={`app-sidebar ${mobileMenuOpen ? 'open' : ''}`} id="appSidebar" style={{ transform: mobileMenuOpen ? 'translateX(0)' : undefined }}>
         <div className="mobile-drawer-header">
           <a href="#overview" onClick={(e) => { e.preventDefault(); handleNavClick('overview'); }} className="brand-link">
-            <Logo size="sm" subtext="SURVEILLANCE OPERATIONS" />
+            <Logo size="sm" />
           </a>
           <button
             type="button"
@@ -176,7 +176,7 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
             onClick={(e) => { e.preventDefault(); handleNavClick('overview'); }}
             className="brand-link"
           >
-            <Logo size="sm" subtext="SURVEILLANCE OPERATIONS" />
+            <Logo size="sm" />
           </a>
 
           {/* Center: Clean 10-Item Plain Language Navigation */}

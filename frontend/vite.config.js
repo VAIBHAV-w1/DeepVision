@@ -4,9 +4,9 @@ import path from 'path';
 
 const isVercel = process.env.VERCEL === '1' || process.env.BUILD_TARGET?.trim() === 'vercel';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react()],
-  base: isVercel ? '/' : (process.env.VITE_BASE_PATH || '/static/dist/'),
+  base: command === 'serve' || isVercel ? '/' : (process.env.VITE_BASE_PATH || '/static/dist/'),
   build: {
     outDir: isVercel ? 'dist' : path.resolve(import.meta.dirname, '../deepvision_django/static/dist'),
     emptyOutDir: true,
@@ -34,4 +34,4 @@ export default defineConfig({
       '/static': 'http://127.0.0.1:8000',
     },
   },
-});
+}));
