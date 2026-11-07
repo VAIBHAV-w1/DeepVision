@@ -65,9 +65,32 @@ jobs:
         run: |
           docker build -t deepvision:ci .
 
+      - name: Prepare shared disposable CI database and media volumes
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/instance" "$GITHUB_WORKSPACE/recordings"
+          python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+          db_path = Path("instance/deepvision.db")
+          schema_path = Path("deepvision_django/schema.sql")
+          if not schema_path.is_file():
+              raise SystemExit(f"Missing canonical SQLite schema: {schema_path}")
+          connection = sqlite3.connect(db_path)
+          try:
+              connection.executescript(schema_path.read_text(encoding="utf-8"))
+              connection.commit()
+          finally:
+              connection.close()
+          db_path.chmod(0o666)
+          Path("instance").chmod(0o777)
+          Path("recordings").chmod(0o777)
+          PY
+
       - name: Start Docker Container & Await Health Check
         run: |
           docker run -d --name deepvision-service -p 8000:8000 \
+            -v "$GITHUB_WORKSPACE/instance:/app/instance" \
+            -v "$GITHUB_WORKSPACE/recordings:$GITHUB_WORKSPACE/recordings" \
             -e DJANGO_SECRET_KEY=ci_test_secret_key_12345678901234567890 \
             -e DEEPVISION_ENV=development \
             -e DJANGO_DEBUG=True \
