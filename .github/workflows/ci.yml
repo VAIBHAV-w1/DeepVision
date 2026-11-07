@@ -69,9 +69,9 @@ jobs:
         run: |
           docker run -d --name deepvision-service -p 8000:8000 \
             -e DJANGO_SECRET_KEY=ci_test_secret_key_12345678901234567890 \
-            -e DJANGO_DEBUG=False \
+            -e DEEPVISION_ENV=development \
+            -e DJANGO_DEBUG=True \
             -e DJANGO_ALLOWED_HOSTS=* \
-            -e INIT_DB_IF_MISSING=true \
             deepvision:ci
           echo "Waiting for container health check on http://127.0.0.1:8000/api/health/..."
           timeout 60 bash -c 'until curl -sf http://127.0.0.1:8000/api/health/; do sleep 2; done'
