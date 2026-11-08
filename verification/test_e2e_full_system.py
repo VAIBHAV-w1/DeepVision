@@ -215,24 +215,65 @@ def test_local_docker_health_and_206():
             full_path = resolved
             break
 
-    # If no existing physical recording on disk (e.g. CI or fresh container), create a safe test fixture
+    # If no existing physical recording is available (e.g. CI or a fresh container),
+    # create an isolated fixture using the current ORM field names and real FK parents.
+    cleanup_camera = False
+    cleanup_user = False
+    fixture_camera = None
+    fixture_user = None
+
     if not recording:
+        from django.utils import timezone
+        from apps.accounts.models import User
+        from apps.cameras.models import Camera
+
+        fixture_camera = Camera.objects.order_by("id").first()
+        if fixture_camera:
+            fixture_user = User.objects.get(id=fixture_camera.user_id)
+        else:
+            fixture_user = User.objects.order_by("id").first()
+            if not fixture_user:
+                fixture_user = User(
+                    full_name="DeepVision CI Test",
+                    email="deepvision-ci-e2e@example.test",
+                    password_hash="ci-test-only-not-a-real-account",
+                    role="user",
+                    is_email_verified=False,
+                    is_active=True,
+                )
+                fixture_user.save()
+                cleanup_user = True
+
+            fixture_camera = Camera.objects.create(
+                user_id=fixture_user.id,
+                name="DeepVision CI Test Camera",
+                source_type="webcam",
+                source="0",
+                location="CI fixture",
+                status="offline",
+                is_active=True,
+            )
+            cleanup_camera = True
+
         rec_dir = os.path.join(REPO_ROOT, "recordings")
         os.makedirs(rec_dir, exist_ok=True)
         fixture_filename = "ci_test_fixture_206.mp4"
         full_path = os.path.join(rec_dir, fixture_filename)
-        # Create 4096 bytes dummy MP4 fixture
+        # Create 4096 bytes of disposable test data; this is not a playable video.
         with open(full_path, "wb") as f:
             f.write(b"\x00" * 4096)
-        
+
+        now = timezone.now()
         recording = Recording.objects.create(
-            camera_id=1,
-            user_id=1,
-            file_name=fixture_filename,
+            camera_id=fixture_camera.id,
+            user_id=fixture_user.id,
+            filename=fixture_filename,
             file_path=full_path,
             file_size=4096,
-            duration=10,
-            status="completed"
+            duration_seconds=10,
+            started_at=now,
+            ended_at=now,
+            status="completed",
         )
         cleanup_fixture = True
         print(f"  Created isolated test recording fixture: ID #{recording.id} (4096 bytes)")
@@ -329,6 +370,16 @@ def test_local_docker_health_and_206():
                 recording.delete()
                 if os.path.exists(full_path):
                     os.remove(full_path)
+            except Exception:
+                pass
+        if cleanup_camera and fixture_camera is not None:
+            try:
+                fixture_camera.delete()
+            except Exception:
+                pass
+        if cleanup_user and fixture_user is not None:
+            try:
+                fixture_user.delete()
             except Exception:
                 pass
 
