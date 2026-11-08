@@ -147,8 +147,12 @@ def health_check_view(request):
 
     # Detect serverless ephemeral SQLite fallback
     is_serverless = bool(os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
+    is_production = (not settings.DEBUG) or os.getenv('DEEPVISION_ENV', '').lower() == 'production'
     db_name = str(connection.settings_dict.get('NAME') or '')
     is_ephemeral_sqlite = (db_vendor == 'sqlite' and (db_name == ':memory:' or not db_name))
+    # Render containers have ephemeral filesystems unless persistent storage is
+    # explicitly attached. Production must therefore never present SQLite as ready.
+    is_non_persistent_production_db = is_production and db_vendor == 'sqlite'
 
     try:
         user_id = request.user.id if getattr(request, 'user', None) and request.user.is_authenticated else None
@@ -162,12 +166,12 @@ def health_check_view(request):
         http_status = 503
         db_state = "disconnected"
         diagnostic = "Database connection failed. Service is unavailable."
-    elif is_serverless and is_ephemeral_sqlite:
+    elif is_non_persistent_production_db or (is_serverless and is_ephemeral_sqlite):
         overall_status = "pending_configuration"
         http_status = 503
         db_state = "pending_configuration"
         schema_ready = False
-        diagnostic = "Serverless deployment requires persistent database configuration (DATABASE_URL). Ephemeral in-memory database cannot persist user records."
+        diagnostic = "Production requires the persistent PostgreSQL/Supabase DATABASE_URL. SQLite is not accepted as a production database."
     elif not schema_ready:
         overall_status = "pending_migration"
         http_status = 503
