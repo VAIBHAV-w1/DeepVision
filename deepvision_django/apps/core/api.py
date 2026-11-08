@@ -344,45 +344,12 @@ def api_resend_login_otp(request):
 
 
 @require_POST
-@ensure_csrf_cookie
-@handle_db_errors
 def api_demo_session(request):
-    """
-    Establishes an authorized Demo Operator session for direct evaluation.
-    Protected by POST + Django CSRF middleware to prevent cross-site session fixation.
-    """
-    request.session.flush()
-    user = User.objects.filter(role__in=['operator', 'admin', 'supervisor'], is_active=True).first()
-    if not user:
-        user = User.objects.filter(email="operator@deepvision.internal").first()
-        if not user:
-            user = User.objects.create(
-                email="operator@deepvision.internal",
-                full_name="SOC Operator",
-                role="operator",
-                is_active=True,
-                is_email_verified=True,
-            )
-            user.set_password("DemoOperator2026!")
-            user.save()
-
-    request.session["user_id"] = user.id
-    request.session["role"] = user.role
-    request.session.modified = True
-    log_audit(request, "AUTH_DEMO_SESSION", "auth", resource_id=user.id, description=f"Demo operator session initiated ({user.email}).", user=user)
-
+    """Legacy demo-login route is intentionally disabled in every environment."""
     return JsonResponse({
-        "success": True,
-        "authenticated": True,
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "full_name": user.full_name,
-            "role": user.role,
-            "is_active": True,
-            "is_email_verified": True,
-        }
-    })
+        "success": False,
+        "error": "Demo sessions are disabled. Sign in with a registered account."
+    }, status=410)
 
 
 @require_POST
