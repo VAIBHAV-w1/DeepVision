@@ -38,15 +38,23 @@ else:
     # Local development mode: allow dev-only fallback if not explicitly provided
     SECRET_KEY = raw_secret if (raw_secret and raw_secret != _COMPROMISED_KEY) else _DEV_FALLBACK_KEY
 
+DEFAULT_ALLOWED_HOSTS = [
+    '127.0.0.1',
+    'localhost',
+    'testserver',
+    '.vercel.app',
+    'deepvision-soc.vercel.app',
+    '.onrender.com',
+    'deepvision-6ie7.onrender.com',
+    'deepvision-backend.onrender.com',
+    'vsw-deepvision.com',
+    '.vsw-deepvision.com',
+]
 allowed_hosts_env = os.getenv('DJANGO_ALLOWED_HOSTS')
 if allowed_hosts_env:
-    ALLOWED_HOSTS = [h.strip() for h in allowed_hosts_env.split(',') if h.strip()]
+    ALLOWED_HOSTS = list(dict.fromkeys([h.strip() for h in allowed_hosts_env.split(',') if h.strip()] + DEFAULT_ALLOWED_HOSTS))
 else:
-    ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '.vercel.app', 'testserver']
-if '.vercel.app' not in ALLOWED_HOSTS:
-    ALLOWED_HOSTS.append('.vercel.app')
-if 'testserver' not in ALLOWED_HOSTS:
-    ALLOWED_HOSTS.append('testserver')
+    ALLOWED_HOSTS = list(DEFAULT_ALLOWED_HOSTS)
 
 # Standard Django SMTP Email Configuration
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -89,27 +97,41 @@ MIDDLEWARE = [
     'apps.accounts.middleware.AuthenticationMiddleware',
 ]
 
+# Reverse proxy header: Honor X-Forwarded-Proto for SSL behind Render / Vercel / Cloudflare
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # Session Configuration: 100% Signed-Cookie based (ZERO database schema changes / tables)
 SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
 SESSION_COOKIE_NAME = 'deepvision_django_session'
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_AGE = 86400 * 30  # 30 days
-SESSION_COOKIE_SECURE = os.getenv('DJANGO_SECURE_COOKIES', 'False').lower() in ('true', '1')
+SESSION_COOKIE_SECURE = (not DEBUG) or (os.getenv('DJANGO_SECURE_COOKIES', 'False').lower() in ('true', '1'))
 
 # CSRF Configuration
 CSRF_COOKIE_NAME = 'deepvision_django_csrftoken'
 CSRF_COOKIE_HTTPONLY = False  # Allows standard client-side JS fetch headers
 CSRF_COOKIE_SAMESITE = 'Lax'
-CSRF_COOKIE_SECURE = os.getenv('DJANGO_SECURE_COOKIES', 'False').lower() in ('true', '1')
+CSRF_COOKIE_SECURE = (not DEBUG) or (os.getenv('DJANGO_SECURE_COOKIES', 'False').lower() in ('true', '1'))
 
+DEFAULT_CSRF_TRUSTED_ORIGINS = [
+    'http://127.0.0.1:8000',
+    'http://localhost:8000',
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://*.vercel.app',
+    'https://deepvision-soc.vercel.app',
+    'https://*.onrender.com',
+    'https://deepvision-6ie7.onrender.com',
+    'https://deepvision-backend.onrender.com',
+    'https://vsw-deepvision.com',
+    'https://*.vsw-deepvision.com',
+]
 csrf_trusted_origins_env = os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS')
 if csrf_trusted_origins_env:
-    CSRF_TRUSTED_ORIGINS = [o.strip() for o in csrf_trusted_origins_env.split(',') if o.strip()]
+    CSRF_TRUSTED_ORIGINS = list(dict.fromkeys([o.strip() for o in csrf_trusted_origins_env.split(',') if o.strip()] + DEFAULT_CSRF_TRUSTED_ORIGINS))
 else:
-    CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:8000', 'http://localhost:8000', 'https://*.vercel.app']
-if 'https://*.vercel.app' not in CSRF_TRUSTED_ORIGINS:
-    CSRF_TRUSTED_ORIGINS.append('https://*.vercel.app')
+    CSRF_TRUSTED_ORIGINS = list(DEFAULT_CSRF_TRUSTED_ORIGINS)
 
 # Security Headers & Protections
 SECURE_BROWSER_XSS_FILTER = True

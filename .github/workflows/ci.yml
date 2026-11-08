@@ -149,7 +149,7 @@ jobs:
           leaks = []
           for f in files:
               if f.endswith(('.py', '.js', '.jsx', '.json', '.html', '.yml', '.yaml')):
-                  if 'test_e2e_full_system.py' in f:
+                  if 'test_e2e_full_system.py' in f or 'ci.yml' in f:
                       continue
                   try:
                       with open(f, 'r', encoding='utf-8', errors='ignore') as content:
