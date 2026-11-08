@@ -73,12 +73,13 @@ jobs:
       - name: Start Docker Container & Await Health Check
         run: |
           set -e
-          # Share the disposable CI SQLite volume with the host-side E2E runner.
-          # The production service does not use this volume or SQLite.
-          mkdir -p instance
-          chmod 777 instance
+          # Share disposable CI database and media directories with host-side E2E tests.
+          # Production never uses these mounts or SQLite.
+          mkdir -p instance recordings
+          chmod 777 instance recordings
           docker run -d --name deepvision-service -p 8000:8000 \
             -v "$PWD/instance:/app/instance" \
+            -v "$PWD/recordings:/app/recordings" \
             -e DJANGO_SECRET_KEY=ci_test_secret_key_12345678901234567890 \
             -e DJANGO_DEBUG=True \
             -e DEEPVISION_ENV=development \
@@ -109,6 +110,12 @@ jobs:
           docker logs deepvision-service || true
           docker inspect deepvision-service || true
           exit 1
+
+      - name: Prepare Disposable E2E Volume Permissions
+        run: |
+          # The container runs as UID 1000; allow the host-side CI runner to
+          # write only to these disposable test volumes for fixture creation.
+          chmod -R a+rwX instance recordings
 
       - name: Verify Full System E2E Suite
         run: |

@@ -268,7 +268,7 @@ def test_local_docker_health_and_206():
             camera_id=fixture_camera.id,
             user_id=fixture_user.id,
             filename=fixture_filename,
-            file_path=full_path,
+            file_path=os.path.join("/app/recordings", fixture_filename),
             file_size=4096,
             duration_seconds=10,
             started_at=now,
