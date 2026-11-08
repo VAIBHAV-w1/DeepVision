@@ -72,16 +72,32 @@ jobs:
 
       - name: Start Docker Container & Await Health Check
         run: |
+          set -e
           docker run -d --name deepvision-service -p 8000:8000 \
             -e DJANGO_SECRET_KEY=ci_test_secret_key_12345678901234567890 \
             -e DJANGO_DEBUG=True \
             -e DEEPVISION_ENV=development \
-            -e DJANGO_ALLOWED_HOSTS=* \
+            -e DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost,testserver \
             -e INIT_DB_IF_MISSING=true \
             deepvision:ci
           echo "Waiting for container health check on http://127.0.0.1:8000/api/health/..."
-          timeout 60 bash -c 'until curl -sf http://127.0.0.1:8000/api/health/; do sleep 2; done'
-          echo "Container is online and healthy!"
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/health/; then
+              echo "Container is online and healthy!"
+              exit 0
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' deepvision-service 2>/dev/null || echo false)" != "true" ]; then
+              echo "Container exited before becoming healthy. Container logs:"
+              docker logs deepvision-service || true
+              docker inspect deepvision-service || true
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "Container did not become healthy within 60 seconds. Container logs:"
+          docker logs deepvision-service || true
+          docker inspect deepvision-service || true
+          exit 1
 
       - name: Verify Full System E2E Suite
         run: |
