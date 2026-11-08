@@ -54,8 +54,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
-          pip uninstall -y opencv-python || true
-          pip install --no-cache-dir opencv-python-headless>=4.8.0
+          # Ultralytics brings opencv-python; both OpenCV wheels share the
+          # cv2 namespace. Remove both before reinstalling the single headless
+          # runtime so uninstalling one wheel cannot delete the other's files.
+          pip uninstall -y opencv-python opencv-python-headless || true
+          pip install --no-cache-dir "opencv-python-headless>=4.8.0"
+          python -c "import cv2; print('OpenCV import OK:', cv2.__version__)"
 
       - name: Run Django Account and Email Unit Tests
         run: |
