@@ -79,6 +79,12 @@ jobs:
             -e DEEPVISION_ENV=development \
             -e DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost,testserver \
             -e INIT_DB_IF_MISSING=true \
+            -e MAIL_SERVER=smtp.example.test \
+            -e MAIL_PORT=587 \
+            -e MAIL_USERNAME=ci-placeholder \
+            -e MAIL_PASSWORD=ci-placeholder-only-not-a-real-secret \
+            -e MAIL_USE_TLS=true \
+            -e MAIL_DEFAULT_SENDER=deepvision-ci@example.test \
             deepvision:ci
           echo "Waiting for container health check on http://127.0.0.1:8000/api/health/..."
           for attempt in $(seq 1 30); do
