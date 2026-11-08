@@ -118,6 +118,12 @@ jobs:
           docker exec --user root deepvision-service sh -lc 'chmod -R a+rwX /app/instance /app/recordings'
 
       - name: Verify Full System E2E Suite
+        env:
+          # Must match the disposable test container so signed session cookies
+          # generated on the host are accepted by the Django server in Docker.
+          DJANGO_SECRET_KEY: ci_test_secret_key_12345678901234567890
+          DJANGO_DEBUG: "True"
+          DEEPVISION_ENV: development
         run: |
           python verification/test_e2e_full_system.py
 

@@ -255,7 +255,7 @@ def test_local_docker_health_and_206():
             )
             cleanup_camera = True
 
-        rec_dir = os.path.join(REPO_ROOT, "recordings")
+        rec_dir = os.path.join(REPO_ROOT, "instance", "recordings")
         os.makedirs(rec_dir, exist_ok=True)
         fixture_filename = "ci_test_fixture_206.mp4"
         full_path = os.path.join(rec_dir, fixture_filename)
@@ -268,7 +268,7 @@ def test_local_docker_health_and_206():
             camera_id=fixture_camera.id,
             user_id=fixture_user.id,
             filename=fixture_filename,
-            file_path=os.path.join("/app/recordings", fixture_filename),
+            file_path=fixture_filename,
             file_size=4096,
             duration_seconds=10,
             started_at=now,
