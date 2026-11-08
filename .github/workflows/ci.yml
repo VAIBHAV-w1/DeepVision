@@ -113,9 +113,9 @@ jobs:
 
       - name: Prepare Disposable E2E Volume Permissions
         run: |
-          # The container runs as UID 1000; allow the host-side CI runner to
-          # write only to these disposable test volumes for fixture creation.
-          chmod -R a+rwX instance recordings
+          # The database files are owned by the container's non-root user.
+          # Adjust only the disposable CI mounts from inside the container.
+          docker exec --user root deepvision-service sh -lc 'chmod -R a+rwX /app/instance /app/recordings'
 
       - name: Verify Full System E2E Suite
         run: |
