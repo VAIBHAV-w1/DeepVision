@@ -73,7 +73,12 @@ jobs:
       - name: Start Docker Container & Await Health Check
         run: |
           set -e
+          # Share the disposable CI SQLite volume with the host-side E2E runner.
+          # The production service does not use this volume or SQLite.
+          mkdir -p instance
+          chmod 777 instance
           docker run -d --name deepvision-service -p 8000:8000 \
+            -v "$PWD/instance:/app/instance" \
             -e DJANGO_SECRET_KEY=ci_test_secret_key_12345678901234567890 \
             -e DJANGO_DEBUG=True \
             -e DEEPVISION_ENV=development \
