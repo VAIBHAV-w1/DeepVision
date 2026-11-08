@@ -313,9 +313,26 @@ def ensure_database():
 
     is_production = is_production_environment()
 
-    # Check if PostgreSQL / Supabase is configured
-    use_postgres = os.getenv("USE_POSTGRES", "").lower() in ("true", "1") or bool(os.getenv("DATABASE_URL", "").startswith("postgres")) or bool(os.getenv("SUPABASE_DB_URL", "").startswith("postgres"))
+    # Production must use the existing persistent PostgreSQL / Supabase database.
+    # Never let a container silently create an empty, ephemeral SQLite database.
+    database_url = (os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or "").strip()
+    has_postgres_url = database_url.startswith(("postgres://", "postgresql://"))
+    use_postgres = os.getenv("USE_POSTGRES", "").lower() in ("true", "1") or has_postgres_url
+
+    if is_production and not has_postgres_url:
+        logger.critical(
+            "FATAL: Production startup requires DATABASE_URL (or SUPABASE_DB_URL) "
+            "pointing to the existing PostgreSQL / Supabase database."
+        )
+        logger.critical(
+            "SQLite production auto-initialization is disabled. Configure the database "
+            "connection in the hosting provider's secret environment variables."
+        )
+        raise RuntimeError("Production database URL is missing or is not PostgreSQL; refusing ephemeral SQLite.")
+
     if use_postgres:
+        if not has_postgres_url:
+            raise RuntimeError("USE_POSTGRES is enabled but no valid PostgreSQL DATABASE_URL is configured.")
         logger.info("Database preflight: PostgreSQL / Supabase configured. Bypassing SQLite file preflight validation.")
         return
 
