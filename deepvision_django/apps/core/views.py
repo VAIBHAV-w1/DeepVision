@@ -134,6 +134,16 @@ def health_check_view(request):
         except Exception:
             schema_ready = False
 
+    # Report SMTP configuration readiness without exposing credentials.
+    email_configuration_complete = all((
+        getattr(settings, "EMAIL_HOST", ""),
+        getattr(settings, "EMAIL_PORT", None),
+        getattr(settings, "EMAIL_HOST_USER", ""),
+        getattr(settings, "EMAIL_HOST_PASSWORD", ""),
+        getattr(settings, "DEFAULT_FROM_EMAIL", ""),
+    ))
+    email_delivery_state = "configured_not_tested" if email_configuration_complete else "not_configured"
+
     # Detect serverless ephemeral SQLite fallback
     is_serverless = bool(os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
     db_name = str(connection.settings_dict.get('NAME') or '')
@@ -162,6 +172,11 @@ def health_check_view(request):
         http_status = 503
         db_state = "connected"
         diagnostic = f"Database connected ({db_vendor}), but required tables are missing ({len(tables)} tables found). Schema migration required."
+    elif not email_configuration_complete:
+        overall_status = "degraded"
+        http_status = 200
+        db_state = "connected"
+        diagnostic = "Database connected and schema verified, but SMTP settings are incomplete. Email-based verification, sign-in OTP, and password recovery cannot be delivered."
     elif engine_health.get("status") != "healthy":
         overall_status = "degraded"
         http_status = 200
@@ -182,6 +197,9 @@ def health_check_view(request):
         "tables_count": len(tables),
         "diagnostic": diagnostic,
         "surveillance_engine": engine_health.get("status", "unknown"),
+        "email_delivery": email_delivery_state,
+        "email_configuration_complete": email_configuration_complete,
+        "email_delivery_tested": False,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     return JsonResponse(payload, status=http_status)

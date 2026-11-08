@@ -144,14 +144,20 @@ def signup_view(request):
             otp = new_user.generate_otp()
             new_user.save()
 
+            email_sent = False
             try:
-                if not send_verification_email(email, otp):
-                    logger.warning("[AUTH] Verification email delivery failed.")
+                email_sent = send_verification_email(email, otp)
             except Exception:
                 logger.warning("[AUTH] Verification email delivery failed.")
 
             request.session["signup_email"] = email
-            messages.success(request, "Account created successfully. A verification code has been sent to your email.")
+            if email_sent:
+                messages.success(request, "Account created successfully. A verification code has been sent to your email.")
+            else:
+                user.email_otp_sent_at = None
+                user.save(update_fields=["email_otp_sent_at"])
+                logger.warning("[AUTH] Verification email was not accepted by the configured email backend.")
+                messages.warning(request, "Your account was created, but the verification email could not be delivered. Check email service configuration or try sending the code again later.")
             return redirect("verify_email")
 
         except Exception:
@@ -265,7 +271,7 @@ def forgot_password_view(request):
             except Exception:
                 logger.warning("[AUTH] Password reset setup failed for user_id=%s.", user.id)
 
-        messages.success(request, "If the account exists, a password reset code has been sent to the email address.")
+        messages.success(request, "If an account exists, the password reset request has been processed. Check the inbox if email delivery is available.")
         return redirect("reset_password")
 
     return render(request, "pages/auth/forgot_password.html")
@@ -349,7 +355,7 @@ def resend_reset_otp_view(request):
 
     user = User.objects.filter(email=email).first()
     if not user:
-        messages.success(request, "A new reset verification code has been sent to your email.")
+        messages.success(request, "If an account exists, a new reset message will be sent when email delivery is available.")
         return redirect("reset_password")
 
     now = datetime.now(timezone.utc)

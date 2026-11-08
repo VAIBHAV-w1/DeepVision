@@ -57,6 +57,11 @@ jobs:
           pip uninstall -y opencv-python || true
           pip install --no-cache-dir opencv-python-headless>=4.8.0
 
+      - name: Run Django Account and Email Unit Tests
+        run: |
+          cd deepvision_django
+          python manage.py test apps.accounts.tests --verbosity 2
+
       - name: Verify CSP & Infinite Loader Guard
         run: |
           python verification/test_csp_and_startup_loader.py
@@ -69,7 +74,8 @@ jobs:
         run: |
           docker run -d --name deepvision-service -p 8000:8000 \
             -e DJANGO_SECRET_KEY=ci_test_secret_key_12345678901234567890 \
-            -e DJANGO_DEBUG=False \
+            -e DJANGO_DEBUG=True \
+            -e DEEPVISION_ENV=development \
             -e DJANGO_ALLOWED_HOSTS=* \
             -e INIT_DB_IF_MISSING=true \
             deepvision:ci
