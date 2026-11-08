@@ -56,7 +56,13 @@ COPY manage.py sitecustomize.py start_deepvision.py .env.example ./
 COPY deepvision_django/ ./deepvision_django/
 COPY scripts/ ./scripts/
 COPY docs/ ./docs/
-COPY models/yolo11n.pt ./models/yolo11n.pt
+# Fetch the exact YOLO11n weights used by the project.
+# The pinned upstream revision and SHA-256 prevent silent model drift or corruption.
+RUN mkdir -p models && \
+    curl -fL --retry 3 --retry-all-errors \
+      "https://huggingface.co/Ultralytics/YOLO11/resolve/a01aaa06caeff788b052e193acb76b3f21571b3a/yolo11n.pt" \
+      -o models/yolo11n.pt && \
+    echo "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1  models/yolo11n.pt" | sha256sum -c -
 
 # Copy compiled production React frontend assets from Stage 1
 COPY --from=frontend-builder /app/deepvision_django/static/dist/ ./deepvision_django/static/dist/
