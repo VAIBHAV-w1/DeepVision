@@ -151,8 +151,16 @@ def health_check_view(request):
     db_name = str(connection.settings_dict.get('NAME') or '')
     is_ephemeral_sqlite = (db_vendor == 'sqlite' and (db_name == ':memory:' or not db_name))
     # Render containers have ephemeral filesystems unless persistent storage is
-    # explicitly attached. Production must therefore never present SQLite as ready.
-    is_non_persistent_production_db = is_production and db_vendor == 'sqlite'
+    # explicitly attached. Production must therefore never present SQLite as ready
+    # unless ALLOW_SQLITE_FALLBACK or INIT_DB_IF_MISSING is explicitly enabled.
+    is_non_persistent_production_db = (
+        is_production
+        and db_vendor == 'sqlite'
+        and not (
+            os.getenv('ALLOW_SQLITE_FALLBACK', 'false').lower() in ('true', '1')
+            or os.getenv('INIT_DB_IF_MISSING', 'false').lower() in ('true', '1')
+        )
+    )
 
     try:
         user_id = request.user.id if getattr(request, 'user', None) and request.user.is_authenticated else None

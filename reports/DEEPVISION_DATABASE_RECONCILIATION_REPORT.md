@@ -164,3 +164,4 @@ DJANGO_CSRF_TRUSTED_ORIGINS=https://deepvision-6ie7.onrender.com,https://deepvis
 If any PostgreSQL connectivity issue occurs:
 1. Clear `DATABASE_URL` and `USE_POSTGRES` from Render environment variables.
 2. Render will instantly fall back to its verified 18-table SQLite engine without service interruption.
+

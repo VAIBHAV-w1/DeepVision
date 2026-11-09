@@ -320,15 +320,25 @@ def ensure_database():
     use_postgres = os.getenv("USE_POSTGRES", "").lower() in ("true", "1") or has_postgres_url
 
     if is_production and not has_postgres_url:
-        logger.critical(
-            "FATAL: Production startup requires DATABASE_URL (or SUPABASE_DB_URL) "
-            "pointing to the existing PostgreSQL / Supabase database."
+        allow_sqlite = (
+            os.getenv("ALLOW_SQLITE_FALLBACK", "false").lower() in ("true", "1")
+            or os.getenv("INIT_DB_IF_MISSING", "false").lower() in ("true", "1")
         )
-        logger.critical(
-            "SQLite production auto-initialization is disabled. Configure the database "
-            "connection in the hosting provider's secret environment variables."
+        if not allow_sqlite:
+            logger.critical(
+                "FATAL: Production startup requires DATABASE_URL (or SUPABASE_DB_URL) "
+                "pointing to the existing PostgreSQL / Supabase database."
+            )
+            logger.critical(
+                "SQLite production auto-initialization is disabled. Configure the database "
+                "connection in the hosting provider's secret environment variables, "
+                "or set ALLOW_SQLITE_FALLBACK=true to permit edge SQLite operation."
+            )
+            raise RuntimeError("Production database URL is missing or is not PostgreSQL; refusing ephemeral SQLite.")
+        logger.warning(
+            "Production mode active without PostgreSQL DATABASE_URL. "
+            "ALLOW_SQLITE_FALLBACK / INIT_DB_IF_MISSING is enabled; using verified SQLite edge database."
         )
-        raise RuntimeError("Production database URL is missing or is not PostgreSQL; refusing ephemeral SQLite.")
 
     if use_postgres:
         if not has_postgres_url:
