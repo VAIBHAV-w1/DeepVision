@@ -181,7 +181,19 @@ def _send_via_http_api(recipient_email, subject, html_content):
 
 
 def _send_email(recipient_email, subject, html_content):
-    """Send through Django's configured backend (or HTTPS API fallback) and report actual provider acceptance."""
+    """Send through configured HTTPS email API (preferred in cloud containers) or Django's email backend."""
+    email_backend = getattr(settings, "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+    has_http_api = bool(
+        os.environ.get("RESEND_API_KEY", "").strip()
+        or os.environ.get("BREVO_API_KEY", "").strip()
+        or os.environ.get("SENDGRID_API_KEY", "").strip()
+    )
+
+    # Prefer HTTPS API over raw SMTP when running with default SMTP backend and an HTTPS API key is present
+    if email_backend == "django.core.mail.backends.smtp.EmailBackend" and has_http_api:
+        if _send_via_http_api(recipient_email, subject, html_content):
+            return True
+
     if not all((settings.EMAIL_HOST, settings.EMAIL_HOST_USER,
                 settings.EMAIL_HOST_PASSWORD, settings.DEFAULT_FROM_EMAIL)):
         if _send_via_http_api(recipient_email, subject, html_content):

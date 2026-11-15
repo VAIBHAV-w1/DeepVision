@@ -18,10 +18,20 @@ export function getCookie(name) {
   return cookieValue;
 }
 
+let cachedCsrfToken = '';
+let inflightCsrfPromise = null;
+
+export function setCsrfToken(token) {
+  if (typeof token === 'string') {
+    cachedCsrfToken = token;
+  }
+}
+
 export function getCsrfToken() {
   return (
     getCookie('deepvision_django_csrftoken') ||
     getCookie('csrftoken') ||
+    cachedCsrfToken ||
     ''
   );
 }
@@ -29,14 +39,32 @@ export function getCsrfToken() {
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 
 export async function fetchCsrfToken() {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/auth/csrf/`, { credentials: 'include' });
-    if (res.ok) {
-      const data = await res.json();
-      return data.csrfToken || getCsrfToken();
-    }
-  } catch (e) {
-    console.warn('Failed to fetch CSRF token:', e);
+  if (inflightCsrfPromise) {
+    return inflightCsrfPromise;
   }
-  return getCsrfToken();
+  inflightCsrfPromise = (async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/csrf/`, {
+        credentials: 'include',
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.csrfToken) {
+          setCsrfToken(data.csrfToken);
+          return data.csrfToken;
+        }
+        return getCsrfToken();
+      }
+    } catch (e) {
+      console.warn('Failed to fetch CSRF token:', e);
+    } finally {
+      clearTimeout(timeoutId);
+      inflightCsrfPromise = null;
+    }
+    return getCsrfToken();
+  })();
+  return inflightCsrfPromise;
 }

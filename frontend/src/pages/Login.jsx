@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../services/api';
+import { getCsrfToken, fetchCsrfToken } from '../utils/csrf';
 import { useToast } from '../components/common/Toast';
 import { useTranslation } from '../i18n/i18nContext';
 import LanguageSelector from '../components/common/LanguageSelector';
@@ -27,6 +28,12 @@ export function Login({ onNavigate, onNeedsVerification }) {
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [cooldown, setCooldown] = useState(60);
   const inputRefs = useRef([]);
+
+  useEffect(() => {
+    if (!getCsrfToken()) {
+      fetchCsrfToken();
+    }
+  }, []);
 
   useEffect(() => {
     if (step === 'otp') {

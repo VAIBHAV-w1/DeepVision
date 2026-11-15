@@ -3,7 +3,7 @@
  * All frontend HTTP/JSON requests must route through this client.
  */
 
-import { getCsrfToken, fetchCsrfToken } from '../utils/csrf';
+import { getCsrfToken, fetchCsrfToken, setCsrfToken } from '../utils/csrf';
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 const RENDER_FALLBACK_ORIGIN = 'https://deepvision-6ie7.onrender.com';
@@ -11,8 +11,6 @@ const RENDER_FALLBACK_ORIGIN = 'https://deepvision-6ie7.onrender.com';
 async function request(endpoint, options = {}) {
   const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
   const timeoutMs = options.timeout || 25000;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   const headers = {
     'Accept': 'application/json',
@@ -27,7 +25,7 @@ async function request(endpoint, options = {}) {
     options.body = JSON.stringify(options.body);
   }
 
-  // Include CSRF Token for mutating methods
+  // Include CSRF Token for mutating methods BEFORE starting the request timeout timer
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
     let csrfToken = getCsrfToken();
     if (!csrfToken) {
@@ -38,6 +36,9 @@ async function request(endpoint, options = {}) {
     }
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     let response = await fetch(url, {
       ...options,
@@ -47,10 +48,10 @@ async function request(endpoint, options = {}) {
       credentials: 'include',
     });
 
-    // Automatic single retry when Render container is waking from cold start (502/504 HTML gateway response)
-    if ((response.status === 502 || response.status === 504) && !options._retried) {
+    // Automatic single retry only for idempotent GET requests when Render container is waking from cold start (502/504)
+    if (method === 'GET' && (response.status === 502 || response.status === 504) && !options._retried) {
       await new Promise((r) => setTimeout(r, 1500));
-      const retryUrl = (!endpoint.startsWith('http') && !API_BASE_URL && method === 'GET')
+      const retryUrl = (!endpoint.startsWith('http') && !API_BASE_URL)
         ? `${RENDER_FALLBACK_ORIGIN}${endpoint}`
         : url;
       response = await fetch(retryUrl, {
@@ -82,6 +83,9 @@ async function request(endpoint, options = {}) {
     if (contentType.includes('application/json')) {
       try {
         data = await response.json();
+        if (data && typeof data === 'object' && data.csrfToken) {
+          setCsrfToken(data.csrfToken);
+        }
       } catch (e) {
         data = null;
       }
@@ -98,6 +102,7 @@ async function request(endpoint, options = {}) {
       } else if (response.status === 503) {
         errorMsg = 'Database or service temporarily unavailable. Please retry in a few moments.';
       } else if (response.status === 403 && typeof data === 'string' && data.includes('CSRF')) {
+        setCsrfToken('');
         errorMsg = 'Security validation failed (CSRF token expired). Please refresh the page.';
       } else if (response.status === 401) {
         errorMsg = 'Authentication required. Please sign in to proceed.';

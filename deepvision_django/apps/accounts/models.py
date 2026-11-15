@@ -99,13 +99,15 @@ class User(models.Model):
     def generate_otp(self, purpose: str = "signup"):
         """
         Generates 6-digit numeric OTP, sets 15-minute expiry, resets attempts.
-        Hashes token with purpose salt (e.g. 'SIGNUP:<otp>' or 'LOGIN:<otp>') using Django PBKDF2.
+        Hashes token with purpose salt (e.g. 'SIGNUP:<otp>' or 'LOGIN:<otp>') using Django PBKDF2
+        with 100,000 iterations (fast on constrained container vCPUs while keeping full cryptographic PBKDF2).
         Returns the plaintext OTP.
         """
-        from django.contrib.auth.hashers import make_password
+        from django.contrib.auth.hashers import PBKDF2PasswordHasher
         otp = "".join(secrets.choice("0123456789") for _ in range(6))
         purpose_tag = purpose.strip().upper()
-        self.email_otp_hash = make_password(f"{purpose_tag}:{otp}")
+        hasher = PBKDF2PasswordHasher()
+        self.email_otp_hash = hasher.encode(f"{purpose_tag}:{otp}", hasher.salt(), iterations=100_000)
         now = timezone.now()
         self.email_otp_expires_at = now + timedelta(minutes=15)
         self.email_otp_sent_at = now
@@ -167,11 +169,12 @@ class User(models.Model):
     def generate_reset_otp(self):
         """
         Generates 6-digit numeric OTP for password reset, sets 15-minute expiry.
-        Hashes with Django PBKDF2. Returns the plaintext OTP.
+        Hashes with Django PBKDF2 (100,000 iterations). Returns the plaintext OTP.
         """
-        from django.contrib.auth.hashers import make_password
+        from django.contrib.auth.hashers import PBKDF2PasswordHasher
         otp = "".join(secrets.choice("0123456789") for _ in range(6))
-        self.password_reset_otp_hash = make_password(otp)
+        hasher = PBKDF2PasswordHasher()
+        self.password_reset_otp_hash = hasher.encode(otp, hasher.salt(), iterations=100_000)
         now = timezone.now()
         self.password_reset_otp_expires_at = now + timedelta(minutes=15)
         self.password_reset_otp_sent_at = now

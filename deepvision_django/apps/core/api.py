@@ -153,14 +153,17 @@ def api_csrf(request):
     return JsonResponse({"csrfToken": token})
 
 
+@ensure_csrf_cookie
 @never_cache
 @require_GET
 def api_me(request):
-    """Returns current authenticated session user state."""
+    """Returns current authenticated session user state and ensures CSRF token availability."""
+    csrf_token = get_token(request)
     user = getattr(request, 'user', None)
     if user and user.is_authenticated:
         return JsonResponse({
             "authenticated": True,
+            "csrfToken": csrf_token,
             "user": {
                 "id": user.id,
                 "email": user.email,
@@ -170,7 +173,7 @@ def api_me(request):
                 "is_email_verified": user.is_email_verified,
             }
         })
-    return JsonResponse({"authenticated": False, "user": None})
+    return JsonResponse({"authenticated": False, "user": None, "csrfToken": csrf_token})
 
 
 @require_POST

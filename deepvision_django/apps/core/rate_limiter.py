@@ -41,23 +41,22 @@ def check_rate_limit(request, scope: str, limit: int, window_seconds: int) -> Tu
     action_key = f"rate_limit:{scope}"
 
     try:
-        # Periodic cleanup of rate limit logs older than 1 hour (5% sampling rate)
-        if random.random() < 0.05:
-            prune_threshold = now - datetime.timedelta(hours=1)
-            AuditLog.objects.filter(action__startswith="rate_limit:", created_at__lt=prune_threshold).delete()
+        # Query existing attempts in current window with a single bounded query
+        recent_timestamps = list(
+            AuditLog.objects.filter(
+                action=action_key,
+                ip_address=ip,
+                created_at__gte=window_start,
+            )
+            .order_by("created_at")
+            .values_list("created_at", flat=True)[:limit]
+        )
 
-        # Query existing attempts in current window
-        attempts = AuditLog.objects.filter(
-            action=action_key,
-            ip_address=ip,
-            created_at__gte=window_start
-        ).order_by("created_at")
-
-        count = attempts.count()
+        count = len(recent_timestamps)
         if count >= limit:
-            oldest = attempts.first()
-            if oldest and oldest.created_at:
-                elapsed = (now - oldest.created_at).total_seconds()
+            oldest_created_at = recent_timestamps[0]
+            if oldest_created_at:
+                elapsed = (now - oldest_created_at).total_seconds()
                 retry_after = max(1, int(window_seconds - elapsed))
             else:
                 retry_after = window_seconds
