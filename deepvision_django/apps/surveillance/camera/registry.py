@@ -99,6 +99,41 @@ class CameraRegistry:
             self._physical_map[physical_key] = worker
             return worker
 
+    def get_or_create_browser_worker(self, camera_id: int, user_id: int = None) -> CameraWorker:
+        """
+        Returns an active worker for camera_id, or creates a passive browser-ingest CameraWorker
+        if physical capture cannot be opened (e.g., cloud-hosted server receiving browser getUserMedia frames).
+        """
+        with self._lock:
+            worker = self._workers.get(camera_id)
+            if worker and worker.running:
+                return worker
+
+            from apps.cameras.models import Camera
+            camera = Camera.objects.filter(id=camera_id).first()
+            if not camera:
+                raise ValueError(f"Camera with ID {camera_id} not found in database.")
+
+            source_type = camera.source_type
+            source = camera.source
+            owner_id = user_id or camera.user_id
+            physical_key = f"browser:{camera_id}:{get_physical_source_key(source_type, source)}"
+
+            worker = CameraWorker(
+                camera_id=camera_id,
+                cap_source=f"browser:{camera_id}",
+                source_type=source_type,
+                user_id=owner_id,
+                physical_source_id=physical_key,
+            )
+            worker.start_browser_mode()
+            worker.ref_count = 1
+            self._workers[camera_id] = worker
+            self._physical_map[physical_key] = worker
+            if camera.status != "online":
+                Camera.objects.filter(id=camera_id).update(status="online")
+            return worker
+
     def get_active_worker(self, camera_id: int) -> CameraWorker:
         with self._lock:
             worker = self._workers.get(camera_id)

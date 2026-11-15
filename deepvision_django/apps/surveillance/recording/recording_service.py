@@ -251,7 +251,7 @@ def stop_recording(recording_id, user_id=None):
 
     now = django_timezone.now()
     rec.ended_at = now
-    rec.status = 'completed'
+    rec.status = 'processing'
 
     if rec.started_at:
         rec.duration_seconds = round(max(0.0, (now - rec.started_at).total_seconds()), 1)
@@ -261,8 +261,21 @@ def stop_recording(recording_id, user_id=None):
     if os.path.exists(full_path):
         rec.file_size = os.path.getsize(full_path)
 
-    rec.save(update_fields=['ended_at', 'status', 'duration_seconds', 'file_size'])
-    logger.info(f"[RECORDING_STOPPED] id={rec.id} cam={rec.camera_id} size={rec.file_size} dur={rec.duration_seconds}s")
+    from apps.core.storage_service import get_storage_backend, schedule_recording_upload
+
+    backend = get_storage_backend()
+    if rec.file_size <= 0 or not os.path.exists(full_path):
+        rec.status = 'failed'
+        rec.save(update_fields=['ended_at', 'status', 'duration_seconds', 'file_size'])
+    elif backend.is_persistent:
+        rec.status = 'uploading'
+        rec.save(update_fields=['ended_at', 'status', 'duration_seconds', 'file_size'])
+        schedule_recording_upload(rec.id)
+    else:
+        rec.status = 'completed'
+        rec.save(update_fields=['ended_at', 'status', 'duration_seconds', 'file_size'])
+
+    logger.info(f"[RECORDING_STOPPED] id={rec.id} cam={rec.camera_id} status={rec.status} size={rec.file_size} dur={rec.duration_seconds}s")
     return rec
 
 
@@ -304,3 +317,81 @@ def write_frame(camera_id, frame):
 
     if writer_thread:
         writer_thread.push_frame(frame)
+
+
+def recover_interrupted_recordings(user_id=None):
+    """
+    Reconciles any orphaned Recording rows left in 'recording', 'processing', or 'uploading'
+    without an active in-memory writer or upload worker (e.g. after container restart).
+    - Re-queues or uploads valid staged files without duplicating persistent objects.
+    - Marks empty/lost sessions as 'interrupted' rather than silently marking them 'completed'.
+    """
+    from apps.core.storage_service import (
+        _INFLIGHT_LOCKS_GUARD,
+        _INFLIGHT_RECORDING_UPLOADS,
+        get_storage_backend,
+        media_exists,
+        parse_storage_uri,
+        resolve_local_staged_recording,
+        schedule_recording_upload,
+    )
+
+    qs = Recording.objects.filter(status__in=('recording', 'processing', 'uploading'))
+    if user_id is not None:
+        qs = qs.filter(user_id=user_id)
+
+    now = django_timezone.now()
+    backend = get_storage_backend()
+    recovered_ids = []
+
+    with _lock:
+        active_rec_ids = {
+            data.get('recording_id')
+            for data in _active_recordings.values()
+            if data.get('writer_thread') and data['writer_thread'].is_alive()
+        }
+
+    with _INFLIGHT_LOCKS_GUARD:
+        active_upload_ids = set(_INFLIGHT_RECORDING_UPLOADS)
+
+    for rec in qs:
+        if rec.id in active_rec_ids or rec.id in active_upload_ids:
+            continue
+
+        scheme, _, _ = parse_storage_uri(rec.file_path)
+        if scheme != 'local' and media_exists(rec.file_path, kind='recording'):
+            rec.status = 'completed'
+            rec.ended_at = rec.ended_at or now
+            rec.save(update_fields=['status', 'ended_at'])
+            recovered_ids.append(rec.id)
+            continue
+
+        local_path = resolve_local_staged_recording(rec)
+        file_size = 0
+        if local_path and os.path.exists(local_path):
+            try:
+                file_size = os.path.getsize(local_path)
+            except Exception:
+                file_size = 0
+
+        rec.ended_at = rec.ended_at or now
+        if rec.started_at and not rec.duration_seconds:
+            rec.duration_seconds = round(max(0.0, (now - rec.started_at).total_seconds()), 1)
+        rec.file_size = file_size
+
+        if file_size > 0:
+            if backend.is_persistent:
+                rec.status = 'uploading'
+                rec.save(update_fields=['ended_at', 'duration_seconds', 'file_size', 'status'])
+                schedule_recording_upload(rec.id)
+            else:
+                rec.status = 'completed'
+                rec.save(update_fields=['ended_at', 'duration_seconds', 'file_size', 'status'])
+        else:
+            rec.status = 'interrupted'
+            rec.save(update_fields=['ended_at', 'duration_seconds', 'file_size', 'status'])
+
+        recovered_ids.append(rec.id)
+        logger.info(f"[RECORDING_RECOVERED] id={rec.id} cam={rec.camera_id} status={rec.status} size={file_size}")
+
+    return recovered_ids

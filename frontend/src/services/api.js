@@ -187,8 +187,17 @@ export const api = {
     startRecording: (id) => request(`/api/cameras/${id}/record/start/`, { method: 'POST' }),
     stopRecording: (id) => request(`/api/cameras/${id}/record/stop/`, { method: 'POST' }),
     testCamera: (id) => request(`/api/cameras/${id}/test/`, { method: 'POST' }),
-    testConnection: (sourceType, source) =>
-      request('/api/cameras/test-connection/', { method: 'POST', body: { source_type: sourceType, source } }),
+    testConnection: (sourceType, source, username = '', password = '') =>
+      request('/api/cameras/test-connection/', {
+        method: 'POST',
+        body: { source_type: sourceType, source, username, password },
+      }),
+    ingestFrame: (id, frameDataUrl) =>
+      request(`/api/cameras/${id}/ingest-frame/`, {
+        method: 'POST',
+        body: { frame: frameDataUrl },
+      }),
+    disconnect: (id) => request(`/api/cameras/${id}/disconnect/`, { method: 'POST' }),
     warm: (id) => request(`/api/cameras/${id}/warm/`),
     getStreamUrl: (id, mode = 'tracking') => `${API_BASE_URL}/api/cameras/${id}/stream/?mode=${mode}`,
     getOriginalStreamUrl: (id) => `${API_BASE_URL}/api/cameras/${id}/stream/original/`,
@@ -214,6 +223,8 @@ export const api = {
       return request(`/api/recordings/${q ? '?' + q : ''}`);
     },
     get: (id) => request(`/api/recordings/${id}/`),
+    remove: (id) => request(`/api/recordings/${id}/`, { method: 'DELETE' }),
+    retryUpload: (id) => request(`/api/recordings/${id}/retry-upload/`, { method: 'POST' }),
     getViewUrl: (id) => `${API_BASE_URL}/recordings/${id}/view/`,
     getDownloadUrl: (id) => `${API_BASE_URL}/recordings/${id}/download/`,
   },
@@ -225,6 +236,7 @@ export const api = {
       return request(`/api/evidence/${q ? '?' + q : ''}`);
     },
     get: (id) => request(`/api/evidence/${id}/`),
+    remove: (id) => request(`/api/evidence/${id}/`, { method: 'DELETE' }),
     getPreviewUrl: (id) => `${API_BASE_URL}/evidence/${id}/preview/`,
     getDownloadUrl: (id) => `${API_BASE_URL}/evidence/${id}/download/`,
   },

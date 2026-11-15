@@ -50,6 +50,58 @@ class CameraWorker:
         self.is_reconnecting = False
         self.last_acquisition_ms = 0.0
         self.acquisition_samples = deque(maxlen=180)
+        self.is_browser_pushed = False
+        self._browser_fps_window_start = time.time()
+        self._browser_frames_pushed = 0
+
+    def start_browser_mode(self):
+        """Activates worker in passive browser-pushed mode (navigator.mediaDevices.getUserMedia bridge)."""
+        with self.lock:
+            self.is_browser_pushed = True
+            self.running = True
+            self.is_starting = False
+            self.start_error = None
+            self.last_error = None
+            if self.state in ("OFFLINE", "ERROR"):
+                self.state = "CONNECTING"
+            self.start_event.set()
+
+    def ingest_external_frame(self, frame):
+        """Injects a decoded BGR numpy frame from an authenticated browser/mobile push client."""
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return False
+        now = time.time()
+        now_mono = time.monotonic()
+        with self.frame_condition:
+            self.is_browser_pushed = True
+            self.running = True
+            self.latest_frame = frame
+            self.rolling_buffer.append(frame)
+            self.frame_id += 1
+            self.last_capture_monotonic = now_mono
+            self.last_frame_time = now
+            self.last_valid_frame_time = now
+            self.consecutive_black_frames = 0
+            self.last_error = None
+            self.state = "ONLINE"
+            self._browser_frames_pushed += 1
+            dt = now - self._browser_fps_window_start
+            if self._browser_frames_pushed >= 4 and dt > 0:
+                self.fps = round(self._browser_frames_pushed / dt, 1)
+                self._browser_frames_pushed = 0
+                self._browser_fps_window_start = now
+            self.frame_condition.notify_all()
+
+        try:
+            from apps.surveillance.recording import recording_service
+            from apps.surveillance.camera.registry import get_camera_registry
+            bound_ids = set(get_camera_registry().get_bound_camera_ids(self.physical_source_id))
+            bound_ids.add(self.camera_id)
+            for cid in bound_ids:
+                recording_service.write_frame(cid, frame)
+        except Exception:
+            pass
+        return True
 
     def get_operational_status(self):
         """Returns standard surveillance state: CONNECTING, ONLINE, STALE, RECONNECTING, OFFLINE, ERROR."""

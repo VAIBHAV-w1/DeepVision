@@ -88,6 +88,20 @@ export function Recordings({ initialCameraId, selectedId, onNavigate }) {
     setActiveRecording(item);
   };
 
+  const handleRetryUpload = async (item) => {
+    try {
+      const res = await api.recordings.retryUpload(item.id);
+      if (res?.success) {
+        addToast('Recording synced to persistent cloud storage.', 'success');
+      } else {
+        addToast(res?.message || 'Unable to sync recording.', 'error');
+      }
+      fetchRecordings(page);
+    } catch (err) {
+      addToast(err?.message || 'Retry upload failed.', 'error');
+    }
+  };
+
   return (
     <div className="recordings-page-container">
       {/* Operational Header */}
@@ -275,6 +289,17 @@ export function Recordings({ initialCameraId, selectedId, onNavigate }) {
                       >
                         <span>{item.file_exists ? 'Play Clip' : 'Unavailable'}</span>
                       </button>
+                      {item.can_retry_upload && (
+                        <button
+                          type="button"
+                          onClick={() => handleRetryUpload(item)}
+                          className="btn btn-ghost btn-sm"
+                          title="Retry persistent storage sync"
+                          style={{ padding: '0.25rem 0.55rem', fontSize: '0.74rem', color: 'var(--color-warning, #f59e0b)' }}
+                        >
+                          Sync
+                        </button>
+                      )}
                       {item.file_exists && item.download_url && (
                         <a
                           href={item.download_url}

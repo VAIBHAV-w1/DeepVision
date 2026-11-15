@@ -299,6 +299,11 @@ def camera_snapshot_view(request, camera_id):
                 captured_at=now,
                 created_at=now,
             )
+            try:
+                from apps.core.storage_service import schedule_evidence_upload
+                schedule_evidence_upload(evidence.id)
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"[SNAPSHOT_DB_ERROR] Failed creating Evidence metadata: {e}")
             return JsonResponse({"success": False, "error": f"Database recording failed: {e}"}, status=500)
@@ -361,10 +366,13 @@ def camera_warm_view(request, camera_id):
 def surveillance_health_api_view(request):
     """
     Phase 8: Boundary Health & Diagnostics API.
-    Exposes observable, sanitized status of the canonical surveillance engine.
+    Exposes observable, sanitized status of the canonical surveillance engine and storage posture.
     Strictly protected by authentication; never leaks internal paths or secrets.
     """
-    health = get_engine_health(user_id=request.user.id)
+    from apps.core.storage_service import get_storage_health
+
+    health = dict(get_engine_health(user_id=request.user.id) or {})
+    health["storage"] = get_storage_health()
     status_code = 200 if health.get("status") in ("healthy", "degraded") else 503
     return JsonResponse(health, status=status_code)
 
@@ -418,6 +426,7 @@ def camera_record_stop_view(request, camera_id):
 def camera_test_connection_view(request):
     """
     Tests camera connection parameters via canonical surveillance engine.
+    Supports optional username/password credentials for RTSP/HTTP cameras.
     """
     data = {}
     if request.body:
@@ -426,12 +435,19 @@ def camera_test_connection_view(request):
         except Exception:
             data = {}
     source_type = data.get("source_type", "") or request.POST.get("source_type", "")
+    if str(source_type).strip().lower() == "stream":
+        source_type = "http"
     source = (
         data.get("source", "")
         or data.get("source_value", "")
         or request.POST.get("source", "")
         or request.POST.get("source_value", "")
     )
+    username = str(data.get("username", "") or request.POST.get("username", "")).strip()
+    password = str(data.get("password", "") or request.POST.get("password", "")).strip()
+    if username or password:
+        from apps.core.api import _inject_url_credentials
+        source = _inject_url_credentials(str(source or ""), username, password)
     result = dict(test_camera_connection(source_type, source, request.user.id))
     http_status = int(result.pop("status_code", 200))
     return JsonResponse(result, status=http_status)
@@ -453,4 +469,166 @@ def camera_test_view(request, camera_id):
         camera.save(update_fields=["status", "updated_at"])
     result["camera_status"] = new_status
     return JsonResponse(result)
+
+
+import collections
+import time
+
+_INGEST_RATE_BUCKETS = {}  # (user_id, camera_id) -> deque of monotonic timestamps
+_INGEST_RATE_LOCK = None
+
+
+def _check_ingest_rate_limit(user_id, camera_id, max_fps=15, window_sec=1.0):
+    global _INGEST_RATE_LOCK
+    if _INGEST_RATE_LOCK is None:
+        import threading
+        _INGEST_RATE_LOCK = threading.Lock()
+    now = time.monotonic()
+    key = (int(user_id), int(camera_id))
+    with _INGEST_RATE_LOCK:
+        dq = _INGEST_RATE_BUCKETS.get(key)
+        if dq is None:
+            dq = collections.deque(maxlen=max_fps * 2)
+            _INGEST_RATE_BUCKETS[key] = dq
+        cutoff = now - window_sec
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        if len(dq) >= max_fps:
+            return True
+        dq.append(now)
+        return False
+
+
+@require_POST
+@login_required
+def camera_ingest_frame_view(request, camera_id):
+    """
+    Accepts a live JPEG frame pushed from the authenticated user's browser (navigator.mediaDevices.getUserMedia)
+    and feeds it directly into the CameraWorker + InferenceWorker + RecordingService pipeline.
+    Enables real webcam & mobile phone camera AI surveillance and recording on both local and cloud-hosted servers.
+    Enforces payload size limits (1.5 MB), resolution bounds (1920x1080), and per-camera rate limits (15 FPS).
+    """
+    import base64
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return JsonResponse({"success": False, "error": "OpenCV/NumPy unavailable."}, status=503)
+
+    from django.utils import timezone
+    from apps.surveillance.camera.registry import get_camera_registry
+    from apps.surveillance.ai.registry import get_inference_registry
+
+    camera = get_user_camera_or_404(request.user, camera_id)
+
+    if _check_ingest_rate_limit(request.user.id, camera.id, max_fps=15, window_sec=1.0):
+        resp = JsonResponse(
+            {"success": False, "error": "Frame ingestion rate limit exceeded (max 15 FPS per camera)."},
+            status=429,
+        )
+        resp["Retry-After"] = "1"
+        return resp
+
+    raw_bytes = None
+
+    if request.FILES and "frame" in request.FILES:
+        raw_bytes = request.FILES["frame"].read()
+    elif request.content_type and "image/" in request.content_type.lower():
+        raw_bytes = request.body
+    elif request.body:
+        if len(request.body) > 2 * 1024 * 1024:
+            return JsonResponse({"success": False, "error": "Frame payload exceeds maximum size (1.5MB)."}, status=413)
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+            b64_str = str(payload.get("frame") or payload.get("image") or "")
+            if "," in b64_str:
+                b64_str = b64_str.split(",", 1)[1]
+            if b64_str:
+                raw_bytes = base64.b64decode(b64_str)
+        except Exception:
+            raw_bytes = request.body
+
+    if not raw_bytes or len(raw_bytes) < 64:
+        return JsonResponse({"success": False, "error": "Empty or invalid frame payload."}, status=400)
+    if len(raw_bytes) > 1536 * 1024:
+        return JsonResponse({"success": False, "error": "Frame payload exceeds maximum size (1.5MB)."}, status=413)
+
+    arr = np.frombuffer(raw_bytes, dtype=np.uint8)
+    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if frame is None or frame.size == 0:
+        return JsonResponse({"success": False, "error": "Unable to decode JPEG/PNG image frame."}, status=400)
+
+    fh, fw = frame.shape[:2]
+    if fw > 1920 or fh > 1080:
+        return JsonResponse({"success": False, "error": f"Frame dimensions ({fw}x{fh}) exceed maximum allowed (1920x1080)."}, status=413)
+
+    cam_reg = get_camera_registry()
+    worker = cam_reg.get_or_create_browser_worker(camera.id, camera.user_id)
+    worker.ingest_external_frame(frame)
+
+    if camera.status != "online":
+        camera.status = "online"
+        camera.updated_at = timezone.now()
+        camera.save(update_fields=["status", "updated_at"])
+
+    # Ensure InferenceWorker is running and bound so YOLO/Tracking/Anomaly detection runs on browser frames
+    inf_worker = None
+    try:
+        inf_reg = get_inference_registry()
+        inf_worker = inf_reg.get_or_create_worker(camera.id, worker, camera.user_id)
+    except Exception:
+        pass
+
+    return JsonResponse({
+        "success": True,
+        "camera_id": camera.id,
+        "frame_id": worker.frame_id,
+        "fps": worker.fps,
+        "ai_fps": getattr(inf_worker, "inference_fps", 0.0) if inf_worker else 0.0,
+        "tracks": len(getattr(inf_worker, "latest_tracks", []) or []) if inf_worker else 0,
+        "anomalies": len(getattr(inf_worker, "latest_anomalies", []) or []) if inf_worker else 0,
+        "camera_status": "online",
+    })
+
+
+@require_POST
+@login_required
+def camera_disconnect_view(request, camera_id):
+    """
+    Cleanly disconnects a camera worker, stops any active recording, releases capture handles,
+    and transitions camera status to offline.
+    """
+    from django.utils import timezone
+    from apps.surveillance.camera.registry import get_camera_registry
+
+    camera = get_user_camera_or_404(request.user, camera_id)
+    if is_camera_recording(camera.id, camera.user_id):
+        try:
+            stop_camera_recording(camera.id, camera.user_id)
+        except Exception:
+            pass
+
+    try:
+        get_camera_registry().remove_camera(camera.id)
+    except Exception:
+        pass
+
+    if camera.status != "offline":
+        camera.status = "offline"
+        camera.updated_at = timezone.now()
+        camera.save(update_fields=["status", "updated_at"])
+
+    log_audit(
+        request,
+        action="CAMERA_DISCONNECTED",
+        resource_type="camera",
+        resource_id=camera.id,
+        description=f"Disconnected camera #{camera.id} ({camera.name}).",
+    )
+    return JsonResponse({
+        "success": True,
+        "camera_id": camera.id,
+        "camera_status": "offline",
+        "message": f"Camera '{camera.name}' disconnected.",
+    })
 
