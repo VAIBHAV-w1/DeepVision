@@ -62,6 +62,7 @@ export function Settings({ onNavigate }) {
     status: "checking",
     activeWorkers: 0,
     modelLoaded: true,
+    databaseLabel: "PostgreSQL / SQLite (18 Tables Connected)",
   });
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -103,16 +104,41 @@ export function Settings({ onNavigate }) {
 
     const loadEngineHealth = async () => {
       try {
-        const health = await api.health.getSurveillance();
-        if (!mounted || !health) return;
+        const [survRes, sysRes] = await Promise.allSettled([
+          api.health.getSurveillance(),
+          api.health.get(),
+        ]);
+        if (!mounted) return;
+        const health = survRes.status === "fulfilled" ? survRes.value : null;
+        const sysHealth = sysRes.status === "fulfilled" ? sysRes.value : null;
+        const dbBackend = String(sysHealth?.database_backend || "").toLowerCase();
+        const emailSuffix =
+          sysHealth?.email_configuration_complete === true
+            ? " · Email: Configured"
+            : sysHealth?.email_configuration_complete === false
+              ? " · Email: Unconfigured"
+              : "";
+        const dbLabel =
+          (dbBackend === "postgresql"
+            ? "PostgreSQL (18 Tables Connected)"
+            : "SQLite WAL (18 Tables Connected)") + emailSuffix;
+        if (!health) {
+          setEngineHealth((prev) => ({
+            ...prev,
+            status: "offline",
+            databaseLabel: dbLabel,
+          }));
+          return;
+        }
         setEngineHealth({
           status:
             health.status === "ok" || health.healthy !== false
               ? "online"
               : "degraded",
           activeWorkers:
-            health.active_camera_workers ?? health.camera_workers ?? 0,
+            health.active_camera_workers ?? health.camera_workers ?? health.logical_cameras_active ?? 0,
           modelLoaded: health.yolo_loaded !== false,
+          databaseLabel: dbLabel,
         });
       } catch {
         if (mounted) {
@@ -1016,7 +1042,7 @@ export function Settings({ onNavigate }) {
                     fontWeight: 600,
                   }}
                 >
-                  SQLite WAL (18 Tables Connected)
+                  {engineHealth.databaseLabel}
                 </div>
               </div>
             </div>

@@ -44,6 +44,7 @@ DEFAULT_ALLOWED_HOSTS = [
     'testserver',
     '.vercel.app',
     'deepvision-soc.vercel.app',
+    'vsw-deepvision.vercel.app',
     '.onrender.com',
     'deepvision-6ie7.onrender.com',
     'deepvision-backend.onrender.com',
@@ -65,7 +66,7 @@ EMAIL_HOST_PASSWORD = os.getenv('MAIL_PASSWORD') or os.getenv('SMTP_PASSWORD', '
 EMAIL_USE_TLS = (os.getenv('MAIL_USE_TLS') or os.getenv('SMTP_USE_TLS', 'True')).lower() == 'true'
 EMAIL_USE_SSL = (os.getenv('MAIL_USE_SSL') or os.getenv('SMTP_USE_SSL', 'False')).lower() == 'true'
 DEFAULT_FROM_EMAIL = os.getenv('MAIL_DEFAULT_SENDER') or os.getenv('SMTP_FROM') or EMAIL_HOST_USER
-EMAIL_TIMEOUT = max(1, _safe_int(os.getenv('MAIL_TIMEOUT') or os.getenv('SMTP_TIMEOUT'), 8))
+EMAIL_TIMEOUT = max(1, min(10, _safe_int(os.getenv('MAIL_TIMEOUT') or os.getenv('SMTP_TIMEOUT'), 5)))
 if EMAIL_USE_TLS and EMAIL_USE_SSL:
     raise ImproperlyConfigured('Configure either SMTP TLS or SSL, not both.')
 
@@ -121,6 +122,7 @@ DEFAULT_CSRF_TRUSTED_ORIGINS = [
     'http://localhost:5173',
     'https://*.vercel.app',
     'https://deepvision-soc.vercel.app',
+    'https://vsw-deepvision.vercel.app',
     'https://*.onrender.com',
     'https://deepvision-6ie7.onrender.com',
     'https://deepvision-backend.onrender.com',
@@ -191,7 +193,8 @@ if USE_POSTGRES:
                     'sslmode': sslmode,
                     'connect_timeout': _safe_int(os.getenv('DB_CONNECT_TIMEOUT'), 10),
                 },
-                'CONN_MAX_AGE': _safe_int(os.getenv('DB_CONN_MAX_AGE'), 0),
+                'CONN_MAX_AGE': _safe_int(os.getenv('DB_CONN_MAX_AGE'), 60),
+                'CONN_HEALTH_CHECKS': True,
             }
         }
     else:
@@ -207,7 +210,8 @@ if USE_POSTGRES:
                     'sslmode': os.getenv('DB_SSLMODE', 'require'),
                     'connect_timeout': _safe_int(os.getenv('DB_CONNECT_TIMEOUT'), 10),
                 },
-                'CONN_MAX_AGE': _safe_int(os.getenv('DB_CONN_MAX_AGE'), 0),
+                'CONN_MAX_AGE': _safe_int(os.getenv('DB_CONN_MAX_AGE'), 60),
+                'CONN_HEALTH_CHECKS': True,
             }
         }
 elif USE_MYSQL:

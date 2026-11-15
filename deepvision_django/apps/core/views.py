@@ -135,15 +135,52 @@ def health_check_view(request):
         except Exception:
             schema_ready = False
 
-    # Report SMTP configuration readiness without exposing credentials.
-    email_configuration_complete = all((
+    # Report SMTP or HTTPS email API configuration readiness without exposing credentials.
+    from apps.accounts.email_service import get_email_runtime_status
+    smtp_complete = all((
         getattr(settings, "EMAIL_HOST", ""),
         getattr(settings, "EMAIL_PORT", None),
         getattr(settings, "EMAIL_HOST_USER", ""),
         getattr(settings, "EMAIL_HOST_PASSWORD", ""),
         getattr(settings, "DEFAULT_FROM_EMAIL", ""),
     ))
-    email_delivery_state = "configured_not_tested" if email_configuration_complete else "not_configured"
+    resend_configured = bool(os.getenv("RESEND_API_KEY", "").strip())
+    brevo_configured = bool(os.getenv("BREVO_API_KEY", "").strip())
+    sendgrid_configured = bool(os.getenv("SENDGRID_API_KEY", "").strip())
+    sender_configured = bool(
+        getattr(settings, "DEFAULT_FROM_EMAIL", "")
+        or os.getenv("MAIL_DEFAULT_SENDER", "").strip()
+        or os.getenv("RESEND_FROM_EMAIL", "").strip()
+    )
+    http_email_complete = bool(
+        (resend_configured or brevo_configured or sendgrid_configured)
+        and sender_configured
+    )
+    email_configuration_complete = smtp_complete or http_email_complete
+    if resend_configured and sender_configured:
+        email_provider = "resend"
+    elif brevo_configured and sender_configured:
+        email_provider = "brevo"
+    elif sendgrid_configured and sender_configured:
+        email_provider = "sendgrid"
+    elif smtp_complete:
+        email_provider = "smtp"
+    else:
+        email_provider = "none"
+
+    email_runtime = get_email_runtime_status()
+    email_delivery_tested = bool(email_runtime.get("tested", False))
+    last_email_status = email_runtime.get("last_status")
+    if not email_configuration_complete:
+        email_delivery_state = "not_configured"
+    elif not email_delivery_tested:
+        email_delivery_state = "configured_not_tested"
+    elif last_email_status == "delivered":
+        email_delivery_state = "delivered"
+    elif last_email_status == "provider_accepted":
+        email_delivery_state = "provider_accepted"
+    else:
+        email_delivery_state = "failed"
 
     # Detect serverless ephemeral SQLite fallback
     is_serverless = bool(os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
@@ -190,6 +227,11 @@ def health_check_view(request):
         http_status = 200
         db_state = "connected"
         diagnostic = "Database connected and schema verified, but SMTP settings are incomplete. Email-based verification, sign-in OTP, and password recovery cannot be delivered."
+    elif email_delivery_state in ("failed", "delivery_failed"):
+        overall_status = "degraded"
+        http_status = 200
+        db_state = "connected"
+        diagnostic = "Database connected and schema verified, but the most recent outbound email delivery request failed."
     elif engine_health.get("status") != "healthy":
         overall_status = "degraded"
         http_status = 200
@@ -211,8 +253,9 @@ def health_check_view(request):
         "diagnostic": diagnostic,
         "surveillance_engine": engine_health.get("status", "unknown"),
         "email_delivery": email_delivery_state,
+        "email_provider": email_provider,
         "email_configuration_complete": email_configuration_complete,
-        "email_delivery_tested": False,
+        "email_delivery_tested": email_delivery_tested,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     return JsonResponse(payload, status=http_status)

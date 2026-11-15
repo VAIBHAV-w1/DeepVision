@@ -79,9 +79,9 @@ USER deepvision
 
 EXPOSE 8000
 
-# Healthcheck targeting the canonical Django API health endpoint
+# Healthcheck targeting the canonical Django API health endpoint (respects Render PORT or DEEPVISION_PORT)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD curl -f http://127.0.0.1:8000/api/health/ || exit 1
+    CMD curl -f http://127.0.0.1:${PORT:-${DEEPVISION_PORT:-8000}}/api/health/ || exit 1
 
 # Launch application via the unified production runner
 ENTRYPOINT ["python", "start_deepvision.py"]

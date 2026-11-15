@@ -403,11 +403,20 @@ def test_secret_safety_check():
         re.compile(r"smtp_password\s*=\s*['\"][^'\"]{8,}['\"]", re.IGNORECASE)
     ]
     
-    # Check git tracked files only
+    # Check git tracked files (fallback to directory walk if git binary is blocked by OS policy)
     import subprocess
-    tracked_files = subprocess.check_output(
-        ["git", "ls-files"], cwd=REPO_ROOT, text=True
-    ).splitlines()
+    try:
+        tracked_files = subprocess.check_output(
+            ["git", "ls-files"], cwd=REPO_ROOT, text=True, stderr=subprocess.DEVNULL
+        ).splitlines()
+    except Exception:
+        skip_dirs = {".git", "node_modules", ".venv", "venv", "__pycache__", "backups", "instance", ".pytest_cache"}
+        tracked_files = []
+        for root, dirs, files in os.walk(REPO_ROOT):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            for fname in files:
+                full = os.path.join(root, fname)
+                tracked_files.append(os.path.relpath(full, REPO_ROOT).replace("\\", "/"))
     
     leaks = []
     for rel_path in tracked_files:

@@ -227,10 +227,20 @@ def api_login(request):
             user.email_otp_sent_at = None
             user.email_otp_attempts = 0
             user.save(update_fields=["email_otp_hash", "email_otp_expires_at", "email_otp_sent_at", "email_otp_attempts"])
-            return JsonResponse({"success": False, "error": "Could not deliver a sign-in code. Please try again later."}, status=503)
+            return JsonResponse({
+                "success": False,
+                "code": "EMAIL_DELIVERY_UNAVAILABLE",
+                "error": "Could not deliver a sign-in code. Please try again later.",
+                "detail": "Credentials verified against PostgreSQL, but the outbound email service (SMTP) is not configured or unreachable."
+            }, status=503)
     except Exception:
         logger.warning("[AUTH] Sign-in verification email delivery failed for user_id=%s", user.id)
-        return JsonResponse({"success": False, "error": "Could not deliver a sign-in code. Please try again later."}, status=503)
+        return JsonResponse({
+            "success": False,
+            "code": "EMAIL_DELIVERY_UNAVAILABLE",
+            "error": "Could not deliver a sign-in code. Please try again later.",
+            "detail": "Credentials verified against PostgreSQL, but the outbound email service (SMTP) is not configured or unreachable."
+        }, status=503)
 
     # Set pending login state in signed session (USER IS NOT AUTHENTICATED YET)
     request.session["pending_login_user_id"] = user.id

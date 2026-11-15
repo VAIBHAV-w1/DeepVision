@@ -6,10 +6,11 @@
 import { getCsrfToken, fetchCsrfToken } from '../utils/csrf';
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+const RENDER_FALLBACK_ORIGIN = 'https://deepvision-6ie7.onrender.com';
 
 async function request(endpoint, options = {}) {
   const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
-  const timeoutMs = options.timeout || 15000;
+  const timeoutMs = options.timeout || 25000;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -38,13 +39,29 @@ async function request(endpoint, options = {}) {
   }
 
   try {
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       ...options,
       signal: options.signal || controller.signal,
       method,
       headers,
       credentials: 'include',
     });
+
+    // Automatic single retry when Render container is waking from cold start (502/504 HTML gateway response)
+    if ((response.status === 502 || response.status === 504) && !options._retried) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const retryUrl = (!endpoint.startsWith('http') && !API_BASE_URL && method === 'GET')
+        ? `${RENDER_FALLBACK_ORIGIN}${endpoint}`
+        : url;
+      response = await fetch(retryUrl, {
+        ...options,
+        _retried: true,
+        signal: options.signal || controller.signal,
+        method,
+        headers,
+        credentials: 'include',
+      });
+    }
 
     clearTimeout(timeoutId);
 
@@ -76,7 +93,9 @@ async function request(endpoint, options = {}) {
       let errorMsg;
       if (data && typeof data === 'object' && (data.error || data.message || data.detail)) {
         errorMsg = data.error || data.message || data.detail;
-      } else if (response.status === 503 || response.status === 502 || response.status === 504) {
+      } else if (response.status === 502 || response.status === 504) {
+        errorMsg = 'Backend server is waking up or temporarily unreachable (HTTP ' + response.status + '). Please retry in a few seconds.';
+      } else if (response.status === 503) {
         errorMsg = 'Database or service temporarily unavailable. Please retry in a few moments.';
       } else if (response.status === 403 && typeof data === 'string' && data.includes('CSRF')) {
         errorMsg = 'Security validation failed (CSRF token expired). Please refresh the page.';

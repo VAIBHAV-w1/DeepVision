@@ -37,11 +37,14 @@ django.setup()
 
 from django.test import Client, override_settings
 from apps.accounts.models import User
+from apps.core.models import AuditLog
 
 def run_suite():
     print("=" * 70)
     print("DEEPVISION COMPLETE AUTHENTICATION END-TO-END VERIFICATION")
     print("=" * 70)
+
+    max_audit_id_before = AuditLog.objects.order_by("-id").values_list("id", flat=True).first() or 0
 
     # Use in-memory email backend for hermetic test execution
     with override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend'):
@@ -166,7 +169,8 @@ def run_suite():
         pw_matches = u_created.check_password(new_password)
         check(12, "Password Reset with New Password", reset_res.status_code == 200 and pw_matches)
 
-        # Clean up disposable test user to keep database clean
+        # Clean up disposable test user and test audit logs to keep database clean
+        AuditLog.objects.filter(id__gt=max_audit_id_before).delete()
         u_created.delete()
         print("-" * 70)
         print(f"Disposable test user ({test_email}) cleaned up safely.")

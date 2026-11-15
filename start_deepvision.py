@@ -430,14 +430,21 @@ def get_server_launch_command(host: str, port: int):
         try:
             import gunicorn  # noqa: F401
             threads = os.getenv("DEEPVISION_WSGI_THREADS", "8")
-            timeout = os.getenv("DEEPVISION_WSGI_TIMEOUT", "120")
+            timeout = os.getenv("DEEPVISION_WSGI_TIMEOUT", "60")
+            max_requests = os.getenv("DEEPVISION_WSGI_MAX_REQUESTS", "500")
+            max_requests_jitter = os.getenv("DEEPVISION_WSGI_MAX_REQUESTS_JITTER", "50")
             cmd = [
                 PYTHON_EXE, "-m", "gunicorn",
                 "config.wsgi:application",
                 "--bind", bind_addr,
                 "--workers", "1",
                 "--threads", str(threads),
+                "--worker-class", "gthread",
                 "--timeout", str(timeout),
+                "--graceful-timeout", "20",
+                "--keep-alive", "5",
+                "--max-requests", str(max_requests),
+                "--max-requests-jitter", str(max_requests_jitter),
                 "--access-logfile", "-",
                 "--error-logfile", "-",
             ]
