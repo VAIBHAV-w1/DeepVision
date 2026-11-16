@@ -21,6 +21,7 @@ from apps.recordings.models import Recording
 from apps.notifications.models import Notification
 from apps.surveillance.audio.service import inspect_media_audio, check_camera_audio_capability
 from apps.core.media_service import safe_resolve_evidence, safe_resolve_recording
+from apps.core.storage_service import media_exists, resolve_local_staged_evidence, resolve_local_staged_recording
 
 
 def _format_size(size_bytes: Optional[int]) -> str:
@@ -89,6 +90,7 @@ def get_incident_context(alert_id: int, user_id: Optional[int] = None) -> Dict[s
             if ev_time_diff > 300.0:
                 ev_mismatched = True
 
+        ev_available = media_exists(ev.file_path, kind='evidence') or (resolve_local_staged_evidence(ev) is not None)
         ev_data = {
             "id": ev.id,
             "alert_id": alert.id,
@@ -98,7 +100,7 @@ def get_incident_context(alert_id: int, user_id: Optional[int] = None) -> Dict[s
             "mime_type": ev.mime_type,
             "file_size": ev.file_size,
             "formatted_size": _format_size(ev.file_size),
-            "file_available": resolved_path is not None,
+            "file_available": ev_available,
             "duration_seconds": ev.duration_seconds,
             "captured_at": ev.captured_at.isoformat() if ev.captured_at else "",
             "preview_url": f"/evidence/{ev.id}/preview/",
@@ -169,6 +171,7 @@ def get_incident_context(alert_id: int, user_id: Optional[int] = None) -> Dict[s
         if alert.detected_at and rec.started_at and abs((alert.detected_at - rec.started_at).total_seconds()) > 300.0:
             rec = None
         rec_resolved = safe_resolve_recording(rec.file_path)
+        rec_available = media_exists(rec.file_path, kind='recording') or (resolve_local_staged_recording(rec) is not None)
         rec_audio = inspect_media_audio(str(rec_resolved)) if rec_resolved else {"has_audio": False, "status": "unavailable"}
         
         # Verify timestamp alignment between alert detection and recording start
@@ -189,7 +192,7 @@ def get_incident_context(alert_id: int, user_id: Optional[int] = None) -> Dict[s
             "duration_seconds": rec.duration_seconds,
             "file_size": rec.file_size,
             "formatted_size": _format_size(rec.file_size),
-            "file_available": rec_resolved is not None,
+            "file_available": rec_available,
             "started_at": rec.started_at.isoformat() if rec.started_at else "",
             "ended_at": rec.ended_at.isoformat() if rec.ended_at else "",
             "view_url": f"/recordings/{rec.id}/view/",

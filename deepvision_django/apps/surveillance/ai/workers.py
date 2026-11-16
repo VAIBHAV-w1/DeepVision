@@ -109,7 +109,7 @@ def _collect_and_save_evidence(alert_id, camera_id, user_id, camera_worker, pre_
                         f.write(buffer.tobytes())
                     snap_size = os.path.getsize(snap_path)
                     snap_rel = os.path.relpath(snap_path, base_folder).replace("\\", "/")
-                    Evidence.objects.create(
+                    ev_snap = Evidence.objects.create(
                         alert_id=alert_id,
                         user_id=user_id,
                         camera_id=camera_id,
@@ -121,6 +121,11 @@ def _collect_and_save_evidence(alert_id, camera_id, user_id, camera_worker, pre_
                         captured_at=now,
                         created_at=now,
                     )
+                    try:
+                        from apps.core.storage_service import schedule_evidence_upload
+                        schedule_evidence_upload(ev_snap.id)
+                    except Exception:
+                        pass
                     logger.info(f"[EVIDENCE_SNAPSHOT_SAVED] alert={alert_id} cam={camera_id}")
             except Exception as snap_err:
                 logger.error(f"[EVIDENCE_SNAPSHOT_ERROR] alert={alert_id}: {snap_err}")
@@ -162,7 +167,7 @@ def _collect_and_save_evidence(alert_id, camera_id, user_id, camera_worker, pre_
                         vid_size = os.path.getsize(vid_path)
                         vid_rel = os.path.relpath(vid_path, base_folder).replace("\\", "/")
                         dur = round(len(all_frames) / fps, 1)
-                        Evidence.objects.create(
+                        ev_vid = Evidence.objects.create(
                             alert_id=alert_id,
                             user_id=user_id,
                             camera_id=camera_id,
@@ -176,8 +181,13 @@ def _collect_and_save_evidence(alert_id, camera_id, user_id, camera_worker, pre_
                             created_at=now,
                         )
                         try:
+                            from apps.core.storage_service import schedule_evidence_upload
+                            schedule_evidence_upload(ev_vid.id)
+                        except Exception:
+                            pass
+                        try:
                             from apps.recordings.models import Recording
-                            Recording.objects.create(
+                            rec_clip = Recording.objects.create(
                                 user_id=user_id,
                                 camera_id=camera_id,
                                 filename=vid_name,
@@ -189,6 +199,11 @@ def _collect_and_save_evidence(alert_id, camera_id, user_id, camera_worker, pre_
                                 status="completed",
                                 created_at=now,
                             )
+                            try:
+                                from apps.core.storage_service import schedule_recording_upload
+                                schedule_recording_upload(rec_clip.id)
+                            except Exception:
+                                pass
                         except Exception as rec_err:
                             logger.warning(f"[EVIDENCE_REC_INDEX_WARN] alert={alert_id}: {rec_err}")
 

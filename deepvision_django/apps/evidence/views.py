@@ -16,6 +16,7 @@ from apps.accounts.decorators import login_required
 from apps.evidence.models import Evidence
 from apps.cameras.models import Camera
 from apps.core.media_service import safe_resolve_evidence, serve_file_with_ranges
+from apps.core.storage_service import media_exists, resolve_local_staged_evidence, serve_stored_media
 
 logger = logging.getLogger(__name__)
 
@@ -67,13 +68,12 @@ def evidence_list_view(request):
     paginator = Paginator(evidence_qs, 18)
     page_obj = paginator.get_page(page_number)
 
-    # Pre-check physical file availability for the active page
+    # Pre-check physical file availability (local or persistent object storage)
     items = []
     for ev in page_obj:
-        full_path = safe_resolve_evidence(ev.file_path)
         items.append({
             'evidence': ev,
-            'file_available': full_path is not None,
+            'file_available': media_exists(ev.file_path, kind='evidence') or (resolve_local_staged_evidence(ev) is not None),
             'formatted_size': _format_size(ev.file_size),
         })
 
@@ -111,8 +111,7 @@ def evidence_detail_view(request, evidence_id):
     """
     evidence = _get_authorized_evidence_or_404(request.user, evidence_id)
 
-    full_path = safe_resolve_evidence(evidence.file_path)
-    file_exists = full_path is not None
+    file_exists = media_exists(evidence.file_path, kind='evidence') or (resolve_local_staged_evidence(evidence) is not None)
 
     return render(request, 'pages/evidence/detail.html', {
         'evidence': evidence,
@@ -125,23 +124,21 @@ def evidence_detail_view(request, evidence_id):
 @login_required
 def preview_evidence_media_view(request, evidence_id):
     """
-    Serves the existing evidence asset inline.
+    Serves the evidence asset inline (from persistent or local storage).
     Supports HTTP Range requests for video clips and standard binary response for snapshots.
     """
     evidence = _get_authorized_evidence_or_404(request.user, evidence_id)
-    full_path = safe_resolve_evidence(evidence.file_path)
-    if not full_path:
-        raise Http404("Evidence file not found on disk.")
-
     mime_type = evidence.mime_type
     if not mime_type:
         mime_type = "image/jpeg" if evidence.evidence_type == "snapshot" else "video/mp4"
 
-    return serve_file_with_ranges(
+    return serve_stored_media(
         request=request,
-        full_path=full_path,
+        file_path=evidence.file_path,
+        kind="evidence",
         content_type=mime_type,
-        as_attachment=False
+        as_attachment=False,
+        fallback_local_path=resolve_local_staged_evidence(evidence),
     )
 
 
@@ -149,19 +146,17 @@ def preview_evidence_media_view(request, evidence_id):
 @login_required
 def download_evidence_view(request, evidence_id):
     """
-    Serves the existing evidence asset as a download attachment.
+    Serves the evidence asset as a download attachment from persistent or local storage.
     """
     evidence = _get_authorized_evidence_or_404(request.user, evidence_id)
-    full_path = safe_resolve_evidence(evidence.file_path)
-    if not full_path:
-        raise Http404("Evidence file not found on disk.")
-
     mime_type = evidence.mime_type or "application/octet-stream"
 
-    return serve_file_with_ranges(
+    return serve_stored_media(
         request=request,
-        full_path=full_path,
+        file_path=evidence.file_path,
+        kind="evidence",
         content_type=mime_type,
         as_attachment=True,
-        download_name=evidence.file_name
+        download_name=evidence.file_name,
+        fallback_local_path=resolve_local_staged_evidence(evidence),
     )

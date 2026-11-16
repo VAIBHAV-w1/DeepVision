@@ -13,6 +13,7 @@ Provides centralized, strongly typed JSON endpoints for the React frontend:
 
 import json
 import logging
+import os
 import re
 import time
 from datetime import datetime, timezone as dt_timezone
@@ -53,6 +54,15 @@ from apps.ai.engine import (
 )
 from apps.cameras.views import get_accessible_cameras_qs, get_user_camera_or_404
 from apps.core.media_service import safe_resolve_recording, safe_resolve_evidence
+from apps.core.storage_service import (
+    delete_stored_media,
+    get_storage_health,
+    media_exists,
+    parse_storage_uri,
+    resolve_local_staged_evidence,
+    resolve_local_staged_recording,
+    upload_recording_by_id,
+)
 from apps.core.rate_limiter import ratelimit
 from apps.core.models import AuditLog
 from apps.core.audit import log_audit
@@ -783,17 +793,78 @@ def _validate_and_normalize_camera_payload(data):
     import urllib.parse
     from apps.surveillance.camera.sources import resolve_camera_capture_source, normalize_camera_source
 
+def _inject_url_credentials(raw_source: str, username: str = "", password: str = "") -> str:
+    """Safely injects URL-encoded username/password into RTSP or HTTP(S) stream URLs if provided."""
+    user = str(username or "").strip()
+    pwd = str(password or "").strip()
+    if not user and not pwd:
+        return raw_source
+    from urllib.parse import urlparse, urlunparse, quote
+    try:
+        parsed = urlparse(raw_source)
+        if parsed.scheme.lower() not in ("rtsp", "rtsps", "http", "https") or not parsed.hostname:
+            return raw_source
+        host_part = parsed.hostname
+        if parsed.port:
+            host_part = f"{host_part}:{parsed.port}"
+        auth_part = quote(user, safe="")
+        if pwd:
+            auth_part = f"{auth_part}:{quote(pwd, safe='')}"
+        new_netloc = f"{auth_part}@{host_part}"
+        return urlunparse((parsed.scheme, new_netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+    except Exception:
+        return raw_source
+
+
+def _mask_camera_source(raw_source: str) -> str:
+    """Masks embedded credentials in camera source URLs before returning in JSON responses."""
+    from apps.surveillance.camera.sources import mask_url_credentials
+    return mask_url_credentials(str(raw_source or ""))
+
+
+def _has_camera_credentials(raw_source: str) -> bool:
+    """Checks whether the stored camera source contains embedded authentication credentials."""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(str(raw_source or ""))
+        return bool(parsed.username or parsed.password)
+    except Exception:
+        return "@" in str(raw_source or "")
+
+
+def _validate_and_normalize_camera_payload(data: dict, existing_source: str = None):
+    """
+    Validates camera registration/update payload and blocks SSRF/unsafe targets.
+    Supports optional username and password fields for authenticated RTSP/HTTP cameras.
+    Returns (cleaned_dict, error_message).
+    """
+    from apps.surveillance.camera.sources import resolve_camera_capture_source, normalize_camera_source
+
     name = str(data.get("name") or "").strip()[:100]
     if not name:
         return None, "Camera name is required."
 
     source_type = str(data.get("source_type") or "webcam").strip().lower()
+    if source_type == "stream":
+        source_type = "http"
     if source_type not in ("webcam", "usb", "rtsp", "phone", "ipcamera", "video", "http", "https", "ip", "mjpeg"):
         return None, f"Unsupported camera source type: {source_type}"
 
     raw_source = str(data.get("source") if data.get("source") is not None else "").strip()
+    if not raw_source and source_type in ("webcam", "usb", "phone"):
+        raw_source = "0"
     if not raw_source:
         return None, "Camera source URL or device index is required."
+
+    # Preserve stored credentials if updating a camera whose masked URL ('***:***@') was submitted unchanged
+    username = str(data.get("username") or "").strip()
+    password = str(data.get("password") or "").strip()
+    if existing_source and "***" in raw_source and not username and not password:
+        if _mask_camera_source(existing_source) == raw_source:
+            raw_source = existing_source
+
+    if username or password:
+        raw_source = _inject_url_credentials(raw_source, username, password)
 
     try:
         resolve_camera_capture_source(source_type, raw_source)
@@ -860,7 +931,8 @@ def api_cameras_list(request):
                 "id": camera.id,
                 "name": camera.name,
                 "source_type": camera.source_type,
-                "source": camera.source,
+                "source": _mask_camera_source(camera.source),
+                "has_credentials": _has_camera_credentials(camera.source),
                 "location": camera.location or "Default Zone",
                 "status": camera.status,
                 "is_active": camera.is_active,
@@ -884,7 +956,8 @@ def api_cameras_list(request):
             "id": c.id,
             "name": c.name,
             "source_type": c.source_type,
-            "source": c.source,
+            "source": _mask_camera_source(c.source),
+            "has_credentials": _has_camera_credentials(c.source),
             "location": c.location or "Default Zone",
             "status": c.status,
             "is_active": c.is_active,
@@ -926,8 +999,10 @@ def api_camera_detail(request, camera_id):
             "source_type": data.get("source_type", camera.source_type),
             "source": data.get("source", camera.source),
             "location": data.get("location", camera.location),
+            "username": data.get("username", ""),
+            "password": data.get("password", ""),
         }
-        cleaned, err = _validate_and_normalize_camera_payload(merged)
+        cleaned, err = _validate_and_normalize_camera_payload(merged, existing_source=camera.source)
         if err:
             return JsonResponse({"success": False, "error": err}, status=400)
 
@@ -961,7 +1036,8 @@ def api_camera_detail(request, camera_id):
                 "id": camera.id,
                 "name": camera.name,
                 "source_type": camera.source_type,
-                "source": camera.source,
+                "source": _mask_camera_source(camera.source),
+                "has_credentials": _has_camera_credentials(camera.source),
                 "location": camera.location or "Default Zone",
                 "status": camera.status,
                 "is_active": camera.is_active,
@@ -1045,7 +1121,8 @@ def api_camera_detail(request, camera_id):
             "id": camera.id,
             "name": camera.name,
             "source_type": camera.source_type,
-            "source": camera.source,
+            "source": _mask_camera_source(camera.source),
+            "has_credentials": _has_camera_credentials(camera.source),
             "location": camera.location,
             "status": camera.status,
             "is_active": camera.is_active,
@@ -1392,6 +1469,11 @@ def api_camera_rules(request, camera_id):
 @handle_db_errors
 def api_recordings_list(request):
     """Returns paginated recordings strictly scoped to the authenticated user."""
+    try:
+        from apps.surveillance.recording.recording_service import recover_interrupted_recordings
+        recover_interrupted_recordings(user_id=request.user.id)
+    except Exception:
+        pass
     recordings_qs = Recording.objects.filter(user_id=request.user.id).select_related('camera')
 
     camera_id = request.GET.get('camera_id', '').strip() or request.GET.get('camera', '').strip()
@@ -1405,7 +1487,7 @@ def api_recordings_list(request):
         )
 
     status_filter = request.GET.get('status', '').strip().lower()
-    if status_filter in ('completed', 'recording', 'stopped'):
+    if status_filter in ('completed', 'recording', 'processing', 'uploading', 'failed', 'interrupted', 'stopped'):
         recordings_qs = recordings_qs.filter(status=status_filter)
 
     type_filter = request.GET.get('type', '').strip().lower()
@@ -1425,8 +1507,10 @@ def api_recordings_list(request):
     items = []
     total_size = 0
     for r in page_obj:
-        full_path = safe_resolve_recording(r.file_path)
-        file_exists = full_path is not None
+        local_staged = resolve_local_staged_recording(r)
+        file_exists = media_exists(r.file_path, kind='recording') or (local_staged is not None)
+        scheme, _, _ = parse_storage_uri(r.file_path)
+        can_retry = (r.status in ('failed', 'interrupted', 'uploading', 'processing')) and (local_staged is not None)
         if file_exists:
             total_size += (r.file_size or 0)
         items.append({
@@ -1438,6 +1522,9 @@ def api_recordings_list(request):
             "file_size": r.file_size or 0,
             "formatted_size": _format_size(r.file_size),
             "file_exists": file_exists,
+            "storage_backend": scheme,
+            "is_persistent": scheme in ('supabase', 's3', 'pdir'),
+            "can_retry_upload": can_retry,
             "started_at": r.started_at.isoformat() if r.started_at else "",
             "ended_at": r.ended_at.isoformat() if r.ended_at else "",
             "status": r.status or "completed",
@@ -1457,6 +1544,7 @@ def api_recordings_list(request):
         "cameras": user_cameras,
         "total_size": total_size,
         "formatted_total_size": _format_size(total_size),
+        "storage_health": get_storage_health(),
     })
 
 
@@ -1464,13 +1552,44 @@ def api_recordings_list(request):
 @login_required
 @handle_db_errors
 def api_recording_detail(request, recording_id):
-    """Returns single recording metadata and events strictly scoped to the authenticated user."""
+    """Returns or deletes single recording metadata strictly scoped to the authenticated user."""
     recording = get_object_or_404(
         Recording.objects.select_related('camera'),
         id=recording_id,
         user_id=request.user.id,
     )
-    full_path = safe_resolve_recording(recording.file_path)
+    local_staged = resolve_local_staged_recording(recording)
+    file_exists = media_exists(recording.file_path, kind='recording') or (local_staged is not None)
+    scheme, _, _ = parse_storage_uri(recording.file_path)
+
+    if request.method == "DELETE":
+        if getattr(request.user, "role", "") == "viewer" and not getattr(request.user, "is_superuser", False):
+            return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
+        rec_filename = recording.filename
+        if recording.status == "recording" and recording.camera_id:
+            try:
+                stop_camera_recording(recording.camera_id, recording.user_id)
+            except Exception:
+                pass
+        delete_stored_media(recording.file_path, kind='recording')
+        if local_staged and os.path.exists(local_staged):
+            try:
+                os.remove(local_staged)
+            except Exception:
+                pass
+        recording.delete()
+        _DASHBOARD_STATS_CACHE.clear()
+        log_audit(
+            request,
+            action="RECORDING_DELETED",
+            resource_type="recording",
+            resource_id=recording_id,
+            description=f"Deleted recording '{rec_filename}'.",
+        )
+        return JsonResponse({
+            "success": True,
+            "message": f"Recording '{rec_filename}' deleted successfully.",
+        })
 
     events = []
     if recording.camera and recording.started_at:
@@ -1498,7 +1617,10 @@ def api_recording_detail(request, recording_id):
             "duration_seconds": recording.duration_seconds or 0,
             "file_size": recording.file_size or 0,
             "formatted_size": _format_size(recording.file_size),
-            "file_exists": full_path is not None,
+            "file_exists": file_exists,
+            "storage_backend": scheme,
+            "is_persistent": scheme in ('supabase', 's3', 'pdir'),
+            "can_retry_upload": (recording.status in ('failed', 'interrupted', 'uploading', 'processing')) and (local_staged is not None),
             "started_at": recording.started_at.isoformat() if recording.started_at else "",
             "ended_at": recording.ended_at.isoformat() if recording.ended_at else "",
             "status": recording.status or "completed",
@@ -1509,9 +1631,26 @@ def api_recording_detail(request, recording_id):
     })
 
 
-# =========================================================================
-# EVIDENCE APIS
-# =========================================================================
+@require_POST
+@never_cache
+@login_required
+@handle_db_errors
+def api_recording_retry_upload(request, recording_id):
+    """Safely retries persistent storage upload for a failed or interrupted recording."""
+    recording = get_object_or_404(Recording, id=recording_id, user_id=request.user.id)
+    if getattr(request.user, "role", "") == "viewer" and not getattr(request.user, "is_superuser", False):
+        return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
+    ok, msg = upload_recording_by_id(recording.id)
+    recording.refresh_from_db()
+    status_code = 200 if ok else 422
+    return JsonResponse({
+        "success": bool(ok),
+        "message": msg,
+        "status": recording.status,
+        "file_size": recording.file_size,
+        "storage_health": get_storage_health(),
+    }, status=status_code)
+
 
 @never_cache
 @login_required
@@ -1549,7 +1688,9 @@ def api_evidence_list(request):
 
     items = []
     for ev in page_obj:
-        full_path = safe_resolve_evidence(ev.file_path)
+        local_ev = resolve_local_staged_evidence(ev)
+        ev_available = media_exists(ev.file_path, kind='evidence') or (local_ev is not None)
+        scheme, _, _ = parse_storage_uri(ev.file_path)
         items.append({
             "id": ev.id,
             "file_name": ev.file_name,
@@ -1557,7 +1698,9 @@ def api_evidence_list(request):
             "mime_type": ev.mime_type,
             "file_size": ev.file_size,
             "formatted_size": _format_size(ev.file_size),
-            "file_available": full_path is not None,
+            "file_available": ev_available,
+            "storage_backend": scheme,
+            "is_persistent": scheme in ('supabase', 's3', 'pdir'),
             "captured_at": ev.captured_at.isoformat() if ev.captured_at else "",
             "camera_id": ev.camera_id,
             "camera_name": ev.camera.name if ev.camera else "Channel 01",
@@ -1582,9 +1725,35 @@ def api_evidence_list(request):
 @login_required
 @handle_db_errors
 def api_evidence_detail(request, evidence_id):
-    """Returns single evidence metadata strictly scoped to the authenticated user."""
+    """Returns or deletes single evidence metadata strictly scoped to the authenticated user."""
     ev = get_object_or_404(Evidence.objects.select_related('camera', 'alert'), id=evidence_id, user_id=request.user.id)
-    full_path = safe_resolve_evidence(ev.file_path)
+    local_ev = resolve_local_staged_evidence(ev)
+    ev_available = media_exists(ev.file_path, kind='evidence') or (local_ev is not None)
+    scheme, _, _ = parse_storage_uri(ev.file_path)
+
+    if request.method == "DELETE":
+        if getattr(request.user, "role", "") == "viewer" and not getattr(request.user, "is_superuser", False):
+            return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
+        ev_name = ev.file_name
+        delete_stored_media(ev.file_path, kind='evidence')
+        if local_ev and os.path.exists(local_ev):
+            try:
+                os.remove(local_ev)
+            except Exception:
+                pass
+        ev.delete()
+        _DASHBOARD_STATS_CACHE.clear()
+        log_audit(
+            request,
+            action="EVIDENCE_DELETED",
+            resource_type="evidence",
+            resource_id=evidence_id,
+            description=f"Deleted evidence item '{ev_name}'.",
+        )
+        return JsonResponse({
+            "success": True,
+            "message": f"Evidence '{ev_name}' deleted successfully.",
+        })
 
     return JsonResponse({
         "evidence": {
@@ -1594,7 +1763,9 @@ def api_evidence_detail(request, evidence_id):
             "mime_type": ev.mime_type,
             "file_size": ev.file_size,
             "formatted_size": _format_size(ev.file_size),
-            "file_available": full_path is not None,
+            "file_available": ev_available,
+            "storage_backend": scheme,
+            "is_persistent": scheme in ('supabase', 's3', 'pdir'),
             "captured_at": ev.captured_at.isoformat() if ev.captured_at else "",
             "camera_id": ev.camera_id,
             "camera_name": ev.camera.name if ev.camera else "Channel 01",

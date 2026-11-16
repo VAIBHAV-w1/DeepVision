@@ -77,6 +77,10 @@ urlpatterns = [
     path('api/cameras/<int:camera_id>/', api_views.api_camera_detail, name='api_camera_detail'),
     path('api/cameras/<int:camera_id>/test', camera_views.camera_test_view, name='camera_test'),
     path('api/cameras/<int:camera_id>/test/', camera_views.camera_test_view, name='camera_test_slash'),
+    path('api/cameras/<int:camera_id>/ingest-frame', camera_views.camera_ingest_frame_view, name='camera_ingest_frame'),
+    path('api/cameras/<int:camera_id>/ingest-frame/', camera_views.camera_ingest_frame_view, name='camera_ingest_frame_slash'),
+    path('api/cameras/<int:camera_id>/disconnect', camera_views.camera_disconnect_view, name='camera_disconnect'),
+    path('api/cameras/<int:camera_id>/disconnect/', camera_views.camera_disconnect_view, name='camera_disconnect_slash'),
     path('api/cameras/test-connection', camera_views.camera_test_connection_view, name='camera_test_connection'),
     path('api/cameras/test-connection/', camera_views.camera_test_connection_view, name='camera_test_connection_slash'),
     path('api/surveillance/health/', camera_views.surveillance_health_api_view, name='api_surveillance_health'),
@@ -121,6 +125,7 @@ urlpatterns = [
     # Recordings REST APIs & HTTP 206 Partial Playback
     path('api/recordings/', api_views.api_recordings_list, name='api_recordings_list'),
     path('api/recordings/<int:recording_id>/', api_views.api_recording_detail, name='api_recording_detail'),
+    path('api/recordings/<int:recording_id>/retry-upload/', api_views.api_recording_retry_upload, name='api_recording_retry_upload'),
     path('recordings/<int:recording_id>/view/', recording_views.view_recording_media_view, name='recording_media'),
     path('recordings/<int:recording_id>/download/', recording_views.download_recording_view, name='recording_download'),
 

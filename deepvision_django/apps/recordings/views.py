@@ -16,6 +16,7 @@ from apps.recordings.models import Recording
 from apps.alerts.models import Alert
 from apps.cameras.models import Camera
 from apps.core.media_service import safe_resolve_recording, serve_file_with_ranges
+from apps.core.storage_service import media_exists, resolve_local_staged_recording, serve_stored_media
 
 logger = logging.getLogger(__name__)
 
@@ -53,17 +54,16 @@ def recordings_list_view(request):
         )
 
     status_filter = request.GET.get('status', '').strip().lower()
-    if status_filter in ('completed', 'recording', 'stopped'):
+    if status_filter in ('completed', 'recording', 'processing', 'uploading', 'failed', 'interrupted', 'stopped'):
         recordings_qs = recordings_qs.filter(status=status_filter)
 
     recordings = list(recordings_qs.order_by('-started_at', '-id')[:100])
 
-    # Pre-check physical file availability
+    # Pre-check physical file availability (local or persistent object storage)
     items = []
     total_size = 0
     for r in recordings:
-        full_path = safe_resolve_recording(r.file_path)
-        file_exists = full_path is not None
+        file_exists = media_exists(r.file_path, kind='recording') or (resolve_local_staged_recording(r) is not None)
         if file_exists:
             total_size += r.file_size
         items.append({
@@ -99,8 +99,7 @@ def recording_detail_view(request, recording_id):
         user_id=request.user.id,
     )
 
-    full_path = safe_resolve_recording(recording.file_path)
-    file_exists = full_path is not None
+    file_exists = media_exists(recording.file_path, kind='recording') or (resolve_local_staged_recording(recording) is not None)
 
     # Retrieve synchronized security events (Alerts for this camera during the recording timeframe)
     timeline_events = []
@@ -126,19 +125,18 @@ def recording_detail_view(request, recording_id):
 @login_required
 def view_recording_media_view(request, recording_id):
     """
-    Serves the existing MP4 recording file supporting HTTP Range requests
-    for inline HTML5 video playback and seeking.
+    Serves the MP4 recording file (from persistent storage or local staging/legacy disk)
+    supporting HTTP 206 Range requests for inline HTML5 video playback and seeking.
     """
     recording = get_object_or_404(Recording, id=recording_id, user_id=request.user.id)
-    full_path = safe_resolve_recording(recording.file_path)
-    if not full_path:
-        raise Http404("Recording file not found on disk.")
-
-    return serve_file_with_ranges(
+    fallback_local = resolve_local_staged_recording(recording)
+    return serve_stored_media(
         request=request,
-        full_path=full_path,
+        file_path=recording.file_path,
+        kind="recording",
         content_type="video/mp4",
-        as_attachment=False
+        as_attachment=False,
+        fallback_local_path=fallback_local,
     )
 
 
@@ -146,17 +144,16 @@ def view_recording_media_view(request, recording_id):
 @login_required
 def download_recording_view(request, recording_id):
     """
-    Serves the existing recording file as a download attachment.
+    Serves the recording file as a download attachment from persistent or local storage.
     """
     recording = get_object_or_404(Recording, id=recording_id, user_id=request.user.id)
-    full_path = safe_resolve_recording(recording.file_path)
-    if not full_path:
-        raise Http404("Recording file not found on disk.")
-
-    return serve_file_with_ranges(
+    fallback_local = resolve_local_staged_recording(recording)
+    return serve_stored_media(
         request=request,
-        full_path=full_path,
+        file_path=recording.file_path,
+        kind="recording",
         content_type="video/mp4",
         as_attachment=True,
-        download_name=recording.filename
+        download_name=recording.filename,
+        fallback_local_path=fallback_local,
     )
