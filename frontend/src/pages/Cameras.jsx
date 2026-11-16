@@ -65,6 +65,7 @@ export function Cameras({ onNavigate, pageParams }) {
   const browserVideoRef = useRef(null);
   const browserCanvasRef = useRef(null);
   const browserStreamRef = useRef(null);
+  const activeBridgeCamIdRef = useRef(null);
   const streamReloadPendingRef = useRef(false);
   const viewportContainerRef = useRef(null);
 
@@ -147,6 +148,7 @@ export function Cameras({ onNavigate, pageParams }) {
     if (browserVideoRef.current) {
       browserVideoRef.current.srcObject = null;
     }
+    activeBridgeCamIdRef.current = null;
     setBrowserBridgeActive(false);
   }, []);
 
@@ -168,9 +170,7 @@ export function Cameras({ onNavigate, pageParams }) {
       const list = res.cameras || res.items || (Array.isArray(res) ? res : []);
       if (Array.isArray(list) && list.length > 0) {
         setCameras(list);
-        if (!selectedCameraId || !list.some((c) => c.id === selectedCameraId)) {
-          setSelectedCameraId(list[0].id);
-        }
+        setSelectedCameraId((prev) => (prev && list.some((c) => c.id === Number(prev)) ? prev : list[0].id));
       } else {
         setCameras([]);
       }
@@ -180,7 +180,7 @@ export function Cameras({ onNavigate, pageParams }) {
     } finally {
       setLoading(false);
     }
-  }, [selectedCameraId]);
+  }, []);
 
   useEffect(() => {
     fetchCameras();
@@ -188,6 +188,18 @@ export function Cameras({ onNavigate, pageParams }) {
 
   // Selected camera object
   const selectedCam = cameras.find((c) => c.id === Number(selectedCameraId)) || cameras[0] || null;
+
+  // Stop browser bridge if user switches to a different camera while streaming
+  useEffect(() => {
+    if (
+      browserBridgeActive &&
+      activeBridgeCamIdRef.current &&
+      selectedCam?.id &&
+      Number(activeBridgeCamIdRef.current) !== Number(selectedCam.id)
+    ) {
+      stopBrowserBridge();
+    }
+  }, [browserBridgeActive, selectedCam?.id, stopBrowserBridge]);
 
   // Sync recording state when selected camera changes
   useEffect(() => {
@@ -316,6 +328,7 @@ export function Cameras({ onNavigate, pageParams }) {
       }
 
       browserStreamRef.current = mediaStream;
+      activeBridgeCamIdRef.current = camTarget?.id || null;
       streamReloadPendingRef.current = true;
       setBrowserBridgeActive(true);
       setStreamError(false);
@@ -596,13 +609,14 @@ export function Cameras({ onNavigate, pageParams }) {
         username: newCam.username.trim(),
         password: newCam.password,
       };
-      let createdCam = null;
+      let savedCam = null;
       if (editingCamId) {
-        await api.cameras.update(editingCamId, payload);
+        const updatedRes = await api.cameras.update(editingCamId, payload);
+        savedCam = updatedRes?.camera || null;
         addToast(`Camera "${newCam.name}" updated successfully`, 'success');
       } else {
         const createdRes = await api.cameras.create(payload);
-        createdCam = createdRes?.camera || null;
+        savedCam = createdRes?.camera || null;
         addToast(`Camera "${newCam.name}" registered successfully`, 'success');
       }
       setIsAddModalOpen(false);
@@ -610,10 +624,10 @@ export function Cameras({ onNavigate, pageParams }) {
       setConnectionTestResult(null);
       setNewCam({ name: '', source_type: 'browser', source: selectedDeviceId || '0', username: '', password: '', location: 'Gate-1', description: '' });
       await fetchCameras();
-      if (createdCam && createdCam.source_type === 'browser') {
-        setSelectedCameraId(createdCam.id);
+      if (savedCam && savedCam.source_type === 'browser') {
+        setSelectedCameraId(savedCam.id);
         setSubTab('yolo');
-        await handleStartBrowserBridge(createdCam, createdCam.source);
+        await handleStartBrowserBridge(savedCam, savedCam.source);
       }
     } catch (err) {
       addToast(err.message || `Failed to save camera ${newCam.name}`, 'error');
