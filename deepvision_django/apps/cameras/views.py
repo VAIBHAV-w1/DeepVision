@@ -580,7 +580,9 @@ def camera_ingest_frame_view(request, camera_id):
     inf_worker = None
     try:
         inf_reg = get_inference_registry()
-        inf_worker = inf_reg.get_or_create_worker(camera.id, worker, camera.user_id)
+        inf_worker = inf_reg.get_active_worker(camera.id)
+        if not inf_worker or not getattr(inf_worker, "running", False):
+            inf_worker = inf_reg.get_worker(camera.id, worker)
     except Exception:
         pass
 

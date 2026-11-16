@@ -430,12 +430,12 @@ def get_server_launch_command(host: str, port: int):
         try:
             import gunicorn  # noqa: F401
             # Balanced single-process concurrency: 12 gthreads handle UI polling + frame ingest + MJPEG streams;
-            # high max-requests (50000) prevents 90s worker churn under 4.5 FPS ingestion while still bound-recycling long-lived processes.
+            # bounded max-requests (15000 + jitter 1500) avoids 90s churn under 4.5 FPS ingestion while still recycling native heap allocations periodically (~50 min under heavy load).
             threads = os.getenv("DEEPVISION_WSGI_THREADS", "12")
             timeout = os.getenv("DEEPVISION_WSGI_TIMEOUT", "90")
             graceful_timeout = os.getenv("DEEPVISION_WSGI_GRACEFUL_TIMEOUT", "30")
-            max_requests = os.getenv("DEEPVISION_WSGI_MAX_REQUESTS", "50000")
-            max_requests_jitter = os.getenv("DEEPVISION_WSGI_MAX_REQUESTS_JITTER", "5000")
+            max_requests = os.getenv("DEEPVISION_WSGI_MAX_REQUESTS", "15000")
+            max_requests_jitter = os.getenv("DEEPVISION_WSGI_MAX_REQUESTS_JITTER", "1500")
             cmd = [
                 PYTHON_EXE, "-m", "gunicorn",
                 "config.wsgi:application",
@@ -518,6 +518,10 @@ def main():
             logger.info("Starting unified Django surveillance application on %s using %s...", bind_addr, runner_desc)
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
+            # Constrain glibc arena & OpenMP/BLAS thread pools in Linux containers to prevent OOM 502s under YOLO11n + OpenCV load
+            env.setdefault("OMP_NUM_THREADS", "2")
+            env.setdefault("OPENBLAS_NUM_THREADS", "2")
+            env.setdefault("MALLOC_ARENA_MAX", "2")
             # Ensure PYTHONPATH includes both DJANGO_DIR and ROOT_DIR for module resolution
             current_pythonpath = env.get("PYTHONPATH", "")
             extra_paths = f"{DJANGO_DIR}{os.pathsep}{ROOT_DIR}"

@@ -223,7 +223,13 @@ export function Cameras({ onNavigate, pageParams }) {
         if (!active || !stats) return;
         if (typeof stats.fps === 'number') setMeasuredFps(Math.round(stats.fps * 10) / 10);
         if (typeof stats.ai_fps === 'number') setMeasuredAiFps(Math.round(stats.ai_fps * 10) / 10);
-        if (typeof stats.tracks === 'number') setActiveTracksCount(stats.tracks);
+        if (typeof stats.tracks === 'number') {
+          setActiveTracksCount(stats.tracks);
+        } else if (Array.isArray(stats.tracks)) {
+          setActiveTracksCount(stats.tracks.length);
+        } else if (typeof stats.detections === 'number') {
+          setActiveTracksCount(stats.detections);
+        }
         if (typeof stats.is_recording === 'boolean') setIsRecording(stats.is_recording);
         if (stats.status === 'online' && selectedCam.status !== 'online') {
           setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, status: 'online' } : c)));
@@ -278,7 +284,11 @@ export function Cameras({ onNavigate, pageParams }) {
           if (typeof res.fps === 'number') setMeasuredFps(res.fps);
           if (typeof res.ai_fps === 'number') setMeasuredAiFps(res.ai_fps);
           if (typeof res.tracks === 'number') setActiveTracksCount(res.tracks);
-          setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, status: 'online' } : c)));
+          setCameras((prev) =>
+            prev.some((c) => c.id === selectedCam.id && c.status !== 'online')
+              ? prev.map((c) => (c.id === selectedCam.id ? { ...c, status: 'online' } : c))
+              : prev
+          );
         }
       } catch {
         // Ignore single frame drop
@@ -293,6 +303,16 @@ export function Cameras({ onNavigate, pageParams }) {
       clearInterval(interval);
     };
   }, [browserBridgeActive, selectedCam?.id, isPlaying]);
+
+  // Ensure <video> srcObject remains attached across subtab transitions (e.g. inventory -> yolo after modal save)
+  useEffect(() => {
+    if (browserBridgeActive && browserVideoRef.current && browserStreamRef.current) {
+      if (browserVideoRef.current.srcObject !== browserStreamRef.current) {
+        browserVideoRef.current.srcObject = browserStreamRef.current;
+      }
+      browserVideoRef.current.play().catch(() => {});
+    }
+  }, [browserBridgeActive, subTab, selectedCam?.id]);
 
   // Start Browser Webcam / Phone Camera Bridge via navigator.mediaDevices.getUserMedia
   const handleStartBrowserBridge = async (targetCam = null, overrideDeviceId = null) => {

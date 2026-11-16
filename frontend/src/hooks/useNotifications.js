@@ -8,18 +8,23 @@ export function useNotifications() {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
   const inFlightUnreadRef = useRef(false);
+  const failureStreakRef = useRef(0);
 
   const fetchUnreadCount = useCallback(async () => {
-    if (!isAuthenticated || inFlightUnreadRef.current) return;
-    if (typeof document !== 'undefined' && document.hidden) return;
+    if (!isAuthenticated || inFlightUnreadRef.current) return true;
+    if (typeof document !== 'undefined' && document.hidden) return true;
     inFlightUnreadRef.current = true;
     try {
       const data = await notificationService.unreadCount();
       if (data && typeof data.count === 'number') {
         setUnreadCount(data.count);
       }
+      failureStreakRef.current = 0;
+      return true;
     } catch {
-      // Background poll failure is non-fatal
+      // Background poll failure is non-fatal; apply exponential backoff on transient upstream errors
+      failureStreakRef.current = Math.min(4, failureStreakRef.current + 1);
+      return false;
     } finally {
       inFlightUnreadRef.current = false;
     }
@@ -42,14 +47,32 @@ export function useNotifications() {
   useEffect(() => {
     if (!isAuthenticated) {
       setUnreadCount(0);
+      failureStreakRef.current = 0;
       return undefined;
     }
-    fetchUnreadCount();
-    const timer = setInterval(fetchUnreadCount, 12000);
-    const handleSync = () => fetchUnreadCount();
+    let active = true;
+    let timerId = null;
+
+    const scheduleNext = () => {
+      if (!active) return;
+      const delayMs = failureStreakRef.current > 0
+        ? Math.min(45000, 12000 * (2 ** (failureStreakRef.current - 1)))
+        : 12000;
+      timerId = setTimeout(async () => {
+        await fetchUnreadCount();
+        scheduleNext();
+      }, delayMs);
+    };
+
+    fetchUnreadCount().then(scheduleNext);
+    const handleSync = () => {
+      failureStreakRef.current = 0;
+      fetchUnreadCount();
+    };
     window.addEventListener('notifications:updated', handleSync);
     return () => {
-      clearInterval(timer);
+      active = false;
+      if (timerId) clearTimeout(timerId);
       window.removeEventListener('notifications:updated', handleSync);
     };
   }, [isAuthenticated, fetchUnreadCount]);
