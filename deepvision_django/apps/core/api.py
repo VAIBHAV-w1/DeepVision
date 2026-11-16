@@ -847,11 +847,11 @@ def _validate_and_normalize_camera_payload(data: dict, existing_source: str = No
     source_type = str(data.get("source_type") or "webcam").strip().lower()
     if source_type == "stream":
         source_type = "http"
-    if source_type not in ("webcam", "usb", "rtsp", "phone", "ipcamera", "video", "http", "https", "ip", "mjpeg"):
+    if source_type not in ("browser", "webcam", "usb", "rtsp", "phone", "ipcamera", "video", "http", "https", "ip", "mjpeg"):
         return None, f"Unsupported camera source type: {source_type}"
 
     raw_source = str(data.get("source") if data.get("source") is not None else "").strip()
-    if not raw_source and source_type in ("webcam", "usb", "phone"):
+    if not raw_source and source_type in ("browser", "webcam", "usb", "phone"):
         raw_source = "0"
     if not raw_source:
         return None, "Camera source URL or device index is required."

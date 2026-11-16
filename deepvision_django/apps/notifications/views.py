@@ -12,8 +12,10 @@ from django.views.decorators.http import require_POST
 from django.views.decorators.cache import never_cache
 from django.utils import timezone
 from django.core.paginator import Paginator
+from django.db import DatabaseError, InterfaceError, OperationalError, close_old_connections
 
 from apps.accounts.decorators import login_required
+from apps.core.api import handle_db_errors
 from apps.notifications.models import Notification
 
 logger = logging.getLogger(__name__)
@@ -73,6 +75,7 @@ def notifications_list_view(request):
 
 @require_POST
 @login_required
+@handle_db_errors
 def mark_notification_read_view(request, notification_id):
     """
     POST action marking a single notification as read.
@@ -94,6 +97,7 @@ def mark_notification_read_view(request, notification_id):
 
 @require_POST
 @login_required
+@handle_db_errors
 def mark_all_notifications_read_view(request):
     """
     POST action marking all unread notifications for the user as read.
@@ -115,16 +119,23 @@ def mark_all_notifications_read_view(request):
 
 @never_cache
 @login_required
+@handle_db_errors
 def unread_count_api_view(request):
     """
     JSON API returning current unread notifications count for UI badges.
+    Self-heals once if a pooled PostgreSQL connection was closed upstream.
     """
-    count = Notification.objects.filter(user_id=request.user.id, is_read=False).count()
+    try:
+        count = Notification.objects.filter(user_id=request.user.id, is_read=False).count()
+    except (OperationalError, InterfaceError):
+        close_old_connections()
+        count = Notification.objects.filter(user_id=request.user.id, is_read=False).count()
     return JsonResponse({'count': count})
 
 
 @never_cache
 @login_required
+@handle_db_errors
 def api_notifications_list_view(request):
     """
     JSON API for notifications center (paginated, with timestamps, camera attribution, and unread counts).

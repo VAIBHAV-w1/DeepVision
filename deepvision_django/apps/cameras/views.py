@@ -327,12 +327,17 @@ def camera_snapshot_view(request, camera_id):
     if camera.status == "offline":
         return HttpResponse(_get_offline_snapshot_bytes(), content_type="image/jpeg")
 
-    # Fast preview thumbnail lookup; online local webcams warm capture-only (zero YOLO threads), offline LAN cameras never block
-    allow_sync_start = (camera.source_type in ("webcam", "usb") and camera.status != "offline")
+    # Fast preview thumbnail lookup; only warm local OpenCV capture when physical video hardware exists
+    has_local_capture = (os.name == "nt") or os.path.exists("/dev/video0")
+    allow_sync_start = (
+        camera.source_type in ("webcam", "usb")
+        and camera.status != "offline"
+        and has_local_capture
+    )
     jpeg_bytes = get_camera_snapshot(camera.id, camera.user_id, allow_start=allow_sync_start)
     if jpeg_bytes:
         return HttpResponse(jpeg_bytes, content_type="image/jpeg")
-    if camera.source_type in ("webcam", "usb"):
+    if has_local_capture and camera.source_type in ("webcam", "usb"):
         import threading
         from apps.ai.engine import warm_camera_capture_only
         threading.Thread(target=warm_camera_capture_only, args=(camera.id, camera.user_id), daemon=True).start()
@@ -584,9 +589,9 @@ def camera_ingest_frame_view(request, camera_id):
         "camera_id": camera.id,
         "frame_id": worker.frame_id,
         "fps": worker.fps,
-        "ai_fps": getattr(inf_worker, "inference_fps", 0.0) if inf_worker else 0.0,
-        "tracks": len(getattr(inf_worker, "latest_tracks", []) or []) if inf_worker else 0,
-        "anomalies": len(getattr(inf_worker, "latest_anomalies", []) or []) if inf_worker else 0,
+        "ai_fps": getattr(inf_worker, "ai_fps", 0.0) if inf_worker else 0.0,
+        "tracks": len(getattr(inf_worker, "cached_tracks", []) or []) if inf_worker else 0,
+        "anomalies": len(getattr(inf_worker, "cached_anomalies", []) or []) if inf_worker else 0,
         "camera_status": "online",
     })
 

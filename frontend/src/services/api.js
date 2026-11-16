@@ -6,7 +6,6 @@
 import { getCsrfToken, fetchCsrfToken, setCsrfToken } from '../utils/csrf';
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
-const RENDER_FALLBACK_ORIGIN = 'https://deepvision-6ie7.onrender.com';
 
 async function request(endpoint, options = {}) {
   const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
@@ -48,13 +47,10 @@ async function request(endpoint, options = {}) {
       credentials: 'include',
     });
 
-    // Automatic single retry only for idempotent GET requests when Render container is waking from cold start (502/504)
+    // Automatic single same-origin retry only for idempotent GET requests when backend gateway returns 502/504
     if (method === 'GET' && (response.status === 502 || response.status === 504) && !options._retried) {
-      await new Promise((r) => setTimeout(r, 1500));
-      const retryUrl = (!endpoint.startsWith('http') && !API_BASE_URL)
-        ? `${RENDER_FALLBACK_ORIGIN}${endpoint}`
-        : url;
-      response = await fetch(retryUrl, {
+      await new Promise((r) => setTimeout(r, 1200));
+      response = await fetch(url, {
         ...options,
         _retried: true,
         signal: options.signal || controller.signal,

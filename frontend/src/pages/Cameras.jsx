@@ -65,6 +65,7 @@ export function Cameras({ onNavigate, pageParams }) {
   const browserVideoRef = useRef(null);
   const browserCanvasRef = useRef(null);
   const browserStreamRef = useRef(null);
+  const streamReloadPendingRef = useRef(false);
   const viewportContainerRef = useRef(null);
 
   // Add / Edit Camera Modal
@@ -74,7 +75,7 @@ export function Cameras({ onNavigate, pageParams }) {
   const [connectionTestResult, setConnectionTestResult] = useState(null);
   const [newCam, setNewCam] = useState({
     name: '',
-    source_type: 'webcam',
+    source_type: 'browser',
     source: '0',
     username: '',
     password: '',
@@ -84,7 +85,7 @@ export function Cameras({ onNavigate, pageParams }) {
 
   // Enumerate browser video input devices when modal or browser bridge is used
   const refreshBrowserDevices = useCallback(async () => {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return;
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return [];
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoInputs = devices.filter((d) => d.kind === 'videoinput');
@@ -92,10 +93,40 @@ export function Cameras({ onNavigate, pageParams }) {
       if (videoInputs.length > 0 && !selectedDeviceId) {
         setSelectedDeviceId(videoInputs[0].deviceId || '');
       }
+      return videoInputs;
     } catch {
-      // Ignore enumeration errors before permission is granted
+      return [];
     }
   }, [selectedDeviceId]);
+
+  const requestBrowserCameraPermission = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      addToast('Browser camera API (getUserMedia) is not supported in this browser.', 'error');
+      return [];
+    }
+    try {
+      const probeStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      probeStream.getTracks().forEach((trk) => {
+        try { trk.stop(); } catch {}
+      });
+      const list = await refreshBrowserDevices();
+      if (list.length > 0 && newCam.source_type === 'browser') {
+        const firstId = list[0].deviceId || '0';
+        setSelectedDeviceId((prev) => prev || firstId);
+        setNewCam((prev) => ({
+          ...prev,
+          source: prev.source && prev.source !== '0' ? prev.source : firstId,
+        }));
+      }
+      return list;
+    } catch (err) {
+      const msg = err?.name === 'NotAllowedError'
+        ? 'Camera permission denied by browser. Please allow camera access in site permissions.'
+        : err?.message || 'Unable to access browser camera.';
+      addToast(msg, 'error');
+      return [];
+    }
+  }, [refreshBrowserDevices, newCam.source_type, addToast]);
 
   useEffect(() => {
     refreshBrowserDevices();
@@ -228,6 +259,10 @@ export function Cameras({ onNavigate, pageParams }) {
         if (active && res?.success) {
           setStreamError(false);
           setStreamLoaded(true);
+          if (streamReloadPendingRef.current) {
+            streamReloadPendingRef.current = false;
+            setStreamTimestamp(Date.now());
+          }
           if (typeof res.fps === 'number') setMeasuredFps(res.fps);
           if (typeof res.ai_fps === 'number') setMeasuredAiFps(res.ai_fps);
           if (typeof res.tracks === 'number') setActiveTracksCount(res.tracks);
@@ -248,18 +283,40 @@ export function Cameras({ onNavigate, pageParams }) {
   }, [browserBridgeActive, selectedCam?.id, isPlaying]);
 
   // Start Browser Webcam / Phone Camera Bridge via navigator.mediaDevices.getUserMedia
-  const handleStartBrowserBridge = async () => {
+  const handleStartBrowserBridge = async (targetCam = null, overrideDeviceId = null) => {
+    const camTarget = targetCam && targetCam.id ? targetCam : selectedCam;
     if (!navigator.mediaDevices?.getUserMedia) {
       addToast('Browser camera API (getUserMedia) is not supported in this browser.', 'error');
       return;
     }
     try {
       stopBrowserBridge();
-      const videoConstraints = selectedDeviceId
-        ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
-        : { facingMode: selectedCam?.source_type === 'phone' ? 'environment' : 'user', width: { ideal: 640 }, height: { ideal: 480 } };
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+      const storedBrowserDevice =
+        camTarget?.source_type === 'browser' && camTarget.source && camTarget.source !== '0' && camTarget.source.length > 8
+          ? camTarget.source
+          : '';
+      const chosenDeviceId = overrideDeviceId || storedBrowserDevice || selectedDeviceId;
+      const defaultFacing = camTarget?.source_type === 'phone' ? 'environment' : 'user';
+      const primaryConstraints = chosenDeviceId
+        ? { deviceId: { exact: chosenDeviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
+        : { facingMode: defaultFacing, width: { ideal: 640 }, height: { ideal: 480 } };
+
+      let mediaStream;
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ video: primaryConstraints, audio: false });
+      } catch (constraintErr) {
+        if (chosenDeviceId && (constraintErr?.name === 'OverconstrainedError' || constraintErr?.name === 'NotFoundError')) {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: defaultFacing, width: { ideal: 640 }, height: { ideal: 480 } },
+            audio: false,
+          });
+        } else {
+          throw constraintErr;
+        }
+      }
+
       browserStreamRef.current = mediaStream;
+      streamReloadPendingRef.current = true;
       setBrowserBridgeActive(true);
       setStreamError(false);
       setStreamLoaded(true);
@@ -270,7 +327,7 @@ export function Cameras({ onNavigate, pageParams }) {
           browserVideoRef.current.play().catch(() => {});
         }
       }, 50);
-      addToast(`Connected browser camera for ${selectedCam?.name || 'Camera'}`, 'success');
+      addToast(`Connected browser camera for ${camTarget?.name || 'Camera'}`, 'success');
     } catch (err) {
       const msg =
         err?.name === 'NotAllowedError'
@@ -327,6 +384,11 @@ export function Cameras({ onNavigate, pageParams }) {
   const handleReconnectCamera = async (camObj = selectedCam) => {
     const target = camObj || selectedCam;
     if (!target?.id || isReconnecting) return;
+    if (target.source_type === 'browser') {
+      setSelectedCameraId(target.id);
+      await handleStartBrowserBridge(target);
+      return;
+    }
     try {
       setIsReconnecting(true);
       setStreamError(false);
@@ -458,6 +520,46 @@ export function Cameras({ onNavigate, pageParams }) {
 
   // Test Camera Connection inside Modal before saving
   const handleTestModalConnection = async () => {
+    if (newCam.source_type === 'browser') {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        const msg = 'Browser camera API (getUserMedia) is not supported in this browser.';
+        setConnectionTestResult({ success: false, message: msg });
+        addToast(msg, 'error');
+        return;
+      }
+      try {
+        setIsTestingConnection(true);
+        setConnectionTestResult(null);
+        const chosenId = newCam.source && newCam.source !== '0' ? newCam.source : selectedDeviceId;
+        const videoConstraint = chosenId
+          ? { deviceId: { exact: chosenId }, width: { ideal: 640 }, height: { ideal: 480 } }
+          : { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } };
+        const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: false });
+        const track = stream.getVideoTracks()[0];
+        const settings = track?.getSettings ? track.getSettings() : {};
+        const label = track?.label || 'Browser Webcam';
+        const dims = settings.width && settings.height ? ` (${settings.width}x${settings.height})` : '';
+        stream.getTracks().forEach((t) => {
+          try { t.stop(); } catch {}
+        });
+        await refreshBrowserDevices();
+        const msg = `Browser camera verified locally: ${label}${dims}`;
+        setConnectionTestResult({ success: true, message: msg });
+        addToast(msg, 'success');
+      } catch (err) {
+        const msg = err?.name === 'NotAllowedError'
+          ? 'Camera permission denied by browser. Please allow camera access in site permissions.'
+          : err?.name === 'NotFoundError'
+          ? 'No webcam detected by browser.'
+          : err?.message || 'Browser camera test failed.';
+        setConnectionTestResult({ success: false, message: msg });
+        addToast(msg, 'warning');
+      } finally {
+        setIsTestingConnection(false);
+      }
+      return;
+    }
+
     try {
       setIsTestingConnection(true);
       setConnectionTestResult(null);
@@ -494,18 +596,25 @@ export function Cameras({ onNavigate, pageParams }) {
         username: newCam.username.trim(),
         password: newCam.password,
       };
+      let createdCam = null;
       if (editingCamId) {
         await api.cameras.update(editingCamId, payload);
         addToast(`Camera "${newCam.name}" updated successfully`, 'success');
       } else {
-        await api.cameras.create(payload);
+        const createdRes = await api.cameras.create(payload);
+        createdCam = createdRes?.camera || null;
         addToast(`Camera "${newCam.name}" registered successfully`, 'success');
       }
       setIsAddModalOpen(false);
       setEditingCamId(null);
       setConnectionTestResult(null);
-      setNewCam({ name: '', source_type: 'webcam', source: '0', username: '', password: '', location: 'Gate-1', description: '' });
-      fetchCameras();
+      setNewCam({ name: '', source_type: 'browser', source: selectedDeviceId || '0', username: '', password: '', location: 'Gate-1', description: '' });
+      await fetchCameras();
+      if (createdCam && createdCam.source_type === 'browser') {
+        setSelectedCameraId(createdCam.id);
+        setSubTab('yolo');
+        await handleStartBrowserBridge(createdCam, createdCam.source);
+      }
     } catch (err) {
       addToast(err.message || `Failed to save camera ${newCam.name}`, 'error');
     }
@@ -624,7 +733,7 @@ export function Cameras({ onNavigate, pageParams }) {
         </button>
         <button
           type="button"
-          onClick={browserBridgeActive ? stopBrowserBridge : handleStartBrowserBridge}
+          onClick={browserBridgeActive ? stopBrowserBridge : () => handleStartBrowserBridge(selectedCam)}
           title="Stream local USB/Laptop/Phone camera via browser WebRTC/getUserMedia into AI pipeline"
           style={{
             background: browserBridgeActive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.18)',
@@ -783,7 +892,16 @@ export function Cameras({ onNavigate, pageParams }) {
             onClick={() => {
               setEditingCamId(null);
               setConnectionTestResult(null);
-              setNewCam({ name: '', source_type: 'webcam', source: '0', username: '', password: '', location: 'Gate-1', description: '' });
+              refreshBrowserDevices();
+              setNewCam({
+                name: '',
+                source_type: 'browser',
+                source: selectedDeviceId || browserDevices[0]?.deviceId || '0',
+                username: '',
+                password: '',
+                location: 'Gate-1',
+                description: '',
+              });
               setIsAddModalOpen(true);
             }}
             style={{
@@ -1024,7 +1142,7 @@ export function Cameras({ onNavigate, pageParams }) {
                                   setOpenMenuCamId(null);
                                   setSelectedCameraId(cam.id);
                                   setSubTab('yolo');
-                                  setTimeout(() => handleStartBrowserBridge(), 100);
+                                  handleStartBrowserBridge(cam);
                                 }}
                                 style={{
                                   background: 'transparent',
@@ -1286,7 +1404,7 @@ export function Cameras({ onNavigate, pageParams }) {
                     </button>
                     <button
                       type="button"
-                      onClick={handleStartBrowserBridge}
+                      onClick={() => handleStartBrowserBridge(selectedCam)}
                       style={{
                         backgroundColor: '#10B981',
                         color: '#FFFFFF',
@@ -1451,7 +1569,7 @@ export function Cameras({ onNavigate, pageParams }) {
                     </button>
                     <button
                       type="button"
-                      onClick={handleStartBrowserBridge}
+                      onClick={() => handleStartBrowserBridge(selectedCam)}
                       style={{ backgroundColor: '#10B981', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
                     >
                       📷 Use Browser Camera
@@ -1593,7 +1711,7 @@ export function Cameras({ onNavigate, pageParams }) {
                       </button>
                       <button
                         type="button"
-                        onClick={handleStartBrowserBridge}
+                        onClick={() => handleStartBrowserBridge(selectedCam)}
                         style={{ backgroundColor: '#10B981', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
                       >
                         📷 Use Browser Camera
@@ -1808,7 +1926,7 @@ export function Cameras({ onNavigate, pageParams }) {
                       </button>
                       <button
                         type="button"
-                        onClick={handleStartBrowserBridge}
+                        onClick={() => handleStartBrowserBridge(selectedCam)}
                         style={{ backgroundColor: '#10B981', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
                       >
                         📷 Use Browser Camera
@@ -1943,9 +2061,13 @@ export function Cameras({ onNavigate, pageParams }) {
                     onChange={(e) => {
                       const nextType = e.target.value;
                       let nextSource = newCam.source;
-                      if (nextType === 'webcam' && !/^\d+$/.test(nextSource)) nextSource = '0';
+                      if (nextType === 'browser') {
+                        nextSource = selectedDeviceId || browserDevices[0]?.deviceId || '0';
+                        refreshBrowserDevices();
+                      } else if (nextType === 'webcam' && !/^\d+$/.test(nextSource)) nextSource = '0';
                       else if (nextType === 'rtsp' && !nextSource.startsWith('rtsp://')) nextSource = 'rtsp://192.168.1.50:554/stream1';
                       else if ((nextType === 'http' || nextType === 'ipcamera' || nextType === 'phone') && !nextSource.startsWith('http')) nextSource = 'http://192.168.1.60:8080/video';
+                      setConnectionTestResult(null);
                       setNewCam({ ...newCam, source_type: nextType, source: nextSource });
                     }}
                     style={{
@@ -1958,12 +2080,13 @@ export function Cameras({ onNavigate, pageParams }) {
                       outline: 'none',
                     }}
                   >
-                    <option value="webcam">{t('cameras.modalSourceWebcam', 'USB / Laptop Webcam')}</option>
-                    <option value="rtsp">{t('cameras.modalSourceRtsp', 'RTSP IP Camera')}</option>
-                    <option value="http">{t('cameras.rtsp', 'HTTP / MJPEG Stream')}</option>
-                    <option value="ipcamera">{t('cameras.modalSourceRtsp', 'Network IP Camera')}</option>
-                    <option value="phone">{t('cameras.directshow', 'Mobile Phone Camera (IP Webcam / Browser)')}</option>
-                    <option value="video">{t('cameras.modalSourceLoopback', 'Local Video File')}</option>
+                    <option value="browser">{t('cameras.modalSourceBrowser', 'Browser Webcam (Laptop / Phone Camera)')}</option>
+                    <option value="webcam">{t('cameras.modalSourceWebcam', 'USB / DirectShow Webcam')}</option>
+                    <option value="rtsp">{t('cameras.modalSourceRtsp', 'IP Camera / RTSP Stream')}</option>
+                    <option value="http">{t('cameras.modalSourceHttp', 'HTTP / MJPEG Stream')}</option>
+                    <option value="ipcamera">{t('cameras.modalSourceNetworkIp', 'Network IP Camera')}</option>
+                    <option value="phone">{t('cameras.modalSourceMobileIp', 'Mobile IP Webcam (URL Stream)')}</option>
+                    <option value="video">{t('cameras.modalSourceLoopback', 'Video Loopback File')}</option>
                   </select>
                 </div>
 
@@ -1987,41 +2110,96 @@ export function Cameras({ onNavigate, pageParams }) {
                 </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>
-                  {newCam.source_type === 'webcam'
-                    ? t('surveillance.sourceUrl', 'Device Index (0 = Default Webcam, 1 = External USB Camera)')
-                    : t('surveillance.sourceUrl', 'Stream URL or Source Path')}
-                </label>
-                <input
-                  type="text"
-                  value={newCam.source}
-                  onChange={(e) => setNewCam({ ...newCam, source: e.target.value })}
-                  placeholder={
-                    newCam.source_type === 'webcam'
-                      ? '0'
-                      : newCam.source_type === 'rtsp'
-                      ? 'rtsp://192.168.1.50:554/stream1'
-                      : 'http://192.168.1.60:8080/video'
-                  }
-                  required
-                  style={{
-                    width: '100%',
-                    backgroundColor: '#090E1A',
-                    border: '1px solid #1E293B',
-                    borderRadius: '6px',
-                    padding: '8px 12px',
-                    color: '#FFFFFF',
-                    outline: 'none',
-                  }}
-                />
-                {browserDevices.length > 0 && (newCam.source_type === 'webcam' || newCam.source_type === 'phone') && (
-                  <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#94A3B8' }}>
-                    {t('surveillance.hardwareBridge', 'Detected Browser Video Devices')}:{' '}
-                    {browserDevices.map((d, idx) => d.label || `Camera #${idx}`).join(', ')}
+              {newCam.source_type === 'browser' ? (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: '8px' }}>
+                    <label style={{ fontSize: '0.8rem', color: '#94A3B8' }}>
+                      Browser Camera Device (navigator.mediaDevices)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={requestBrowserCameraPermission}
+                      style={{
+                        background: 'rgba(16, 185, 129, 0.15)',
+                        border: '1px solid rgba(16, 185, 129, 0.4)',
+                        color: '#10B981',
+                        borderRadius: '6px',
+                        padding: '3px 8px',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Allow Camera / Refresh Devices
+                    </button>
                   </div>
-                )}
-              </div>
+                  <select
+                    value={newCam.source}
+                    onChange={(e) => {
+                      setSelectedDeviceId(e.target.value);
+                      setNewCam({ ...newCam, source: e.target.value });
+                    }}
+                    style={{
+                      width: '100%',
+                      backgroundColor: '#090E1A',
+                      border: '1px solid #1E293B',
+                      borderRadius: '6px',
+                      padding: '8px 12px',
+                      color: '#FFFFFF',
+                      outline: 'none',
+                    }}
+                  >
+                    {browserDevices.length > 0 ? (
+                      browserDevices.map((d, idx) => (
+                        <option key={d.deviceId || idx} value={d.deviceId || String(idx)}>
+                          {d.label || `Browser Camera #${idx + 1} (Grant permission to show model name)`}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="0">Default Browser Webcam (Click "Allow Camera" to detect devices)</option>
+                    )}
+                  </select>
+                  <div style={{ marginTop: '6px', fontSize: '0.74rem', color: '#94A3B8' }}>
+                    Streams directly from your browser into DeepVision YOLO + ByteTrack + Supabase storage (no server DirectShow required).
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>
+                    {newCam.source_type === 'webcam'
+                      ? t('surveillance.sourceUrl', 'Device Index (0 = Default Webcam, 1 = External USB Camera)')
+                      : t('surveillance.sourceUrl', 'Stream URL or Source Path')}
+                  </label>
+                  <input
+                    type="text"
+                    value={newCam.source}
+                    onChange={(e) => setNewCam({ ...newCam, source: e.target.value })}
+                    placeholder={
+                      newCam.source_type === 'webcam'
+                        ? '0'
+                        : newCam.source_type === 'rtsp'
+                        ? 'rtsp://192.168.1.50:554/stream1'
+                        : 'http://192.168.1.60:8080/video'
+                    }
+                    required
+                    style={{
+                      width: '100%',
+                      backgroundColor: '#090E1A',
+                      border: '1px solid #1E293B',
+                      borderRadius: '6px',
+                      padding: '8px 12px',
+                      color: '#FFFFFF',
+                      outline: 'none',
+                    }}
+                  />
+                  {browserDevices.length > 0 && (newCam.source_type === 'webcam' || newCam.source_type === 'phone') && (
+                    <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#94A3B8' }}>
+                      {t('surveillance.hardwareBridge', 'Detected Browser Video Devices')}:{' '}
+                      {browserDevices.map((d, idx) => d.label || `Camera #${idx}`).join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {(newCam.source_type === 'rtsp' || newCam.source_type === 'http' || newCam.source_type === 'ipcamera' || newCam.source_type === 'phone') && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>

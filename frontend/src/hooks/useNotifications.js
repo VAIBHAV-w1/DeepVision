@@ -1,12 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { notificationService } from '../services/notifications';
+import { useAuth } from './useAuth';
 
 export function useNotifications() {
+  const { isAuthenticated } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
+  const inFlightUnreadRef = useRef(false);
 
   const fetchUnreadCount = useCallback(async () => {
+    if (!isAuthenticated || inFlightUnreadRef.current) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    inFlightUnreadRef.current = true;
     try {
       const data = await notificationService.unreadCount();
       if (data && typeof data.count === 'number') {
@@ -14,8 +20,10 @@ export function useNotifications() {
       }
     } catch {
       // Background poll failure is non-fatal
+    } finally {
+      inFlightUnreadRef.current = false;
     }
-  }, []);
+  }, [isAuthenticated]);
 
   const fetchNotifications = useCallback(async (params = { status: 'unread', per_page: 5 }) => {
     try {
@@ -32,15 +40,19 @@ export function useNotifications() {
   }, []);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      setUnreadCount(0);
+      return undefined;
+    }
     fetchUnreadCount();
-    const timer = setInterval(fetchUnreadCount, 10000);
+    const timer = setInterval(fetchUnreadCount, 12000);
     const handleSync = () => fetchUnreadCount();
     window.addEventListener('notifications:updated', handleSync);
     return () => {
       clearInterval(timer);
       window.removeEventListener('notifications:updated', handleSync);
     };
-  }, [fetchUnreadCount]);
+  }, [isAuthenticated, fetchUnreadCount]);
 
   const markRead = async (id) => {
     try {

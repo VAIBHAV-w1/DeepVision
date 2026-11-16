@@ -429,10 +429,13 @@ def get_server_launch_command(host: str, port: int):
         # Production / Container / Linux mode: Gunicorn WSGI is strictly required
         try:
             import gunicorn  # noqa: F401
-            threads = os.getenv("DEEPVISION_WSGI_THREADS", "8")
-            timeout = os.getenv("DEEPVISION_WSGI_TIMEOUT", "60")
-            max_requests = os.getenv("DEEPVISION_WSGI_MAX_REQUESTS", "500")
-            max_requests_jitter = os.getenv("DEEPVISION_WSGI_MAX_REQUESTS_JITTER", "50")
+            # Balanced single-process concurrency: 12 gthreads handle UI polling + frame ingest + MJPEG streams;
+            # high max-requests (50000) prevents 90s worker churn under 4.5 FPS ingestion while still bound-recycling long-lived processes.
+            threads = os.getenv("DEEPVISION_WSGI_THREADS", "12")
+            timeout = os.getenv("DEEPVISION_WSGI_TIMEOUT", "90")
+            graceful_timeout = os.getenv("DEEPVISION_WSGI_GRACEFUL_TIMEOUT", "30")
+            max_requests = os.getenv("DEEPVISION_WSGI_MAX_REQUESTS", "50000")
+            max_requests_jitter = os.getenv("DEEPVISION_WSGI_MAX_REQUESTS_JITTER", "5000")
             cmd = [
                 PYTHON_EXE, "-m", "gunicorn",
                 "config.wsgi:application",
@@ -441,7 +444,7 @@ def get_server_launch_command(host: str, port: int):
                 "--threads", str(threads),
                 "--worker-class", "gthread",
                 "--timeout", str(timeout),
-                "--graceful-timeout", "20",
+                "--graceful-timeout", str(graceful_timeout),
                 "--keep-alive", "5",
                 "--max-requests", str(max_requests),
                 "--max-requests-jitter", str(max_requests_jitter),

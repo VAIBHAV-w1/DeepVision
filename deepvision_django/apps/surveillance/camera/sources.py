@@ -149,7 +149,10 @@ def normalize_camera_source(source_type, source):
     if not source:
         return ""
     
-    if source_type in ("webcam", "usb", "video", "file", "local"):
+    if source_type == "browser":
+        cleaned = str(source).replace("\x00", "").replace("\r", "").replace("\n", "").strip()[:255]
+        return cleaned or "0"
+    elif source_type in ("webcam", "usb", "video", "file", "local"):
         return source
     elif source_type == "phone":
         if "://" not in source:
@@ -191,7 +194,11 @@ def resolve_camera_capture_source(source_type, source):
         if source == "":
             raise ValueError("Stream Source cannot be empty.")
         
-    if source_type in ("webcam", "usb"):
+    if source_type == "browser":
+        norm = str(source or "0").replace("\x00", "").replace("\r", "").replace("\n", "").strip()[:255] or "0"
+        return f"browser://{norm}"
+
+    elif source_type in ("webcam", "usb"):
         if isinstance(source, int):
             return source
         if isinstance(source, str) and source.isdigit():
@@ -226,7 +233,9 @@ def get_physical_source_key(source_type, source):
     except Exception:
         cap_source = source
 
-    if source_type in ("webcam", "usb") or isinstance(cap_source, int):
+    if source_type == "browser":
+        return f"browser://{normalize_camera_source('browser', source)}"
+    elif source_type in ("webcam", "usb") or isinstance(cap_source, int):
         backend = "dshow" if (os.name == "nt" or sys.platform.startswith("win")) else "v4l2"
         return f"{backend}://{cap_source}"
     elif source_type in ("video", "file", "local"):
