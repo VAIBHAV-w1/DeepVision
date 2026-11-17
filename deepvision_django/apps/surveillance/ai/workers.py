@@ -301,6 +301,11 @@ class InferenceWorker:
         last_zone_refresh = 0.0
 
         print(f"[INFERENCE_LOOP_ENTER] camera_id={self.camera_id}")
+        if hasattr(self.tracker, "ensure_model_loaded"):
+            try:
+                self.tracker.ensure_model_loaded()
+            except Exception as e:
+                logger.warning(f"[InferenceWorker] Lazy model initialization fallback camera {self.camera_id}: {e}")
         cond = getattr(camera_worker, "frame_condition", None)
         while True:
             with self.lock:
@@ -527,7 +532,10 @@ class InferenceWorker:
                     })
                 self.track_history.clean_stale_tracks(now, cfg_anom)
 
-                events = self.anomaly_detector.detect(tracked_objects_for_anom, now, zones=stream_zones)
+                fh_cur, fw_cur = frame.shape[:2]
+                events = self.anomaly_detector.detect(
+                    tracked_objects_for_anom, now, zones=stream_zones, frame_size=(fw_cur, fh_cur)
+                )
                 if events:
                     self.cached_anomalies = events
                     pre_buf = camera_worker.get_recent_buffer(60)

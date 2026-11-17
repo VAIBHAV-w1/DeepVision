@@ -134,8 +134,10 @@ class InferenceRegistry:
                 imgsz = getattr(settings, "YOLO_IMAGE_SIZE", 640)
                 rules_snapshot = dict(self.runtime_anomaly_rules)
 
-            # Construct & start strictly ONE InferenceWorker while holding phys_lock
-            tracker = ByteTrackTracker(confidence_threshold=threshold, imgsz=imgsz)
+            # Construct & start strictly ONE InferenceWorker while holding phys_lock.
+            # Use lazy_init=True so HTTP stream/ingest endpoints return immediately while
+            # YOLO11n weights load inside the background InferenceWorker thread.
+            tracker = ByteTrackTracker(confidence_threshold=threshold, imgsz=imgsz, lazy_init=True)
             iworker = InferenceWorker(camera_id, tracker, inference_interval_ms=interval_ms)
             iworker.anomaly_detector.config.update(rules_snapshot)
             iworker.ref_count = 1

@@ -37,6 +37,7 @@ from apps.surveillance.streaming.stream_service import (
     generate_raw_stream,
     generate_tracking_stream,
     get_camera_telemetry,
+    render_annotated_frame,
 )
 from apps.surveillance.camera.sources import resolve_camera_capture_source
 from apps.surveillance.camera.capture import safe_open_video_capture
@@ -180,17 +181,20 @@ def stream_camera_frames(camera_id: int, user_id: int, mode: str = "tracking") -
         yield from generate_tracking_stream(camera_id, user_id)
 
 
-def get_camera_snapshot(camera_id: int, user_id: int, allow_start: bool = True) -> Optional[bytes]:
+def get_camera_snapshot(camera_id: int, user_id: int, allow_start: bool = True, mode: str = "raw") -> Optional[bytes]:
     """
     Captures a single snapshot JPEG frame directly from native camera worker or hardware,
     or via the host camera bridge if running containerized.
+    When `mode == "tracking"`, overlays active restricted zones, bounding boxes, and
+    ByteTrack IDs using `render_annotated_frame()`.
     When allow_start=False (e.g. non-blocking dashboard thumbnail GET), returns immediately
     from active workers without stalling HTTP worker threads on offline cameras.
     """
     bridge_url = get_host_bridge_url()
     if bridge_url:
         try:
-            req = urllib.request.Request(f"{bridge_url}/cameras/{camera_id}/snapshot/")
+            suffix = "?mode=tracking" if mode == "tracking" else ""
+            req = urllib.request.Request(f"{bridge_url}/cameras/{camera_id}/snapshot/{suffix}")
             with urllib.request.urlopen(req, timeout=1.5) as resp:
                 if resp.status == 200:
                     return resp.read()
@@ -203,6 +207,29 @@ def get_camera_snapshot(camera_id: int, user_id: int, allow_start: bool = True) 
     cam_reg = get_camera_registry()
     worker = cam_reg.get_active_worker(camera_id)
 
+    def _encode_frame(raw_frame, active_cam_worker):
+        out_frame = raw_frame
+        if mode == "tracking" and get_inference_registry is not None:
+            try:
+                inf_reg = get_inference_registry()
+                inf_worker = inf_reg.get_active_worker(camera_id)
+                if inf_worker is None and active_cam_worker is not None and active_cam_worker.running:
+                    inf_worker = inf_reg.get_worker(camera_id, active_cam_worker)
+                if inf_worker is not None:
+                    out_frame, _ = render_annotated_frame(
+                        raw_frame,
+                        camera_id,
+                        inference_worker=inf_worker,
+                        current_id=getattr(active_cam_worker, "frame_id", 0),
+                        cap_mono=getattr(active_cam_worker, "last_capture_monotonic", 0.0),
+                        display_fps=getattr(active_cam_worker, "fps", 0.0),
+                        worker=active_cam_worker,
+                    )
+            except Exception as exc:
+                logger.warning(f"[SNAPSHOT_ANNOTATE_WARN] cam={camera_id}: {exc}")
+        success, buffer = cv2.imencode(".jpg", out_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        return buffer.tobytes() if success else None
+
     # 1. Grab from active worker (including shared physical hardware worker) if available
     if worker and worker.running and worker.latest_frame is not None:
         with worker.lock:
@@ -210,9 +237,7 @@ def get_camera_snapshot(camera_id: int, user_id: int, allow_start: bool = True) 
         sample = frame[::16, ::16]
         if float(sample.mean()) < 1.0 and float(sample.std()) < 0.5:
             return None
-        success, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        if success:
-            return buffer.tobytes()
+        return _encode_frame(frame, worker)
 
     if not allow_start:
         return None
@@ -231,10 +256,10 @@ def get_camera_snapshot(camera_id: int, user_id: int, allow_start: bool = True) 
                     frame = temp_worker.latest_frame.copy()
                 sample = frame[::16, ::16]
                 if float(sample.mean()) >= 1.0 or float(sample.std()) >= 0.5:
-                    success, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    encoded = _encode_frame(frame, temp_worker)
                     cam_reg.release_worker(camera_id)
-                    if success:
-                        return buffer.tobytes()
+                    if encoded is not None:
+                        return encoded
             import time
             time.sleep(0.05)
         cam_reg.release_worker(camera_id)
@@ -247,6 +272,8 @@ def get_camera_snapshot(camera_id: int, user_id: int, allow_start: bool = True) 
 def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
     """
     Retrieves live stream telemetry from native surveillance services or host bridge.
+    Falls back directly to active InferenceWorker state so tracks, zones, anomalies,
+    and detector_backend remain fresh even when MJPEG streaming isn't open.
     """
     bridge_url = get_host_bridge_url()
     if bridge_url:
@@ -261,29 +288,69 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
     telemetry = get_camera_telemetry(camera_id)
     health = get_camera_health(camera_id)
     tracks_list = telemetry.get("tracks", [])
+    anomalies_list = telemetry.get("anomalies", [])
+    zones_list = telemetry.get("zones", [])
+    active_intrusions = telemetry.get("active_intrusions", [])
+    detector_backend = telemetry.get("detector_backend", "unknown")
+
+    cam_reg = get_camera_registry()
+    active_worker = cam_reg.get_active_worker(camera_id) if cam_reg else None
+    inf_worker = get_inference_registry().get_active_worker(camera_id) if get_inference_registry else None
+
+    if inf_worker is not None and getattr(inf_worker, "running", False):
+        tracker = getattr(inf_worker, "tracker", None)
+        detector_backend = getattr(tracker, "detector_backend", detector_backend) if tracker is not None else detector_backend
+        if not tracks_list:
+            tracks_list = [
+                {
+                    "track_id": f"#{trk['track_id']}",
+                    "class_name": str(trk.get("class_name", "object")).capitalize(),
+                    "confidence": round(float(trk.get("confidence", 0.0)), 3),
+                    "bbox": [int(trk["x1"]), int(trk["y1"]), int(trk["x2"]), int(trk["y2"])],
+                    "behavior": trk.get("behavior") or "normal",
+                    "direction": trk.get("direction") or "stationary",
+                    "speed": round(float(trk.get("speed", 0.0) or 0.0), 1),
+                }
+                for trk in (getattr(inf_worker, "cached_tracks", []) or [])
+            ]
+        if not anomalies_list:
+            anomalies_list = list(getattr(inf_worker, "cached_anomalies", []) or [])
+        if not zones_list and hasattr(inf_worker, "get_cached_zones"):
+            zones_list = list(inf_worker.get_cached_zones(camera_id) or [])
+
     is_rec = False
     try:
         is_rec = recording_service.get_active_recording(camera_id, user_id) is not None
     except Exception:
         pass
-    cam_reg = get_camera_registry()
-    active_worker = cam_reg.get_active_worker(camera_id) if cam_reg else None
     real_fps = health.get("fps", 0.0) or telemetry.get("fps", 0.0) or (active_worker.fps if active_worker else 0.0)
     cap_fps = (active_worker.fps if (active_worker and getattr(active_worker, "fps", 0.0)) else 0.0) or real_fps
-    inf_fps = health.get("ai_fps") or telemetry.get("ai_fps") or 0.0
+    inf_fps = (
+        health.get("ai_fps")
+        or telemetry.get("ai_fps")
+        or (getattr(inf_worker, "ai_fps", 0.0) if inf_worker else 0.0)
+        or 0.0
+    )
+    lat_ms = (
+        health.get("inference_latency_ms")
+        or telemetry.get("latency_ms")
+        or (getattr(inf_worker, "latency_ms", 0.0) if inf_worker else 0.0)
+        or 0.0
+    )
     return {
         "camera_id": camera_id,
         "tracks": tracks_list,
         "detections": len(tracks_list),
-        "anomalies": telemetry.get("anomalies", []),
-        "zones": telemetry.get("zones", []),
-        "active_intrusions": telemetry.get("active_intrusions", []),
+        "anomalies": anomalies_list,
+        "zones": zones_list,
+        "active_intrusions": active_intrusions,
+        "detector_backend": detector_backend,
         "fps": real_fps,
         "capture_fps": round(float(cap_fps), 2),
         "ai_fps": inf_fps,
         "inference_fps": round(float(inf_fps), 2),
-        "latency_ms": health.get("inference_latency_ms") or telemetry.get("latency_ms") or 0.0,
-        "stage_timings": telemetry.get("stage_timings", {}),
+        "latency_ms": lat_ms,
+        "stage_timings": telemetry.get("stage_timings", {}) or (getattr(inf_worker, "last_stage_timings", {}) if inf_worker else {}),
         "inference_age_ms": telemetry.get("inference_age_ms", 0.0),
         "status": health.get("status", "active"),
         "is_recording": is_rec,

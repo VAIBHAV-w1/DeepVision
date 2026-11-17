@@ -31,11 +31,12 @@ class AnomalyDetector:
         # }
         self.abandoned_objects = {}
 
-    def detect(self, tracked_objects, timestamp, zones=None):
+    def detect(self, tracked_objects, timestamp, zones=None, frame_size=None):
         """
         Processes a list of tracked objects with behavioral attributes and
         evaluates anomaly rules. Returns a list of generated anomaly events.
         """
+        frame_w, frame_h = (frame_size[0], frame_size[1]) if (frame_size and len(frame_size) >= 2) else (None, None)
         # If no zones provided, use a default test zone for evaluation/unit tests
         if zones is None:
             zones = [
@@ -113,7 +114,11 @@ class AnomalyDetector:
                 zone_name = getattr(zone, 'name', 'Restricted Area')
                 zone_camera_id = getattr(zone, 'camera_id', None)
                 zone_user_id = getattr(zone, 'user_id', None)
-                if zone.is_point_inside(center_x, center_y):
+                try:
+                    is_inside = zone.is_point_inside(center_x, center_y, frame_width=frame_w, frame_height=frame_h)
+                except TypeError:
+                    is_inside = zone.is_point_inside(center_x, center_y)
+                if is_inside:
                     current_inside_zones.add(zone_id)
 
                     # Transition: OUTSIDE -> INSIDE
