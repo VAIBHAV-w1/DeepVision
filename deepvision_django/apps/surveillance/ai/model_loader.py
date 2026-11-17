@@ -45,7 +45,8 @@ def get_shared_yolo_model():
             print(f"[MODEL_LOADER] MODEL_LOAD_COUNT={_model_load_count} (should always be 1)")
             import torch
             try:
-                torch.set_num_threads(4)
+                max_threads = max(1, min(int(os.getenv("OMP_NUM_THREADS", "2")), os.cpu_count() or 2))
+                torch.set_num_threads(max_threads)
             except Exception:
                 pass
             model = YOLO(model_path)

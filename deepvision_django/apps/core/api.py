@@ -896,6 +896,34 @@ def api_cameras_list(request):
         if err:
             return JsonResponse({"success": False, "error": err}, status=400)
 
+        existing_by_name = Camera.objects.filter(
+            user_id=request.user.id,
+            name__iexact=cleaned["name"],
+        ).first()
+        if existing_by_name:
+            return JsonResponse({
+                "success": False,
+                "error": f"A camera named '{existing_by_name.name}' already exists.",
+                "duplicate_camera_id": existing_by_name.id,
+            }, status=409)
+
+        is_explicit_source = (
+            cleaned["source"].startswith(("rtsp://", "http://", "https://"))
+            or (cleaned["source_type"] == "browser" and cleaned["source"] not in ("browser", "webcam", "0", ""))
+        )
+        if is_explicit_source:
+            existing_by_source = Camera.objects.filter(
+                user_id=request.user.id,
+                source_type=cleaned["source_type"],
+                source=cleaned["source"],
+            ).first()
+            if existing_by_source:
+                return JsonResponse({
+                    "success": False,
+                    "error": f"This camera source is already registered as '{existing_by_source.name}'.",
+                    "duplicate_camera_id": existing_by_source.id,
+                }, status=409)
+
         now = timezone.now()
         initial_status = "offline"
         if cleaned["source_type"] in ("webcam", "usb"):
@@ -1161,34 +1189,46 @@ def api_camera_zones(request, camera_id):
     """
     List or create/update restricted anomaly zones for a camera.
     GET: returns array of configured zones for camera (deduplicated by identical coordinates).
-    POST: creates or updates a zone {name, x1, y1, x2, y2, enabled}. Protected by CSRF & RBAC.
+    POST/PUT: creates or updates a zone {zone_id?, name, x1, y1, x2, y2, enabled}. Protected by CSRF & RBAC.
     """
     from apps.core.models import RestrictedZone
 
-    if request.method == "POST":
+    if request.method in ("POST", "PUT"):
         try:
             camera = get_user_camera_or_404(request.user, camera_id, require_write=True)
         except PermissionDenied:
             return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
         data = _parse_body(request)
         name = str(data.get("name") or "Restricted Zone").strip()[:100]
+        raw_zone_id = data.get("zone_id") or data.get("id")
         try:
-            x1 = int(data.get("x1", 300))
-            y1 = int(data.get("y1", 100))
-            x2 = int(data.get("x2", 800))
-            y2 = int(data.get("y2", 600))
+            fx1 = float(data.get("x1", 300))
+            fy1 = float(data.get("y1", 100))
+            fx2 = float(data.get("x2", 800))
+            fy2 = float(data.get("y2", 600))
         except (ValueError, TypeError):
             return JsonResponse({"success": False, "error": "Invalid zone coordinates"}, status=400)
+
+        # Support normalized 0..1 float rectangles cleanly in canonical 1280x720 integer space
+        if min(fx1, fy1, fx2, fy2) >= 0.0 and max(fx1, fy1, fx2, fy2) <= 1.0 and (max(fx2, fy2) > 0.0):
+            x1, y1, x2, y2 = int(round(fx1 * 1280)), int(round(fy1 * 720)), int(round(fx2 * 1280)), int(round(fy2 * 720))
+        else:
+            x1, y1, x2, y2 = int(round(fx1)), int(round(fy1)), int(round(fx2)), int(round(fy2))
 
         nx1, ny1, nx2, ny2 = min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
         enabled = bool(data.get("enabled", True))
         now = timezone.now()
 
-        # Upsert if an identical rectangle or identical zone name already exists on this camera
-        existing = (
-            RestrictedZone.objects.filter(camera_id=camera.id, x1=nx1, y1=ny1, x2=nx2, y2=ny2).order_by("-id").first()
-            or RestrictedZone.objects.filter(camera_id=camera.id, name__iexact=name).order_by("-id").first()
-        )
+        existing = None
+        if raw_zone_id:
+            existing = RestrictedZone.objects.filter(id=int(raw_zone_id), camera_id=camera.id).first()
+            if existing is None:
+                return JsonResponse({"success": False, "error": "Zone not found."}, status=404)
+        else:
+            existing = (
+                RestrictedZone.objects.filter(camera_id=camera.id, x1=nx1, y1=ny1, x2=nx2, y2=ny2).order_by("-id").first()
+                or RestrictedZone.objects.filter(camera_id=camera.id, name__iexact=name).order_by("-id").first()
+            )
         if existing is not None:
             existing.name = name
             existing.x1 = nx1

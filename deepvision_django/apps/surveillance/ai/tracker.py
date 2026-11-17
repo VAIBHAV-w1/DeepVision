@@ -6,6 +6,7 @@ and optimized trajectory persistence to eliminate person track ID churn across o
 """
 import os
 import time
+import threading
 try:
     import torch
 except (ImportError, Exception):
@@ -63,20 +64,17 @@ def _bbox_iou(a, b):
 
 
 class ByteTrackTracker:
-    def __init__(self, confidence_threshold=0.45, imgsz=640):
+    def __init__(self, confidence_threshold=0.45, imgsz=640, lazy_init=False):
         self.confidence_threshold = confidence_threshold
         self.imgsz = imgsz
-        self.model = create_camera_model_wrapper()
         self.tracker_yaml = os.path.abspath(os.path.join(os.path.dirname(__file__), "bytetrack.yaml"))
         if not os.path.exists(self.tracker_yaml):
             self.tracker_yaml = "bytetrack.yaml"
 
         self.phone_class_id = 67
-        if hasattr(self.model, "names") and self.model and self.model.names:
-            for cid, name in self.model.names.items():
-                if name == "cell phone":
-                    self.phone_class_id = cid
-                    break
+        self._init_lock = threading.Lock()
+        self._model_initialized = False
+        self.model = None
 
         self.last_detections = []
         self.last_stage_timings = {
@@ -91,6 +89,34 @@ class ByteTrackTracker:
         self._cv_haar_body = None
         self._cv_tracks = {}  # track_id -> dict(x1, y1, x2, y2, class_id, class_name, confidence, missed, hits)
         self._cv_next_track_id = 1
+
+        if not lazy_init:
+            self.ensure_model_loaded()
+
+    @property
+    def detector_backend(self) -> str:
+        if not self._model_initialized:
+            return "initializing"
+        if torch is not None and self.model is not None:
+            return "yolo11n"
+        return "opencv_fallback"
+
+    def ensure_model_loaded(self):
+        if self._model_initialized:
+            return self.model
+        with self._init_lock:
+            if self._model_initialized:
+                return self.model
+            try:
+                self.model = create_camera_model_wrapper()
+                if hasattr(self.model, "names") and self.model and self.model.names:
+                    for cid, name in self.model.names.items():
+                        if name == "cell phone":
+                            self.phone_class_id = cid
+                            break
+            finally:
+                self._model_initialized = True
+        return self.model
 
     def _track_opencv_fallback(self, frame, base_conf=0.45):
         """
@@ -142,52 +168,62 @@ class ByteTrackTracker:
 
         if self._cv_bg_subtractor is None:
             self._cv_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-                history=120, varThreshold=28, detectShadows=False
+                history=120, varThreshold=30, detectShadows=False
             )
 
         fg_mask = self._cv_bg_subtractor.apply(blurred)
-        # Also detect high-contrast distinct foreground regions against ambient background intensity
         bg_median = float(np.median(blurred))
-        diff_mask = cv2.absdiff(blurred, int(round(bg_median)))
-        _, thresh_mask = cv2.threshold(diff_mask, 55, 255, cv2.THRESH_BINARY)
-        combined = cv2.bitwise_or(fg_mask, thresh_mask)
-        # Exclude top/bottom HUD watermark strips so changing frame timestamps are not mistaken for objects
-        hud_band = max(36, int(fh * 0.085))
+        if float(np.count_nonzero(fg_mask)) / float(max(1, fh * fw)) > 0.65:
+            fg_mask = np.zeros((fh, fw), dtype=np.uint8)
+
+        if bg_median < 55:
+            # High-contrast subjects on dark synthetic or night frames
+            diff_mask = cv2.absdiff(blurred, int(round(bg_median)))
+            _, static_fg = cv2.threshold(diff_mask, 48, 255, cv2.THRESH_BINARY)
+        else:
+            # Exclude bright low-saturation background walls/glare; highlight darker foreground subjects/torsos
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            not_bright = cv2.bitwise_not(cv2.inRange(hsv, (0, 0, 165), (180, 70, 255)))
+            dark_thr = max(45, min(115, int(bg_median * 0.68)))
+            static_fg = cv2.bitwise_and((blurred < dark_thr).astype(np.uint8) * 255, not_bright)
+            if float(np.count_nonzero(static_fg)) / float(max(1, fh * fw)) > 0.72:
+                static_fg = np.zeros((fh, fw), dtype=np.uint8)
+
+        combined = cv2.bitwise_or(fg_mask, static_fg)
+        # Exclude top HUD watermark strip so changing frame timestamps are not mistaken for objects
+        hud_band = max(24, int(fh * 0.065))
         combined[:hud_band, :] = 0
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 9))
-        morphed = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel, iterations=2)
+        k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        k_close = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 11))
+        morphed = cv2.morphologyEx(combined, cv2.MORPH_OPEN, k_open, iterations=1)
+        morphed = cv2.morphologyEx(morphed, cv2.MORPH_CLOSE, k_close, iterations=2)
 
         contours, _ = cv2.findContours(morphed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        min_area = max(450, int((fw * fh) * 0.0025))
-        max_area = int((fw * fh) * 0.85)
+        min_area = max(500, int((fw * fh) * (0.0025 if bg_median < 55 else 0.014)))
+        max_area = int((fw * fh) * 0.92)
 
         for cnt in contours:
             area = cv2.contourArea(cnt)
             if area < min_area or area > max_area:
                 continue
             x, y, w, h = cv2.boundingRect(cnt)
-            if w < 18 or h < 28:
+            if w < 22 or h < 34:
                 continue
-            # Ignore full-width/full-height border frames or HUD text strips
-            if w > fw * 0.90 or h > fh * 0.90:
+            # Only reject entire uniform full-frame artifacts
+            if w > fw * 0.97 and h > fh * 0.97:
                 continue
-            aspect = float(h) / float(max(1, w))
-            roi_Area = float(w * h)
-            fill_ratio = min(1.0, float(area) / max(1.0, roi_Area))
-            conf = round(min(0.94, max(0.48, 0.52 + 0.35 * fill_ratio)), 2)
+            # Ignore narrow vertical door-frame edge strips along left boundary on normal indoor scenes
+            if bg_median >= 55 and x <= 5 and w < fw * 0.09:
+                continue
+            roi_area = float(w * h)
+            fill_ratio = min(1.0, float(area) / max(1.0, roi_area))
+            conf = round(min(0.92, max(0.50, 0.52 + 0.40 * fill_ratio)), 2)
             if conf < base_conf:
                 continue
-            # Classify upright human-proportioned silhouettes as person (0), wide vehicles as car (2), compact items as backpack (24)
-            if aspect >= 1.15:
-                cls_id, cls_name = 0, "person"
-            elif aspect <= 0.75 and w >= 48:
-                cls_id, cls_name = 2, "car"
-            else:
-                cls_id, cls_name = 0, "person"
-
+            # Indoor/webcam foreground silhouettes default to 'person' rather than mislabeling wide torso contours as 'car'
             candidates.append({
-                "class_id": cls_id,
-                "class_name": cls_name,
+                "class_id": 0,
+                "class_name": "person",
                 "confidence": conf,
                 "x1": int(x),
                 "y1": int(y),
@@ -195,10 +231,10 @@ class ByteTrackTracker:
                 "y2": int(y + h),
             })
 
-        # Sort largest/highest confidence candidates first and suppress overlapping boxes
-        candidates.sort(key=lambda c: (c["confidence"], (c["x2"] - c["x1"]) * (c["y2"] - c["y1"])), reverse=True)
+        # Sort largest confident subjects first and suppress overlapping boxes
+        candidates.sort(key=lambda c: ((c["x2"] - c["x1"]) * (c["y2"] - c["y1"]), c["confidence"]), reverse=True)
         filtered_dets = []
-        for cand in candidates[:12]:
+        for cand in candidates[:6]:
             if any(_bbox_iou(cand, kept) >= 0.45 for kept in filtered_dets):
                 continue
             filtered_dets.append(cand)
@@ -268,6 +304,8 @@ class ByteTrackTracker:
     def track(self, frame, custom_conf=None):
         if frame is None or not hasattr(frame, "shape"):
             return []
+        if not self._model_initialized:
+            self.ensure_model_loaded()
         base_conf = custom_conf if custom_conf is not None else self.confidence_threshold
         if torch is None or self.model is None:
             return self._track_opencv_fallback(frame, base_conf=base_conf)

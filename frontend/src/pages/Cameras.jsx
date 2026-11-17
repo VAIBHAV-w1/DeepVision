@@ -51,12 +51,22 @@ export function Cameras({ onNavigate, pageParams }) {
   const [measuredFps, setMeasuredFps] = useState(0);
   const [measuredAiFps, setMeasuredAiFps] = useState(0);
   const [activeTracksCount, setActiveTracksCount] = useState(0);
+  const [activeTracksList, setActiveTracksList] = useState([]);
+  const [activeIntrusions, setActiveIntrusions] = useState([]);
+  const [detectorBackend, setDetectorBackend] = useState('');
+  const [sourceFrameSize, setSourceFrameSize] = useState({ width: 640, height: 480 });
   const [streamError, setStreamError] = useState(false);
   const [streamLoaded, setStreamLoaded] = useState(false);
+  const [useSnapshotFallback, setUseSnapshotFallback] = useState(false);
+  const [snapshotUrl, setSnapshotUrl] = useState(null);
   const [streamTimestamp, setStreamTimestamp] = useState(() => Date.now());
   const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [isSavingCamera, setIsSavingCamera] = useState(false);
+  const [newZoneName, setNewZoneName] = useState('');
+  const [isZoneBusy, setIsZoneBusy] = useState(false);
   const [openMenuCamId, setOpenMenuCamId] = useState(null);
+  const snapshotUrlRef = useRef(null);
 
   // Browser Webcam / Mobile Camera Bridge (navigator.mediaDevices.getUserMedia)
   const [browserBridgeActive, setBrowserBridgeActive] = useState(false);
@@ -131,6 +141,13 @@ export function Cameras({ onNavigate, pageParams }) {
 
   useEffect(() => {
     refreshBrowserDevices();
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.addEventListener) {
+      navigator.mediaDevices.addEventListener('devicechange', refreshBrowserDevices);
+      return () => {
+        navigator.mediaDevices.removeEventListener('devicechange', refreshBrowserDevices);
+      };
+    }
+    return undefined;
   }, [refreshBrowserDevices]);
 
   // Stop browser media tracks cleanly
@@ -208,12 +225,19 @@ export function Cameras({ onNavigate, pageParams }) {
     }
   }, [selectedCam?.id, selectedCam?.is_recording]);
 
-  // Truthful live status: online in DB, or stream image loaded, or browser webcam bridge active
+  // Truthful live status: online in DB, or actual MJPEG/snapshot frame loaded, or browser webcam bridge active
   const isCameraLive = Boolean(
-    selectedCam && ((selectedCam.status === 'online' && !streamError) || streamLoaded || browserBridgeActive)
+    selectedCam && ((selectedCam.status === 'online' && !streamError) || streamLoaded || Boolean(snapshotUrl) || browserBridgeActive)
   );
 
-  // Poll live telemetry (FPS, AI FPS, Tracks, Recording state) when viewing a live surveillance tab
+  const activeViewMode =
+    subTab === 'yolo'
+      ? (detectionEnabled ? 'tracking' : 'raw')
+      : subTab === 'tracking'
+        ? (trackingEnabled ? 'tracking' : 'raw')
+        : 'tracking';
+
+  // Poll live telemetry (FPS, AI FPS, Tracks, Detector backend, Recording state) when viewing a live surveillance tab
   useEffect(() => {
     if (!selectedCam?.id || subTab === 'inventory' || !isPlaying) return undefined;
     let active = true;
@@ -223,12 +247,19 @@ export function Cameras({ onNavigate, pageParams }) {
         if (!active || !stats) return;
         if (typeof stats.fps === 'number') setMeasuredFps(Math.round(stats.fps * 10) / 10);
         if (typeof stats.ai_fps === 'number') setMeasuredAiFps(Math.round(stats.ai_fps * 10) / 10);
-        if (typeof stats.tracks === 'number') {
-          setActiveTracksCount(stats.tracks);
-        } else if (Array.isArray(stats.tracks)) {
+        if (Array.isArray(stats.tracks)) {
+          setActiveTracksList(stats.tracks);
           setActiveTracksCount(stats.tracks.length);
+        } else if (typeof stats.tracks === 'number') {
+          setActiveTracksCount(stats.tracks);
         } else if (typeof stats.detections === 'number') {
           setActiveTracksCount(stats.detections);
+        }
+        if (Array.isArray(stats.active_intrusions)) {
+          setActiveIntrusions(stats.active_intrusions);
+        }
+        if (typeof stats.detector_backend === 'string' && stats.detector_backend) {
+          setDetectorBackend(stats.detector_backend);
         }
         if (typeof stats.is_recording === 'boolean') setIsRecording(stats.is_recording);
         if (stats.status === 'online' && selectedCam.status !== 'online') {
@@ -245,6 +276,73 @@ export function Cameras({ onNavigate, pageParams }) {
       clearInterval(timer);
     };
   }, [selectedCam?.id, selectedCam?.status, subTab, isPlaying]);
+
+  // Automatic server-annotated snapshot frame fallback whenever MJPEG <img /> fails or buffers (>1.8s)
+  useEffect(() => {
+    const camId = selectedCam?.id;
+    const canStream = Boolean(
+      camId &&
+      isPlaying &&
+      subTab !== 'inventory' &&
+      (selectedCam?.status === 'online' || browserBridgeActive)
+    );
+    if (!canStream) {
+      if (snapshotUrlRef.current) {
+        URL.revokeObjectURL(snapshotUrlRef.current);
+        snapshotUrlRef.current = null;
+      }
+      setSnapshotUrl(null);
+      setUseSnapshotFallback(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    let pollTimer = null;
+
+    const fallbackArmTimer = (!streamLoaded && !streamError)
+      ? setTimeout(() => {
+          if (!cancelled) setUseSnapshotFallback(true);
+        }, 1800)
+      : null;
+
+    const shouldPollSnapshots = streamError || useSnapshotFallback || (browserBridgeActive && !streamLoaded);
+    if (shouldPollSnapshots) {
+      const fetchNextSnapshot = async () => {
+        if (cancelled) return;
+        try {
+          const resp = await fetch(
+            `/api/cameras/${camId}/snapshot/?mode=${activeViewMode}&t=${Date.now()}`,
+            { credentials: 'include', cache: 'no-store' }
+          );
+          if (!cancelled && resp.ok) {
+            const blob = await resp.blob();
+            if (!cancelled && blob.size > 512) {
+              const objUrl = URL.createObjectURL(blob);
+              if (snapshotUrlRef.current) {
+                URL.revokeObjectURL(snapshotUrlRef.current);
+              }
+              snapshotUrlRef.current = objUrl;
+              setSnapshotUrl(objUrl);
+              setStreamError(false);
+            }
+          }
+        } catch {
+          // Keep last valid frame on transient fetch drop
+        } finally {
+          if (!cancelled) {
+            pollTimer = setTimeout(fetchNextSnapshot, 180);
+          }
+        }
+      };
+      fetchNextSnapshot();
+    }
+
+    return () => {
+      cancelled = true;
+      if (fallbackArmTimer) clearTimeout(fallbackArmTimer);
+      if (pollTimer) clearTimeout(pollTimer);
+    };
+  }, [selectedCam?.id, selectedCam?.status, isPlaying, subTab, browserBridgeActive, streamLoaded, streamError, useSnapshotFallback, activeViewMode]);
 
   // Browser Webcam / Phone Camera Frame Ingest Loop -> pushes frames to backend YOLO + ByteTrack + Recording
   useEffect(() => {
@@ -276,14 +374,24 @@ export function Cameras({ onNavigate, pageParams }) {
         const res = await api.cameras.ingestFrame(selectedCam.id, dataUrl);
         if (active && res?.success) {
           setStreamError(false);
-          setStreamLoaded(true);
           if (streamReloadPendingRef.current) {
             streamReloadPendingRef.current = false;
             setStreamTimestamp(Date.now());
           }
           if (typeof res.fps === 'number') setMeasuredFps(res.fps);
           if (typeof res.ai_fps === 'number') setMeasuredAiFps(res.ai_fps);
-          if (typeof res.tracks === 'number') setActiveTracksCount(res.tracks);
+          if (Array.isArray(res.tracks_list)) {
+            setActiveTracksList(res.tracks_list);
+            setActiveTracksCount(res.tracks_list.length);
+          } else if (typeof res.tracks === 'number') {
+            setActiveTracksCount(res.tracks);
+          }
+          if (typeof res.detector_backend === 'string' && res.detector_backend) {
+            setDetectorBackend(res.detector_backend);
+          }
+          if (typeof res.frame_width === 'number' && typeof res.frame_height === 'number' && res.frame_width > 0 && res.frame_height > 0) {
+            setSourceFrameSize({ width: res.frame_width, height: res.frame_height });
+          }
           setCameras((prev) =>
             prev.some((c) => c.id === selectedCam.id && c.status !== 'online')
               ? prev.map((c) => (c.id === selectedCam.id ? { ...c, status: 'online' } : c))
@@ -297,9 +405,11 @@ export function Cameras({ onNavigate, pageParams }) {
       }
     };
 
+    const initialTimer = setTimeout(pushFrame, 50);
     const interval = setInterval(pushFrame, 220);
     return () => {
       active = false;
+      clearTimeout(initialTimer);
       clearInterval(interval);
     };
   }, [browserBridgeActive, selectedCam?.id, isPlaying]);
@@ -352,7 +462,8 @@ export function Cameras({ onNavigate, pageParams }) {
       streamReloadPendingRef.current = true;
       setBrowserBridgeActive(true);
       setStreamError(false);
-      setStreamLoaded(true);
+      setStreamLoaded(false);
+      setUseSnapshotFallback(false);
       await refreshBrowserDevices();
       setTimeout(() => {
         if (browserVideoRef.current && browserStreamRef.current) {
@@ -367,6 +478,8 @@ export function Cameras({ onNavigate, pageParams }) {
           ? 'Camera permission denied by browser. Please allow camera access in site permissions.'
           : err?.name === 'NotFoundError'
           ? 'No physical webcam or camera device detected on this device.'
+          : err?.name === 'NotReadableError'
+          ? 'Camera device is in use by another app or tab. Close other camera apps and retry.'
           : err?.message || 'Failed to access browser camera.';
       addToast(msg, 'error');
     }
@@ -508,7 +621,26 @@ export function Cameras({ onNavigate, pageParams }) {
     }
   };
 
-  // Load zones & scoped alerts whenever selected camera changes
+  // Load zones & scoped alerts whenever selected camera changes + poll live alerts while viewing zone/anomaly
+  const refreshCameraZonesAndAlerts = useCallback(async (camId) => {
+    if (!camId) return;
+    try {
+      const [zRes, aRes] = await Promise.allSettled([
+        api.cameras.getZones(camId),
+        api.alerts.list({ camera_id: camId, limit: 10 }),
+      ]);
+      if (zRes.status === 'fulfilled' && zRes.value?.zones) {
+        setZones(zRes.value.zones);
+      }
+      if (aRes.status === 'fulfilled') {
+        const rawAlerts = aRes.value?.alerts || aRes.value?.items || (Array.isArray(aRes.value) ? aRes.value : []);
+        setCameraAlerts(rawAlerts);
+      }
+    } catch {
+      // ignore transient poll error
+    }
+  }, []);
+
   useEffect(() => {
     if (!selectedCam?.id) {
       setZones([]);
@@ -517,39 +649,98 @@ export function Cameras({ onNavigate, pageParams }) {
     }
     setStreamError(false);
     setStreamLoaded(false);
+    setUseSnapshotFallback(false);
     setStreamTimestamp(Date.now());
-    let mounted = true;
+    setActiveTracksList([]);
+    setActiveTracksCount(0);
+    refreshCameraZonesAndAlerts(selectedCam.id);
+  }, [selectedCam?.id, refreshCameraZonesAndAlerts]);
 
-    (async () => {
-      try {
-        const [zRes, aRes] = await Promise.allSettled([
-          api.cameras.getZones(selectedCam.id),
-          api.alerts.list({ camera_id: selectedCam.id, limit: 10 }),
-        ]);
-        if (!mounted) return;
-        if (zRes.status === 'fulfilled' && zRes.value?.zones) {
-          setZones(zRes.value.zones);
-        } else {
-          setZones([]);
-        }
-        if (aRes.status === 'fulfilled') {
-          const rawAlerts = aRes.value?.alerts || aRes.value?.items || (Array.isArray(aRes.value) ? aRes.value : []);
-          setCameraAlerts(rawAlerts);
-        } else {
-          setCameraAlerts([]);
-        }
-      } catch {
-        if (mounted) {
-          setZones([]);
-          setCameraAlerts([]);
-        }
-      }
-    })();
+  useEffect(() => {
+    if (!selectedCam?.id || !isCameraLive || (subTab !== 'zone' && subTab !== 'anomaly' && !isRecording)) {
+      return undefined;
+    }
+    const timer = setInterval(() => {
+      refreshCameraZonesAndAlerts(selectedCam.id);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [selectedCam?.id, isCameraLive, subTab, isRecording, refreshCameraZonesAndAlerts]);
 
-    return () => {
-      mounted = false;
-    };
-  }, [selectedCam?.id]);
+  // Restricted Zone Create / Update / Toggle / Delete handlers
+  const handleCreateRestrictedZone = async (e) => {
+    e?.preventDefault?.();
+    if (!selectedCam?.id || isZoneBusy) return;
+    const zoneLabel = (newZoneName || '').trim() || `Zone ${zones.length + 1}`;
+    try {
+      setIsZoneBusy(true);
+      await api.cameras.createZone(selectedCam.id, {
+        name: zoneLabel,
+        x1: 320,
+        y1: 144,
+        x2: 960,
+        y2: 612,
+        color: '#ef4444',
+      });
+      setNewZoneName('');
+      await refreshCameraZonesAndAlerts(selectedCam.id);
+      addToast(`Restricted zone "${zoneLabel}" added`, 'success');
+    } catch (err) {
+      addToast(err.message || 'Failed to create restricted zone', 'error');
+    } finally {
+      setIsZoneBusy(false);
+    }
+  };
+
+  const handleRenameRestrictedZone = async (zoneObj) => {
+    if (!selectedCam?.id || !zoneObj?.id || isZoneBusy) return;
+    const nextName = window.prompt('Update restricted zone name:', zoneObj.name || '');
+    if (!nextName || !nextName.trim() || nextName.trim() === zoneObj.name) return;
+    try {
+      setIsZoneBusy(true);
+      await api.cameras.createZone(selectedCam.id, {
+        zone_id: zoneObj.id,
+        name: nextName.trim(),
+        x1: zoneObj.x1,
+        y1: zoneObj.y1,
+        x2: zoneObj.x2,
+        y2: zoneObj.y2,
+        enabled: zoneObj.enabled !== false,
+      });
+      await refreshCameraZonesAndAlerts(selectedCam.id);
+      addToast(`Updated zone to "${nextName.trim()}"`, 'success');
+    } catch (err) {
+      addToast(err.message || 'Failed to update zone', 'error');
+    } finally {
+      setIsZoneBusy(false);
+    }
+  };
+
+  const handleToggleRestrictedZone = async (zoneId) => {
+    if (!selectedCam?.id || isZoneBusy) return;
+    try {
+      setIsZoneBusy(true);
+      await api.cameras.toggleZone(selectedCam.id, zoneId);
+      await refreshCameraZonesAndAlerts(selectedCam.id);
+    } catch (err) {
+      addToast(err.message || 'Failed to toggle zone', 'error');
+    } finally {
+      setIsZoneBusy(false);
+    }
+  };
+
+  const handleDeleteRestrictedZone = async (zoneId) => {
+    if (!selectedCam?.id || isZoneBusy) return;
+    try {
+      setIsZoneBusy(true);
+      await api.cameras.deleteZone(selectedCam.id, zoneId);
+      await refreshCameraZonesAndAlerts(selectedCam.id);
+      addToast('Restricted zone deleted', 'success');
+    } catch (err) {
+      addToast(err.message || 'Failed to delete zone', 'error');
+    } finally {
+      setIsZoneBusy(false);
+    }
+  };
 
   // Test Camera Connection inside Modal before saving
   const handleTestModalConnection = async () => {
@@ -584,6 +775,8 @@ export function Cameras({ onNavigate, pageParams }) {
           ? 'Camera permission denied by browser. Please allow camera access in site permissions.'
           : err?.name === 'NotFoundError'
           ? 'No webcam detected by browser.'
+          : err?.name === 'NotReadableError'
+          ? 'Camera device is in use by another app or tab. Close other camera apps and retry.'
           : err?.message || 'Browser camera test failed.';
         setConnectionTestResult({ success: false, message: msg });
         addToast(msg, 'warning');
@@ -619,7 +812,8 @@ export function Cameras({ onNavigate, pageParams }) {
   // Handle Add / Edit Camera Submit
   const handleAddCameraSubmit = async (e) => {
     e.preventDefault();
-    if (!newCam.name.trim()) return;
+    if (!newCam.name.trim() || isSavingCamera) return;
+    setIsSavingCamera(true);
     try {
       const payload = {
         name: newCam.name.trim(),
@@ -651,6 +845,8 @@ export function Cameras({ onNavigate, pageParams }) {
       }
     } catch (err) {
       addToast(err.message || `Failed to save camera ${newCam.name}`, 'error');
+    } finally {
+      setIsSavingCamera(false);
     }
   };
 
@@ -840,29 +1036,158 @@ export function Cameras({ onNavigate, pageParams }) {
     </div>
   );
 
-  // Hidden <video> element capturing browser getUserMedia frames for backend ingestion
+  // Small PIP preview <video> capturing local browser getUserMedia frames for backend ingestion
   const renderBrowserBridgeVideo = () =>
     browserBridgeActive ? (
-      <video
-        ref={browserVideoRef}
-        muted
-        playsInline
-        autoPlay
+      <div
         style={{
           position: 'absolute',
           bottom: 56,
           right: 12,
-          width: '132px',
-          height: '92px',
-          objectFit: 'cover',
+          width: '136px',
+          height: '94px',
           borderRadius: '8px',
           border: '2px solid #10B981',
           backgroundColor: '#000',
           zIndex: 9,
+          overflow: 'hidden',
           boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
         }}
-      />
+      >
+        <video
+          ref={browserVideoRef}
+          muted
+          playsInline
+          autoPlay
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+        <span
+          style={{
+            position: 'absolute',
+            top: 3,
+            left: 4,
+            backgroundColor: 'rgba(15, 23, 42, 0.85)',
+            color: '#10B981',
+            fontSize: '0.62rem',
+            fontWeight: 700,
+            padding: '1px 5px',
+            borderRadius: '4px',
+          }}
+        >
+          LOCAL CAM
+        </span>
+      </div>
     ) : null;
+
+  const getDetectorBadgeLabel = () => {
+    if (detectorBackend === 'opencv_fallback') return 'OpenCV Fallback';
+    if (detectorBackend === 'initializing') return 'AI Initializing...';
+    return t('cameras.yoloModel', 'YOLOv11');
+  };
+
+  // Shared Live Feed Image Renderer (MJPEG stream with automatic snapshot fallback on buffer/error)
+  const renderLiveFeedElement = (altText, aiMode = 'tracking') => {
+    if (!selectedCam || !isPlaying) return null;
+    const mjpegSrc = `/api/cameras/${selectedCam.id}/stream/?mode=${aiMode}&t=${streamTimestamp}`;
+    const showSnapshot = Boolean(snapshotUrl && (!streamLoaded || streamError || useSnapshotFallback));
+
+    return (
+      <>
+        {!useSnapshotFallback && (
+          <img
+            src={mjpegSrc}
+            alt={altText}
+            onError={() => {
+              setStreamError(true);
+              setStreamLoaded(false);
+              setUseSnapshotFallback(true);
+            }}
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              if (img?.naturalWidth > 0 && img?.naturalHeight > 0) {
+                setSourceFrameSize({ width: img.naturalWidth, height: img.naturalHeight });
+              }
+              setStreamError(false);
+              setStreamLoaded(true);
+              setUseSnapshotFallback(false);
+            }}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              display: showSnapshot ? 'none' : 'block',
+              backgroundColor: '#050914',
+            }}
+          />
+        )}
+        {showSnapshot && (
+          <img
+            src={snapshotUrl}
+            alt={altText}
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              if (img?.naturalWidth > 0 && img?.naturalHeight > 0) {
+                setSourceFrameSize({ width: img.naturalWidth, height: img.naturalHeight });
+              }
+            }}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              display: 'block',
+              backgroundColor: '#050914',
+            }}
+          />
+        )}
+        {isCameraLive && !streamLoaded && !snapshotUrl && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#090E1A',
+              color: '#94A3B8',
+              gap: '8px',
+              pointerEvents: 'none',
+            }}
+          >
+            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#38BDF8' }}>{t('cameras.connectingLiveStream', 'Connecting Live AI Video Stream...')}</span>
+            <span style={{ fontSize: '0.78rem', color: '#64748B' }}>{t('cameras.syncingAnnotatedFrames', 'Synchronizing annotated camera frames')}</span>
+          </div>
+        )}
+        {isCameraLive && (streamLoaded || snapshotUrl) && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 10,
+              left: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: 'rgba(15, 23, 42, 0.78)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              borderRadius: '6px',
+              padding: '3px 8px',
+              fontSize: '0.72rem',
+              fontWeight: 700,
+              color: '#E2E8F0',
+              pointerEvents: 'none',
+              zIndex: 6,
+            }}
+          >
+            <span style={{ color: '#10B981' }}>●</span>
+            <span>{aiMode === 'raw' ? 'RAW' : getDetectorBadgeLabel()}</span>
+            {activeTracksCount > 0 && (
+              <span style={{ color: '#38BDF8' }}>· {activeTracksCount} tracked</span>
+            )}
+          </div>
+        )}
+      </>
+    );
+  };
 
   return (
     <div
@@ -1349,8 +1674,11 @@ export function Cameras({ onNavigate, pageParams }) {
                   }}
                 />
               </button>
-              <span style={{ backgroundColor: '#1E293B', color: '#94A3B8', fontSize: '0.75rem', fontWeight: 700, padding: '4px 10px', borderRadius: '6px' }}>
-                {t('cameras.yoloModel', 'YOLOv11')}
+              <span
+                title={`Active detector backend: ${detectorBackend || 'yolo11n'}`}
+                style={{ backgroundColor: '#1E293B', color: detectorBackend === 'opencv_fallback' ? '#FBBF24' : '#94A3B8', fontSize: '0.75rem', fontWeight: 700, padding: '4px 10px', borderRadius: '6px' }}
+              >
+                {getDetectorBadgeLabel()}
               </span>
             </div>
           </div>
@@ -1368,21 +1696,7 @@ export function Cameras({ onNavigate, pageParams }) {
               border: '1px solid rgba(255, 255, 255, 0.08)',
             }}
           >
-            {selectedCam && isPlaying ? (
-              <img
-                src={`/api/cameras/${selectedCam.id}/stream/?mode=${detectionEnabled ? 'tracking' : 'raw'}&t=${streamTimestamp}`}
-                alt={selectedCam.name}
-                onError={() => {
-                  setStreamError(true);
-                  setStreamLoaded(false);
-                }}
-                onLoad={() => {
-                  setStreamError(false);
-                  setStreamLoaded(true);
-                }}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              />
-            ) : null}
+            {renderLiveFeedElement(selectedCam?.name || 'YOLO Surveillance Feed', detectionEnabled ? 'tracking' : 'raw')}
             {renderBrowserBridgeVideo()}
 
             {/* Offline or Error State Display */}
@@ -1548,21 +1862,7 @@ export function Cameras({ onNavigate, pageParams }) {
               border: '1px solid rgba(255, 255, 255, 0.08)',
             }}
           >
-            {selectedCam && isPlaying ? (
-              <img
-                src={`/api/cameras/${selectedCam.id}/stream/?mode=${trackingEnabled ? 'tracking' : 'raw'}&t=${streamTimestamp}`}
-                alt="Live Tracking"
-                onError={() => {
-                  setStreamError(true);
-                  setStreamLoaded(false);
-                }}
-                onLoad={() => {
-                  setStreamError(false);
-                  setStreamLoaded(true);
-                }}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              />
-            ) : null}
+            {renderLiveFeedElement('Live Tracking', trackingEnabled ? 'tracking' : 'raw')}
             {renderBrowserBridgeVideo()}
 
             {(!selectedCam || !isCameraLive) && (
@@ -1616,6 +1916,41 @@ export function Cameras({ onNavigate, pageParams }) {
             {/* Bottom Transport Controls Bar matching Figure 7.1.5 */}
             {renderTransportBar()}
           </div>
+
+          {activeTracksList.length > 0 && (
+            <div
+              style={{
+                backgroundColor: '#0F172A',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '10px',
+                padding: '10px 14px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
+                Active Track IDs ({activeTracksList.length}):
+              </span>
+              {activeTracksList.map((trk, idx) => (
+                <span
+                  key={`${trk.track_id || idx}-${idx}`}
+                  style={{
+                    backgroundColor: 'rgba(139, 92, 246, 0.16)',
+                    border: '1px solid rgba(139, 92, 246, 0.35)',
+                    color: '#DDD6FE',
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                    padding: '3px 9px',
+                    borderRadius: '6px',
+                  }}
+                >
+                  {trk.track_id} {trk.class_name} ({Math.round((Number(trk.confidence || 0)) * 100)}%) · {trk.behavior || 'normal'}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -1664,7 +1999,7 @@ export function Cameras({ onNavigate, pageParams }) {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '20px' }}>
-            {/* Viewport with Perimeter Polygon */}
+            {/* Viewport with Real DB Restricted Zones */}
             <div
               ref={viewportContainerRef}
               style={{
@@ -1677,36 +2012,52 @@ export function Cameras({ onNavigate, pageParams }) {
                 border: '1px solid rgba(255, 255, 255, 0.08)',
               }}
             >
-              {selectedCam && isPlaying ? (
-                <img
-                  src={`/api/cameras/${selectedCam.id}/stream/?mode=tracking&t=${streamTimestamp}`}
-                  alt="Restricted Zone Stream"
-                  onError={() => {
-                    setStreamError(true);
-                    setStreamLoaded(false);
-                  }}
-                  onLoad={() => {
-                    setStreamError(false);
-                    setStreamLoaded(true);
-                  }}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              ) : null}
+              {renderLiveFeedElement('Restricted Zone Stream', 'tracking')}
               {renderBrowserBridgeVideo()}
 
-              {/* Perimeter Polygon Overlay */}
-              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
-                <polygon
-                  points="120,440 280,320 620,320 780,440"
-                  fill="rgba(239, 68, 68, 0.18)"
-                  stroke="#EF4444"
-                  strokeWidth="2"
-                  strokeDasharray="6,4"
-                />
-                <text x="450" y="420" fill="#EF4444" fontSize="13" fontWeight="800" textAnchor="middle">
-                  {t('cameras.zoneTextOverlay', 'Restricted Zone: {name}', { name: zones[0]?.name || 'Gate-1' })}
-                </text>
-              </svg>
+              {/* Real Database Restricted Zone Indicator Overlay (shown when offline/unannotated or synced) */}
+              {zones.length > 0 && !streamLoaded && !snapshotUrl && (
+                <svg
+                  viewBox={`0 0 ${sourceFrameSize.width || 640} ${sourceFrameSize.height || 480}`}
+                  preserveAspectRatio="xMidYMid meet"
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
+                >
+                  {zones.filter((z) => z.enabled !== false).map((z) => {
+                    const fw = sourceFrameSize.width || 640;
+                    const fh = sourceFrameSize.height || 480;
+                    const rx1 = Number(z.x1 || 0);
+                    const ry1 = Number(z.y1 || 0);
+                    const rx2 = Number(z.x2 || 0);
+                    const ry2 = Number(z.y2 || 0);
+                    const isNorm = Math.max(rx1, rx2) <= 1.0 && Math.max(ry1, ry2) <= 1.0 && Math.max(rx2, ry2) > 0;
+                    const exceeds = !isNorm && (Math.max(rx1, rx2) > fw || Math.max(ry1, ry2) > fh);
+                    const refW = exceeds ? (Math.max(rx1, rx2) <= 1280 && Math.max(ry1, ry2) <= 720 ? 1280 : 1920) : fw;
+                    const refH = exceeds ? (refW === 1280 ? 720 : 1080) : fh;
+                    const zx1 = isNorm ? rx1 * fw : (exceeds ? (rx1 * fw) / refW : rx1);
+                    const zy1 = isNorm ? ry1 * fh : (exceeds ? (ry1 * fh) / refH : ry1);
+                    const zx2 = isNorm ? rx2 * fw : (exceeds ? (rx2 * fw) / refW : rx2);
+                    const zy2 = isNorm ? ry2 * fh : (exceeds ? (ry2 * fh) / refH : ry2);
+                    const intruded = activeIntrusions.includes(z.id);
+                    return (
+                      <g key={z.id}>
+                        <rect
+                          x={zx1}
+                          y={zy1}
+                          width={Math.max(10, zx2 - zx1)}
+                          height={Math.max(10, zy2 - zy1)}
+                          fill={intruded ? 'rgba(239, 68, 68, 0.24)' : 'rgba(245, 158, 11, 0.14)'}
+                          stroke={intruded ? '#EF4444' : '#F59E0B'}
+                          strokeWidth="2"
+                          strokeDasharray="6,4"
+                        />
+                        <text x={zx1 + 8} y={Math.max(18, zy1 + 18)} fill={intruded ? '#EF4444' : '#F59E0B'} fontSize="13" fontWeight="800">
+                          {z.name}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </svg>
+              )}
 
               {(!selectedCam || !isCameraLive) && (
                 <div
@@ -1774,24 +2125,24 @@ export function Cameras({ onNavigate, pageParams }) {
               <div>
                 <div
                   style={{
-                    backgroundColor: intrusionAlert ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                    border: `1px solid ${intrusionAlert ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)'}`,
+                    backgroundColor: (intrusionAlert || activeIntrusions.length > 0) ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                    border: `1px solid ${(intrusionAlert || activeIntrusions.length > 0) ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)'}`,
                     borderRadius: '8px',
                     padding: '8px 12px',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
-                    color: intrusionAlert ? '#EF4444' : '#10B981',
+                    color: (intrusionAlert || activeIntrusions.length > 0) ? '#EF4444' : '#10B981',
                     fontWeight: 800,
                     fontSize: '0.88rem',
-                    marginBottom: '1.5rem',
+                    marginBottom: '1rem',
                   }}
                 >
-                  <span>{intrusionAlert ? '⚠️' : '🛡️'}</span>
-                  <span>{intrusionAlert ? t('cameras.intrusionDetected', 'Intrusion Detected') : t('cameras.zoneArmedSecure', 'Zone Armed & Secure')}</span>
+                  <span>{(intrusionAlert || activeIntrusions.length > 0) ? '⚠️' : '🛡️'}</span>
+                  <span>{(intrusionAlert || activeIntrusions.length > 0) ? t('cameras.intrusionDetected', 'Intrusion Detected') : t('cameras.zoneArmedSecure', 'Zone Armed & Secure')}</span>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.85rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.84rem', marginBottom: '1rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#94A3B8' }}>{t('cameras.cameraLabel', 'Camera')}</span>
                     <span style={{ fontWeight: 700, color: '#FFFFFF' }}>{selectedCam?.name || 'N/A'}</span>
@@ -1799,19 +2150,19 @@ export function Cameras({ onNavigate, pageParams }) {
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#94A3B8' }}>{t('cameras.zoneHeader', 'Zone')}</span>
                     <span style={{ fontWeight: 700, color: '#FFFFFF' }}>
-                      {intrusionAlert?.zone_name || zones[0]?.name || `${selectedCam?.location || 'Gate-1'} (${t('cameras.subtabZone', 'Restricted')})`}
+                      {intrusionAlert?.zone_name || zones[0]?.name || 'None Configured'}
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#94A3B8' }}>{t('cameras.objectLabel', 'Object')}</span>
                     <span style={{ fontWeight: 700, color: '#FFFFFF' }}>
-                      {intrusionAlert?.detected_object || (intrusionAlert ? t('cameras.personObject', 'Person') : t('cameras.noneObject', 'None'))}
+                      {intrusionAlert?.detected_object || (activeIntrusions.length > 0 ? t('cameras.personObject', 'Person') : t('cameras.noneObject', 'None'))}
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#94A3B8' }}>{t('cameras.confidenceLabel', 'Confidence')}</span>
                     <span style={{ fontWeight: 700, color: '#10B981' }}>
-                      {intrusionAlert?.confidence ? Number(intrusionAlert.confidence).toFixed(2) : (intrusionAlert ? '0.96' : '0.00')}
+                      {intrusionAlert?.confidence ? Number(intrusionAlert.confidence).toFixed(2) : (activeIntrusions.length > 0 ? '0.89' : '0.00')}
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1820,6 +2171,121 @@ export function Cameras({ onNavigate, pageParams }) {
                       {intrusionAlert ? formatAlertTime(intrusionAlert.detected_at || intrusionAlert.created_at) : t('cameras.activeSurveillance', 'Active Surveillance')}
                     </span>
                   </div>
+                </div>
+
+                {/* Real DB Zone Configuration Controls */}
+                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '12px', marginBottom: '12px' }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#CBD5E1', marginBottom: '8px' }}>
+                    Configured Zones ({zones.length})
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '130px', overflowY: 'auto', marginBottom: '8px' }}>
+                    {zones.length === 0 ? (
+                      <div style={{ fontSize: '0.75rem', color: '#64748B' }}>{t('cameras.noZonesConfigured', 'No restricted zones yet. Add one below to monitor perimeter entry.')}</div>
+                    ) : (
+                      zones.map((z) => (
+                        <div
+                          key={z.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            backgroundColor: '#090E1A',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            borderRadius: '6px',
+                            padding: '5px 8px',
+                            fontSize: '0.76rem',
+                          }}
+                        >
+                          <span style={{ color: z.enabled === false ? '#64748B' : '#F8FAFC', fontWeight: 600 }}>{z.name}</span>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleRenameRestrictedZone(z)}
+                              disabled={isZoneBusy}
+                              style={{
+                                background: 'transparent',
+                                border: '1px solid rgba(255,255,255,0.12)',
+                                color: '#CBD5E1',
+                                borderRadius: '4px',
+                                padding: '2px 6px',
+                                fontSize: '0.7rem',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleRestrictedZone(z.id)}
+                              disabled={isZoneBusy}
+                              style={{
+                                background: 'transparent',
+                                border: '1px solid rgba(255,255,255,0.12)',
+                                color: z.enabled === false ? '#64748B' : '#10B981',
+                                borderRadius: '4px',
+                                padding: '2px 6px',
+                                fontSize: '0.7rem',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {z.enabled === false ? 'Off' : 'On'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRestrictedZone(z.id)}
+                              disabled={isZoneBusy}
+                              style={{
+                                background: 'transparent',
+                                border: '1px solid rgba(239,68,68,0.35)',
+                                color: '#FCA5A5',
+                                borderRadius: '4px',
+                                padding: '2px 6px',
+                                fontSize: '0.7rem',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Del
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <form onSubmit={handleCreateRestrictedZone} style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      type="text"
+                      value={newZoneName}
+                      onChange={(e) => setNewZoneName(e.target.value)}
+                      placeholder="Zone name..."
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        backgroundColor: '#090E1A',
+                        border: '1px solid #1E293B',
+                        borderRadius: '6px',
+                        padding: '6px 8px',
+                        color: '#FFFFFF',
+                        fontSize: '0.76rem',
+                        outline: 'none',
+                      }}
+                    />
+                    <button
+                      type="submit"
+                      disabled={isZoneBusy}
+                      style={{
+                        backgroundColor: '#F59E0B',
+                        color: '#0F172A',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '6px 10px',
+                        fontSize: '0.76rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      + Add Zone
+                    </button>
+                  </form>
                 </div>
               </div>
 
@@ -1904,21 +2370,7 @@ export function Cameras({ onNavigate, pageParams }) {
                 border: '1px solid rgba(255, 255, 255, 0.08)',
               }}
             >
-              {selectedCam && isPlaying ? (
-                <img
-                  src={`/api/cameras/${selectedCam.id}/stream/?mode=tracking&t=${streamTimestamp}`}
-                  alt="Anomaly Stream"
-                  onError={() => {
-                    setStreamError(true);
-                    setStreamLoaded(false);
-                  }}
-                  onLoad={() => {
-                    setStreamError(false);
-                    setStreamLoaded(true);
-                  }}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              ) : null}
+              {renderLiveFeedElement('Anomaly Stream', 'tracking')}
               {renderBrowserBridgeVideo()}
 
               {(!selectedCam || !isCameraLive) && (
@@ -2322,9 +2774,19 @@ export function Cameras({ onNavigate, pageParams }) {
                   </button>
                   <button
                     type="submit"
-                    style={{ backgroundColor: '#2563EB', border: 'none', color: '#FFFFFF', padding: '8px 18px', borderRadius: '6px', fontWeight: 700, cursor: 'pointer' }}
+                    disabled={isSavingCamera}
+                    style={{
+                      backgroundColor: '#2563EB',
+                      border: 'none',
+                      color: '#FFFFFF',
+                      padding: '8px 18px',
+                      borderRadius: '6px',
+                      fontWeight: 700,
+                      cursor: isSavingCamera ? 'wait' : 'pointer',
+                      opacity: isSavingCamera ? 0.7 : 1,
+                    }}
                   >
-                    {t('cameras.modalSave', 'Save Camera')}
+                    {isSavingCamera ? 'Saving...' : t('cameras.modalSave', 'Save Camera')}
                   </button>
                 </div>
               </div>

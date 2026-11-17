@@ -324,7 +324,13 @@ def camera_snapshot_view(request, camera_id):
             "message": f"Snapshot #{evidence.id} captured and saved to Evidence Vault."
         })
 
-    if camera.status == "offline":
+    mode = request.GET.get("mode", "raw").strip().lower()
+    if mode not in ("raw", "tracking"):
+        mode = "raw"
+
+    from apps.surveillance.camera.registry import get_camera_registry
+    active_worker = get_camera_registry().get_active_worker(camera.id)
+    if camera.status == "offline" and not (active_worker and active_worker.running and active_worker.latest_frame is not None):
         return HttpResponse(_get_offline_snapshot_bytes(), content_type="image/jpeg")
 
     # Fast preview thumbnail lookup; only warm local OpenCV capture when physical video hardware exists
@@ -334,7 +340,7 @@ def camera_snapshot_view(request, camera_id):
         and camera.status != "offline"
         and has_local_capture
     )
-    jpeg_bytes = get_camera_snapshot(camera.id, camera.user_id, allow_start=allow_sync_start)
+    jpeg_bytes = get_camera_snapshot(camera.id, camera.user_id, allow_start=allow_sync_start, mode=mode)
     if jpeg_bytes:
         return HttpResponse(jpeg_bytes, content_type="image/jpeg")
     if has_local_capture and camera.source_type in ("webcam", "usb"):
@@ -586,14 +592,61 @@ def camera_ingest_frame_view(request, camera_id):
     except Exception:
         pass
 
+    tracks_list = []
+    anomalies_list = []
+    zones_list = []
+    detector_backend = "inactive"
+    if inf_worker is not None:
+        raw_tracks = getattr(inf_worker, "cached_tracks", []) or []
+        tracks_list = [
+            {
+                "track_id": f"#{trk['track_id']}",
+                "class_name": str(trk.get("class_name", "object")).capitalize(),
+                "confidence": round(float(trk.get("confidence", 0.0)), 3),
+                "bbox": [int(trk["x1"]), int(trk["y1"]), int(trk["x2"]), int(trk["y2"])],
+                "behavior": trk.get("behavior") or "normal",
+                "direction": trk.get("direction") or "stationary",
+                "speed": round(float(trk.get("speed", 0.0) or 0.0), 1),
+            }
+            for trk in raw_tracks
+        ]
+        anomalies_list = list(getattr(inf_worker, "cached_anomalies", []) or [])
+        if hasattr(inf_worker, "get_cached_zones"):
+            zones_list = list(inf_worker.get_cached_zones(camera.id) or [])
+        tracker = getattr(inf_worker, "tracker", None)
+        detector_backend = getattr(tracker, "detector_backend", "unknown") if tracker is not None else "unknown"
+
+    try:
+        from apps.surveillance.health.health_service import update_camera_health
+        update_camera_health(
+            camera.id,
+            status="online",
+            fps=round(float(getattr(worker, "fps", 0.0) or 0.0), 1),
+            ai_fps=round(float(getattr(inf_worker, "ai_fps", 0.0) or 0.0), 1) if inf_worker else 0.0,
+            inference_latency_ms=round(float(getattr(inf_worker, "latency_ms", 0.0) or 0.0), 2) if inf_worker else 0.0,
+            stream_active=True,
+            detection_active=bool(inf_worker and getattr(inf_worker, "running", False)),
+            tracking_active=bool(inf_worker and getattr(inf_worker, "running", False)),
+        )
+    except Exception:
+        pass
+
     return JsonResponse({
         "success": True,
         "camera_id": camera.id,
         "frame_id": worker.frame_id,
         "fps": worker.fps,
         "ai_fps": getattr(inf_worker, "ai_fps", 0.0) if inf_worker else 0.0,
-        "tracks": len(getattr(inf_worker, "cached_tracks", []) or []) if inf_worker else 0,
-        "anomalies": len(getattr(inf_worker, "cached_anomalies", []) or []) if inf_worker else 0,
+        "latency_ms": round(float(getattr(inf_worker, "latency_ms", 0.0) or 0.0), 2) if inf_worker else 0.0,
+        "tracks": len(tracks_list),
+        "tracks_list": tracks_list,
+        "anomalies": len(anomalies_list),
+        "anomalies_list": anomalies_list,
+        "zones": zones_list,
+        "inference_active": bool(inf_worker and getattr(inf_worker, "running", False)),
+        "detector_backend": detector_backend,
+        "frame_width": fw,
+        "frame_height": fh,
         "camera_status": "online",
     })
 
@@ -624,6 +677,18 @@ def camera_disconnect_view(request, camera_id):
         camera.status = "offline"
         camera.updated_at = timezone.now()
         camera.save(update_fields=["status", "updated_at"])
+
+    try:
+        from apps.surveillance.health.health_service import update_camera_health
+        update_camera_health(
+            camera.id,
+            status="offline",
+            stream_active=False,
+            detection_active=False,
+            tracking_active=False,
+        )
+    except Exception:
+        pass
 
     log_audit(
         request,

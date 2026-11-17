@@ -282,9 +282,9 @@ MEDIA_URL = '/media/'
 
 # Native Django Surveillance Subsystem Configuration
 SURVEILLANCE_ARCHITECTURE = 'native_django'
-YOLO_CONFIDENCE_THRESHOLD = 0.35
-YOLO_INFERENCE_INTERVAL_MS = 60
-YOLO_IMAGE_SIZE = 640
+YOLO_CONFIDENCE_THRESHOLD = float(os.environ.get('YOLO_CONFIDENCE_THRESHOLD', '0.35'))
+YOLO_INFERENCE_INTERVAL_MS = int(os.environ.get('YOLO_INFERENCE_INTERVAL_MS', '120'))
+YOLO_IMAGE_SIZE = int(os.environ.get('YOLO_IMAGE_SIZE', '480'))
 
 # Logging Configuration
 LOGGING = {
