@@ -434,6 +434,21 @@ def test_camera_connection(source_type: str, source: str, user_id: int) -> Dict[
     except ValueError as e:
         return {"success": False, "error": str(e), "message": str(e), "status_code": 400}
 
+    # Never attempt server-side OpenCV probing for browser-managed cameras
+    if str(source_type).strip().lower() == "browser":
+        return {
+            "success": True,
+            "browser_managed": True,
+            "message": "Browser webcam connects via your browser's navigator.mediaDevices.getUserMedia() bridge.",
+        }
+
+    if str(source_type).strip().lower() in ("webcam", "usb") and os.name != "nt" and not os.path.exists("/dev/video0"):
+        return {
+            "success": False,
+            "browser_managed": False,
+            "message": "No local USB/DirectShow camera hardware is attached to this server. Select 'Browser Webcam' to stream your laptop or phone camera.",
+        }
+
     from apps.surveillance.camera.sources import get_physical_source_key
     physical_key = get_physical_source_key(source_type, source)
     cam_reg = get_camera_registry()
@@ -480,11 +495,28 @@ def test_existing_camera(camera_id: int, user_id: int) -> Dict[str, Any]:
             logger.warning(f"[BRIDGE_TEST_CAM_ERROR] cam={camera_id}: {e}")
 
     from apps.surveillance.camera.sources import get_physical_source_key
-    physical_key = get_physical_source_key(camera.source_type, camera.source)
     cam_reg = get_camera_registry()
+    if camera.source_type == "browser":
+        active_worker = cam_reg.get_active_worker(camera_id)
+        if active_worker and active_worker.running and active_worker.latest_frame is not None:
+            return {"success": True, "browser_managed": True, "message": "Browser camera stream is active and receiving live frames."}
+        return {
+            "success": False,
+            "browser_managed": True,
+            "message": "Browser camera ready. Start Browser Cam in your browser to push live frames.",
+        }
+
+    physical_key = get_physical_source_key(camera.source_type, camera.source)
     active_worker = cam_reg.get_active_worker(camera_id) or cam_reg.get_physical_worker(physical_key)
     if active_worker and active_worker.running:
         return {"success": True, "message": "Camera stream is currently active and healthy."}
+
+    if camera.source_type in ("webcam", "usb") and os.name != "nt" and not os.path.exists("/dev/video0"):
+        return {
+            "success": False,
+            "browser_managed": True,
+            "message": "No DirectShow/V4L2 camera hardware on server. Use 'Browser Cam' to stream from your browser.",
+        }
 
     try:
         cap_source = resolve_camera_capture_source(camera.source_type, camera.source)

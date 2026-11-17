@@ -1,21 +1,34 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { notificationService } from '../services/notifications';
+import { useAuth } from './useAuth';
 
 export function useNotifications() {
+  const { isAuthenticated } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
+  const inFlightUnreadRef = useRef(false);
+  const failureStreakRef = useRef(0);
 
   const fetchUnreadCount = useCallback(async () => {
+    if (!isAuthenticated || inFlightUnreadRef.current) return true;
+    if (typeof document !== 'undefined' && document.hidden) return true;
+    inFlightUnreadRef.current = true;
     try {
       const data = await notificationService.unreadCount();
       if (data && typeof data.count === 'number') {
         setUnreadCount(data.count);
       }
+      failureStreakRef.current = 0;
+      return true;
     } catch {
-      // Background poll failure is non-fatal
+      // Background poll failure is non-fatal; apply exponential backoff on transient upstream errors
+      failureStreakRef.current = Math.min(4, failureStreakRef.current + 1);
+      return false;
+    } finally {
+      inFlightUnreadRef.current = false;
     }
-  }, []);
+  }, [isAuthenticated]);
 
   const fetchNotifications = useCallback(async (params = { status: 'unread', per_page: 5 }) => {
     try {
@@ -32,15 +45,37 @@ export function useNotifications() {
   }, []);
 
   useEffect(() => {
-    fetchUnreadCount();
-    const timer = setInterval(fetchUnreadCount, 10000);
-    const handleSync = () => fetchUnreadCount();
+    if (!isAuthenticated) {
+      setUnreadCount(0);
+      failureStreakRef.current = 0;
+      return undefined;
+    }
+    let active = true;
+    let timerId = null;
+
+    const scheduleNext = () => {
+      if (!active) return;
+      const delayMs = failureStreakRef.current > 0
+        ? Math.min(45000, 12000 * (2 ** (failureStreakRef.current - 1)))
+        : 12000;
+      timerId = setTimeout(async () => {
+        await fetchUnreadCount();
+        scheduleNext();
+      }, delayMs);
+    };
+
+    fetchUnreadCount().then(scheduleNext);
+    const handleSync = () => {
+      failureStreakRef.current = 0;
+      fetchUnreadCount();
+    };
     window.addEventListener('notifications:updated', handleSync);
     return () => {
-      clearInterval(timer);
+      active = false;
+      if (timerId) clearTimeout(timerId);
       window.removeEventListener('notifications:updated', handleSync);
     };
-  }, [fetchUnreadCount]);
+  }, [isAuthenticated, fetchUnreadCount]);
 
   const markRead = async (id) => {
     try {

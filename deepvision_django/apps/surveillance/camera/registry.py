@@ -42,6 +42,10 @@ class CameraRegistry:
             source_type = camera.source_type
             source = camera.source
             owner_id = user_id or camera.user_id
+
+            if source_type == "browser":
+                return self._ensure_browser_worker_locked(camera_id, camera, owner_id, mark_online=False)
+
             physical_key = get_physical_source_key(source_type, source)
 
             # 3. Check if physical hardware is already claimed
@@ -99,6 +103,26 @@ class CameraRegistry:
             self._physical_map[physical_key] = worker
             return worker
 
+    def _ensure_browser_worker_locked(self, camera_id: int, camera, owner_id: int, mark_online: bool = True) -> CameraWorker:
+        source_type = camera.source_type
+        source = camera.source
+        physical_key = f"browser:{camera_id}:{get_physical_source_key(source_type, source)}"
+        worker = CameraWorker(
+            camera_id=camera_id,
+            cap_source=f"browser:{camera_id}",
+            source_type=source_type,
+            user_id=owner_id,
+            physical_source_id=physical_key,
+        )
+        worker.start_browser_mode()
+        worker.ref_count = 1
+        self._workers[camera_id] = worker
+        self._physical_map[physical_key] = worker
+        if mark_online and camera.status != "online":
+            from apps.cameras.models import Camera
+            Camera.objects.filter(id=camera_id).update(status="online")
+        return worker
+
     def get_or_create_browser_worker(self, camera_id: int, user_id: int = None) -> CameraWorker:
         """
         Returns an active worker for camera_id, or creates a passive browser-ingest CameraWorker
@@ -114,25 +138,8 @@ class CameraRegistry:
             if not camera:
                 raise ValueError(f"Camera with ID {camera_id} not found in database.")
 
-            source_type = camera.source_type
-            source = camera.source
             owner_id = user_id or camera.user_id
-            physical_key = f"browser:{camera_id}:{get_physical_source_key(source_type, source)}"
-
-            worker = CameraWorker(
-                camera_id=camera_id,
-                cap_source=f"browser:{camera_id}",
-                source_type=source_type,
-                user_id=owner_id,
-                physical_source_id=physical_key,
-            )
-            worker.start_browser_mode()
-            worker.ref_count = 1
-            self._workers[camera_id] = worker
-            self._physical_map[physical_key] = worker
-            if camera.status != "online":
-                Camera.objects.filter(id=camera_id).update(status="online")
-            return worker
+            return self._ensure_browser_worker_locked(camera_id, camera, owner_id, mark_online=True)
 
     def get_active_worker(self, camera_id: int) -> CameraWorker:
         with self._lock:
