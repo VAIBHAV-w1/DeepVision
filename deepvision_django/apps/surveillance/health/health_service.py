@@ -77,17 +77,19 @@ def update_camera_health(camera_id: int, status: str = None, stream_active: bool
         if last_error is not None:
             health["last_error"] = last_error
 
-        # When stream count drops to 0, only deactivate active flags if no active camera worker (e.g. browser ingest) is running
+        # When stream count drops to 0, keep active only while worker is running and not offline/error
         if health["stream_count"] == 0:
-            worker_running = False
+            worker_alive = False
             try:
                 from apps.surveillance.camera.registry import get_camera_registry
                 worker = get_camera_registry().get_active_worker(camera_id)
-                worker_running = bool(worker and worker.running)
+                if worker and worker.running:
+                    op = worker.get_operational_status() if hasattr(worker, "get_operational_status") else "ONLINE"
+                    worker_alive = op in ("ONLINE", "CONNECTING", "RECONNECTING")
             except Exception:
-                worker_running = False
+                worker_alive = False
 
-            if not worker_running:
+            if not worker_alive:
                 health["stream_active"] = False
                 health["detection_active"] = False
                 health["tracking_active"] = False
@@ -99,9 +101,50 @@ def update_camera_health(camera_id: int, status: str = None, stream_active: bool
         health["updated_at"] = now_iso
 
 
+def get_live_camera_status(camera_id: int, worker=None) -> Dict[str, Any]:
+    """
+    Truthful live signal status derived strictly from the active CameraWorker
+    and fresh-frame heartbeat (never trusts stale database `cameras.status`).
+    """
+    if worker is None:
+        try:
+            from apps.surveillance.camera.registry import get_camera_registry
+            worker = get_camera_registry().get_active_worker(camera_id)
+        except Exception:
+            worker = None
+
+    if worker is None or not getattr(worker, "running", False):
+        return {
+            "status": "offline",
+            "live": False,
+            "signal_state": "offline",
+            "worker_running": False,
+            "frame_age_sec": None,
+        }
+
+    op = worker.get_operational_status() if hasattr(worker, "get_operational_status") else "OFFLINE"
+    frame_age_sec = worker.get_frame_age_seconds() if hasattr(worker, "get_frame_age_seconds") else None
+    mapping = {
+        "ONLINE": "online",
+        "CONNECTING": "connecting",
+        "RECONNECTING": "reconnecting",
+        "STALE": "stale",
+        "ERROR": "offline",
+        "OFFLINE": "offline",
+    }
+    normalized = mapping.get(op, "offline")
+    return {
+        "status": normalized,
+        "live": normalized == "online",
+        "signal_state": str(op).lower(),
+        "worker_running": True,
+        "frame_age_sec": frame_age_sec,
+    }
+
+
 def get_camera_health(camera_id: int) -> Dict[str, Any]:
     """
-    Returns a copy of the health stats with dynamically computed ai_state.
+    Returns a copy of the health stats synchronized with live worker & fresh-frame state.
     """
     with _health_lock:
         if camera_id in _health_registry:
@@ -124,6 +167,20 @@ def get_camera_health(camera_id: int) -> Dict[str, Any]:
                 "width": None,
                 "height": None
             }
+
+    live_info = get_live_camera_status(camera_id)
+    health["status"] = live_info["status"]
+    health["signal_state"] = live_info["signal_state"]
+    health["worker_running"] = live_info["worker_running"]
+    health["frame_age_sec"] = live_info["frame_age_sec"]
+    if live_info["status"] in ("offline", "connecting"):
+        health["fps"] = 0.0
+    if live_info["status"] == "offline":
+        health["stream_active"] = False
+        health["ai_fps"] = None
+        health["inference_latency_ms"] = None
+        health["detection_active"] = False
+        health["tracking_active"] = False
 
     w = health.get("width")
     h = health.get("height")

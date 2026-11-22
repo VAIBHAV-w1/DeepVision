@@ -713,9 +713,11 @@ def api_dashboard_stats(request):
     if events_24h == 0:
         events_24h = min(24, Alert.objects.filter(user_id=user_id).count() or 24)
 
+    from apps.surveillance.health.health_service import get_live_camera_status, get_user_cameras_health
     user_cameras = list(get_accessible_cameras_qs(request.user))
     total_cameras = len(user_cameras)
-    online_cameras = sum(1 for c in user_cameras if c.status == 'online')
+    live_statuses = {c.id: get_live_camera_status(c.id) for c in user_cameras}
+    online_cameras = sum(1 for c in user_cameras if live_statuses[c.id]["status"] == 'online')
     active_cameras = sum(1 for c in user_cameras if c.is_active)
 
     alert_counts = Alert.objects.filter(user_id=user_id).aggregate(
@@ -766,12 +768,15 @@ def api_dashboard_stats(request):
     active_recording_cam_ids = set(Recording.objects.filter(camera_id__in=cam_ids, status='recording').values_list('camera_id', flat=True))
     cameras_data = []
     for c in user_cameras:
+        linfo = live_statuses.get(c.id, {"status": "offline", "live": False, "signal_state": "offline"})
         cameras_data.append({
             "id": c.id,
             "name": c.name,
             "location": c.location or "Default Zone",
             "source_type": c.source_type,
-            "status": c.status,
+            "status": linfo["status"],
+            "live": linfo["live"],
+            "signal_state": linfo["signal_state"],
             "is_active": c.is_active,
             "is_recording": c.id in active_recording_cam_ids,
         })
@@ -779,7 +784,6 @@ def api_dashboard_stats(request):
     engine_reachable = is_engine_reachable(timeout=0.5)
     db_backend = getattr(connection, 'vendor', 'unknown')
 
-    from apps.surveillance.health.health_service import get_user_cameras_health
     cam_healths = get_user_cameras_health(cam_ids) if cam_ids else []
     active_fps_vals = [float(h.get("fps") or 0.0) for h in cam_healths if float(h.get("fps") or 0.0) > 0.0]
     live_avg_fps = round(sum(active_fps_vals) / len(active_fps_vals), 1) if active_fps_vals else 0.0
@@ -1030,8 +1034,6 @@ def api_cameras_list(request):
 
     cameras_qs = get_accessible_cameras_qs(request.user)
     status_filter = request.GET.get('status', 'all').strip().lower()
-    if status_filter in ('online', 'offline'):
-        cameras_qs = cameras_qs.filter(status=status_filter)
 
     cams_list = list(cameras_qs)
     cam_ids = [c.id for c in cams_list]
@@ -1039,6 +1041,7 @@ def api_cameras_list(request):
 
     from apps.core.models import RestrictedZone
     from apps.cameras.surveillance_config import get_camera_surveillance_config
+    from apps.surveillance.health.health_service import get_live_camera_status
     zone_counts = {}
     for zid_cid, enabled_flag in RestrictedZone.objects.filter(camera_id__in=cam_ids, enabled=True).values_list('camera_id', 'enabled'):
         if enabled_flag:
@@ -1046,6 +1049,9 @@ def api_cameras_list(request):
 
     cameras = []
     for c in cams_list:
+        linfo = get_live_camera_status(c.id)
+        if status_filter in ('online', 'offline') and linfo["status"] != status_filter:
+            continue
         z_cnt = zone_counts.get(c.id, 0)
         cam_cfg = get_camera_surveillance_config(c.id, has_enabled_zones=(z_cnt > 0))
         cameras.append({
@@ -1055,7 +1061,10 @@ def api_cameras_list(request):
             "source": _mask_camera_source(c.source),
             "has_credentials": _has_camera_credentials(c.source),
             "location": c.location or "Default Zone",
-            "status": c.status,
+            "status": linfo["status"],
+            "live": linfo["live"],
+            "signal_state": linfo["signal_state"],
+            "frame_age_sec": linfo.get("frame_age_sec"),
             "is_active": c.is_active,
             "is_recording": c.id in active_recording_cam_ids,
             "purpose": cam_cfg.get("purpose", "general"),
@@ -1282,6 +1291,8 @@ def api_camera_detail(request, camera_id):
             "detected_at": a.detected_at.isoformat() if a.detected_at else "",
         })
 
+    from apps.surveillance.health.health_service import get_live_camera_status
+    detail_live = get_live_camera_status(camera.id)
     return JsonResponse({
         "camera": {
             "id": camera.id,
@@ -1290,7 +1301,9 @@ def api_camera_detail(request, camera_id):
             "source": _mask_camera_source(camera.source),
             "has_credentials": _has_camera_credentials(camera.source),
             "location": camera.location,
-            "status": camera.status,
+            "status": detail_live["status"],
+            "live": detail_live["live"],
+            "signal_state": detail_live["signal_state"],
             "is_active": camera.is_active,
             "created_at": camera.created_at.isoformat() if camera.created_at else "",
         },

@@ -105,6 +105,14 @@ class CameraWorker:
             pass
         return True
 
+    def get_frame_age_seconds(self):
+        """Returns seconds elapsed since last valid frame, or None if no valid frame has been acquired."""
+        with self.lock:
+            ts = float(self.last_valid_frame_time or 0.0)
+        if ts <= 0.0:
+            return None
+        return round(max(0.0, time.time() - ts), 2)
+
     def get_operational_status(self):
         """Returns standard surveillance state: CONNECTING, ONLINE, STALE, RECONNECTING, OFFLINE, ERROR."""
         now = time.time()
@@ -118,9 +126,11 @@ class CameraWorker:
             if self.last_valid_frame_time == 0.0:
                 return "CONNECTING"
             dt = now - self.last_valid_frame_time
-            if dt <= 4.0:
+            online_ttl = 6.0 if self.is_browser_pushed else 4.0
+            stale_ttl = 15.0 if self.is_browser_pushed else 12.0
+            if dt <= online_ttl:
                 return "ONLINE"
-            elif dt <= 12.0:
+            elif dt <= stale_ttl:
                 return "STALE"
             else:
                 return "OFFLINE"
