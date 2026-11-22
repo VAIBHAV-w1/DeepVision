@@ -1307,10 +1307,9 @@ def _invalidate_camera_zones(camera_id):
         from apps.surveillance.ai.registry import get_inference_registry
         reg = get_inference_registry()
         if reg:
-            for iw in set(getattr(reg, 'physical_workers', {}).values()) | set(getattr(reg, 'workers', {}).values()):
-                if iw:
-                    iw.bind_camera(camera_id)
-                    iw.invalidate_zones()
+            iw = reg.get_active_worker(camera_id)
+            if iw:
+                iw.invalidate_zones()
     except Exception:
         pass
 

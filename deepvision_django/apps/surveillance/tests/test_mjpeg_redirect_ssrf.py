@@ -8,10 +8,12 @@ from unittest.mock import MagicMock, patch
 from django.test import SimpleTestCase
 
 from apps.surveillance.camera.capture import (
+    DummyVideoCapture,
     HttpMjpegCapture,
     _SafeMjpegRedirectHandler,
     _ScopedMjpegHTTPSHandler,
     _is_authorized_private_lan_url,
+    safe_open_video_capture,
 )
 
 
@@ -153,4 +155,27 @@ class HttpMjpegRedirectAndTlsSecurityTests(SimpleTestCase):
         self.assertTrue(_is_authorized_private_lan_url("https://172.16.4.10/videofeed"))
         self.assertFalse(_is_authorized_private_lan_url("https://127.0.0.1/videofeed"))
         self.assertFalse(_is_authorized_private_lan_url("https://169.254.169.254/latest"))
+
+    def test_safe_open_video_capture_never_falls_back_to_opencv_after_policy_rejection(self):
+        with patch("apps.surveillance.camera.sources.socket.getaddrinfo") as mock_dns:
+            mock_dns.return_value = [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+            ]
+            with (
+                patch("urllib.request.OpenerDirector.open", side_effect=ValueError("Security Error: unsafe redirect")),
+                patch("apps.surveillance.camera.capture.cv2.VideoCapture") as mock_cv_cap,
+            ):
+                cap = safe_open_video_capture("https://public.camera.example/live")
+                self.assertIsInstance(cap, DummyVideoCapture)
+                self.assertFalse(cap.isOpened())
+                mock_cv_cap.assert_not_called()
+
+            with (
+                patch("urllib.request.OpenerDirector.open", side_effect=urllib.error.URLError(ssl.SSLCertVerificationError("bad cert"))),
+                patch("apps.surveillance.camera.capture.cv2.VideoCapture") as mock_cv_cap,
+            ):
+                cap = safe_open_video_capture("https://public.camera.example/live")
+                self.assertIsInstance(cap, DummyVideoCapture)
+                self.assertFalse(cap.isOpened())
+                mock_cv_cap.assert_not_called()
 

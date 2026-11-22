@@ -100,3 +100,34 @@ class SecurityHardeningRegressionTests(SimpleTestCase):
             resp_limited = assistant_chat_view(req_ok)
         self.assertEqual(resp_limited.status_code, 429)
         self.assertEqual(resp_limited["Retry-After"], "45")
+
+    def test_invalidate_camera_zones_does_not_bind_unrelated_workers(self):
+        from apps.core.api import _invalidate_camera_zones
+
+        worker_a = MagicMock()
+        worker_b = MagicMock()
+        fake_reg = MagicMock()
+        fake_reg.physical_workers = {"src_a": worker_a, "src_b": worker_b}
+        fake_reg.workers = {101: worker_a, 202: worker_b}
+        fake_reg.get_active_worker.side_effect = lambda cid: {101: worker_a, 202: worker_b}.get(cid)
+
+        with patch("apps.surveillance.ai.registry.get_inference_registry", return_value=fake_reg):
+            _invalidate_camera_zones(101)
+
+        worker_a.invalidate_zones.assert_called_once_with()
+        worker_a.bind_camera.assert_not_called()
+        worker_b.invalidate_zones.assert_not_called()
+        worker_b.bind_camera.assert_not_called()
+
+    def test_verify_model_artifact_rejects_unmanifested_filename(self):
+        import tempfile
+        from pathlib import Path
+        from apps.surveillance.ai.onnx_runtime import verify_model_artifact
+
+        with tempfile.TemporaryDirectory() as tmpd:
+            f = Path(tmpd) / "untrusted_custom.onnx"
+            f.write_bytes(b"fake-onnx")
+            ok, msg, digest = verify_model_artifact(str(f))
+            self.assertFalse(ok)
+            self.assertIn("Unregistered", msg)
+            self.assertIsNotNone(digest)

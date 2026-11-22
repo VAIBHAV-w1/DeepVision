@@ -82,18 +82,19 @@ def compute_sha256(file_path: str) -> str:
 
 
 def verify_model_artifact(model_path: str, expected_name: Optional[str] = None) -> Tuple[bool, str, Optional[str]]:
-    """Validates existence, non-empty size, and expected SHA-256 digest for a model file."""
+    """Validates existence, non-empty size, and expected SHA-256 digest for a manifested model file."""
     if not model_path or not os.path.isfile(model_path):
         return False, f"Model file missing: {model_path}", None
     fname = expected_name or os.path.basename(model_path)
     meta = MODEL_MANIFEST.get(fname)
     actual_size = os.path.getsize(model_path)
     actual_hash = compute_sha256(model_path)
-    if meta is not None:
-        if actual_size != meta["size_bytes"]:
-            return False, f"Size mismatch for {fname}: expected {meta['size_bytes']}, got {actual_size}", actual_hash
-        if actual_hash != meta["sha256"]:
-            return False, f"SHA-256 mismatch for {fname}: expected {meta['sha256']}, got {actual_hash}", actual_hash
+    if meta is None:
+        return False, f"Unregistered ONNX model artifact rejected (missing manifest digest): {fname}", actual_hash
+    if actual_size != meta["size_bytes"]:
+        return False, f"Size mismatch for {fname}: expected {meta['size_bytes']}, got {actual_size}", actual_hash
+    if actual_hash != meta["sha256"]:
+        return False, f"SHA-256 mismatch for {fname}: expected {meta['sha256']}, got {actual_hash}", actual_hash
     return True, "ok", actual_hash
 
 

@@ -181,6 +181,7 @@ class HttpMjpegCapture:
         self._height = 0
         self._fps = 25.0
         self.last_error = None
+        self.policy_rejected = False
         self._lock = threading.Lock()
         self._open_stream()
 
@@ -218,6 +219,15 @@ class HttpMjpegCapture:
                     self.release()
             else:
                 self.release()
+        except (ValueError, ssl.SSLError) as e:
+            self.policy_rejected = True
+            self.last_error = str(e)
+            self.release()
+        except urllib.error.URLError as e:
+            if isinstance(getattr(e, "reason", None), (ValueError, ssl.SSLError)):
+                self.policy_rejected = True
+            self.last_error = str(e)
+            self.release()
         except Exception as e:
             self.last_error = str(e)
             self.release()
@@ -451,9 +461,12 @@ def safe_open_video_capture(capture_source, timeout=None):
             if cap.isOpened():
                 return cap
             last_err = getattr(cap, "last_error", None)
+            policy_rejected = bool(getattr(cap, "policy_rejected", False))
             cap.release()
 
-            if isinstance(capture_source, str) and any(kw in capture_source for kw in ("/silent", "/videofeed", "/video", ":8080")):
+            if policy_rejected or (
+                isinstance(capture_source, str) and any(kw in capture_source for kw in ("/silent", "/videofeed", "/video", ":8080"))
+            ):
                 return DummyVideoCapture(last_error=last_err)
 
             cap = cv2.VideoCapture(capture_source)
