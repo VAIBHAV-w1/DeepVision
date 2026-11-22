@@ -71,6 +71,7 @@ export function CameraLivePlayer(props) {
   useEffect(() => {
     let active = true;
     const fetchTelemetry = async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const res = await fetch(`/api/cameras/${cameraId}/stats/`, { credentials: 'include' });
         if (res.ok) {
@@ -806,7 +807,7 @@ export function CameraLivePlayer(props) {
               </span>
             ) : mode === 'tracking' ? (
               <span style={{ color: '#10b981', fontWeight: 700 }}>
-                {zones.length > 0 ? `ZONE MONITORED (${zones[0].name}) • ` : ''}YOLO11n + ByteTrack ({detectionsCount} Objects)
+                {zones.length > 0 ? `ZONE MONITORED (${zones[0].name}) • ` : ''}AI Tracking ({detectionsCount} Objects)
               </span>
             ) : (
               <span style={{ color: '#38bdf8', fontWeight: 700 }}>

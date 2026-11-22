@@ -49,6 +49,8 @@ export function Settings({ onNavigate }) {
   const [confThreshold, setConfThreshold] = useState(() => {
     return Number(localStorage.getItem("deepvision_conf_threshold")) || 0.35;
   });
+  const [aiProfile, setAiProfile] = useState("balanced");
+  const [activeBackendDetail, setActiveBackendDetail] = useState("YOLO26s ONNX + BoT-SORT Re-ID");
   const [anomalyRules, setAnomalyRules] = useState(() => {
     const saved = localStorage.getItem("deepvision_anomaly_rules");
     if (saved) {
@@ -91,6 +93,12 @@ export function Settings({ onNavigate }) {
             "deepvision_conf_threshold",
             String(res.confidence_threshold),
           );
+        }
+        if (typeof res.ai_profile === "string" && res.ai_profile) {
+          setAiProfile(res.ai_profile);
+        }
+        if (typeof res.detector_backend === "string" && res.detector_backend && res.detector_backend !== "unknown") {
+          setActiveBackendDetail(`${res.detector_backend} (${res.effective_cpus || 1} vCPU) + BoT-SORT Re-ID`);
         }
         if (res.rules && typeof res.rules === "object") {
           const normalized = {
@@ -227,6 +235,7 @@ export function Settings({ onNavigate }) {
       await Promise.all([
         api.settings.saveDetection({
           confidence_threshold: confThreshold,
+          ai_profile: aiProfile,
           rules: anomalyRules,
         }),
         api.notifications.savePreferences(emailPrefs),
@@ -903,6 +912,43 @@ export function Settings({ onNavigate }) {
             />
           </div>
 
+          <div>
+            <label
+              htmlFor="select-ai-profile"
+              style={{
+                display: "block",
+                fontSize: "0.82rem",
+                fontWeight: 600,
+                color: "var(--text-main, #F8FAFC)",
+                marginBottom: "6px",
+              }}
+            >
+              {t("settings.aiProfileLabel", "AI Inference Model Profile")}
+            </label>
+            <select
+              id="select-ai-profile"
+              value={aiProfile}
+              onChange={(e) => setAiProfile(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "7px 10px",
+                borderRadius: "4px",
+                background: "var(--bg-canvas, #101826)",
+                border: "1px solid var(--border-color, #24324A)",
+                color: "var(--text-main, #F8FAFC)",
+                fontSize: "0.82rem",
+              }}
+            >
+              <option value="balanced">YOLO26s — Balanced Accuracy (Default)</option>
+              <option value="lightweight">YOLO26n — High-Speed CPU (~3.3x Faster)</option>
+            </select>
+            <div style={{ fontSize: "0.73rem", color: "var(--text-muted, #64748B)", marginTop: "4px" }}>
+              {aiProfile === "lightweight"
+                ? "Optimized for low-vCPU cloud containers with lower latency and slightly reduced small-object recall."
+                : "Higher detection recall on small or distant subjects; heavier on single-vCPU cloud hosts."}
+            </div>
+          </div>
+
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             <span
               style={{
@@ -1120,7 +1166,7 @@ export function Settings({ onNavigate }) {
                     fontWeight: 600,
                   }}
                 >
-                  YOLO11n + ByteTrack (
+                  {activeBackendDetail} (
                   {engineHealth.modelLoaded ? "Ready" : "Standby"})
                 </div>
               </div>

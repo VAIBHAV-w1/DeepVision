@@ -278,11 +278,22 @@ export const api = {
         method: 'POST',
         body: { source_type: sourceType, source, username, password },
       }),
-    ingestFrame: (id, frameDataUrl) =>
-      request(`/api/cameras/${id}/ingest-frame/`, {
+    ingestFrame: (id, framePayload, seq = null) => {
+      const q = seq !== null ? `?seq=${encodeURIComponent(seq)}` : '';
+      if (typeof Blob !== 'undefined' && framePayload instanceof Blob) {
+        return request(`/api/cameras/${id}/ingest-frame/${q}`, {
+          method: 'POST',
+          headers: { 'Content-Type': framePayload.type || 'image/jpeg' },
+          body: framePayload,
+          timeout: 12000,
+        });
+      }
+      return request(`/api/cameras/${id}/ingest-frame/${q}`, {
         method: 'POST',
-        body: { frame: frameDataUrl },
-      }),
+        body: { frame: framePayload },
+        timeout: 12000,
+      });
+    },
     disconnect: (id) => request(`/api/cameras/${id}/disconnect/`, { method: 'POST' }),
     warm: (id) => request(`/api/cameras/${id}/warm/`),
     getStreamUrl: (id, mode = 'tracking') => `${API_BASE_URL}/api/cameras/${id}/stream/?mode=${mode}`,

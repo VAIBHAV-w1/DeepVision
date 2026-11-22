@@ -98,15 +98,72 @@ def verify_model_artifact(model_path: str, expected_name: Optional[str] = None) 
     return True, "ok", actual_hash
 
 
-def resolve_selected_model_name() -> str:
-    """Resolves active ONNX checkpoint filename based on explicit env or hardware profile."""
+def get_effective_cpu_count() -> int:
+    """
+    Returns effective CPU quota available to this process (respecting Linux cgroup v1/v2
+    CPU limits in containers such as Render/Docker so OpenVINO/ORT do not oversubscribe).
+    """
+    override = (os.getenv("DEEPVISION_CPU_THREADS") or "").strip()
+    if override.isdigit() and int(override) >= 1:
+        return int(override)
+
+    host_cpus = max(1, os.cpu_count() or 1)
+    quota_cpus = None
+
+    try:
+        # cgroup v2: "<quota> <period>"
+        with open("/sys/fs/cgroup/cpu.max", "r", encoding="utf-8") as fh:
+            parts = fh.read().strip().split()
+            if len(parts) >= 2 and parts[0] != "max":
+                q, p = float(parts[0]), float(parts[1])
+                if q > 0 and p > 0:
+                    quota_cpus = max(1, int(round(q / p)))
+    except Exception:
+        pass
+
+    if quota_cpus is None:
+        try:
+            # cgroup v1
+            with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us", "r", encoding="utf-8") as fq, \
+                 open("/sys/fs/cgroup/cpu/cpu.cfs_period_us", "r", encoding="utf-8") as fp:
+                q, p = float(fq.read().strip()), float(fp.read().strip())
+                if q > 0 and p > 0:
+                    quota_cpus = max(1, int(round(q / p)))
+        except Exception:
+            pass
+
+    if quota_cpus is not None:
+        return max(1, min(host_cpus, quota_cpus))
+    return host_cpus
+
+
+def resolve_selected_model_name(profile_override: Optional[str] = None) -> str:
+    """Resolves active ONNX checkpoint filename based on explicit profile, env, or default."""
     explicit = (os.getenv("DEEPVISION_MODEL_NAME") or "").strip()
-    if explicit:
+    if explicit and not profile_override:
         return explicit
-    profile = (os.getenv("DEEPVISION_AI_PROFILE") or "balanced").strip().lower()
-    if profile in ("lightweight", "nano", "low_resource", "cpu_lite"):
+    profile = (profile_override or os.getenv("DEEPVISION_AI_PROFILE") or "balanced").strip().lower()
+    if profile in ("lightweight", "nano", "low_resource", "cpu_lite", "fast", "fast_cpu"):
         return "yolo26n.onnx"
     return "yolo26s.onnx"
+
+
+def get_model_profile_catalog() -> List[Dict[str, str]]:
+    """Returns explicit accuracy/performance profiles without hiding model identity."""
+    return [
+        {
+            "id": "balanced",
+            "model_name": "yolo26s.onnx",
+            "label": "YOLO26s — Balanced Accuracy",
+            "tradeoff": "Higher small/distant object recall; heavier on single-vCPU cloud hosts.",
+        },
+        {
+            "id": "lightweight",
+            "model_name": "yolo26n.onnx",
+            "label": "YOLO26n — High-Speed CPU",
+            "tradeoff": "~3.3x faster CPU inference and lower latency with slightly lower small-object recall.",
+        },
+    ]
 
 
 class _InferenceBuffers:
@@ -120,7 +177,8 @@ class _InferenceBuffers:
 
     def _apply_lowlight_enhancement(self, bgr_frame: np.ndarray) -> np.ndarray:
         """Apply LAB CLAHE only on dark/low-contrast frames so normal scenes stay fast and untouched."""
-        gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
+        sample = bgr_frame[::4, ::4] if (bgr_frame.shape[0] >= 32 and bgr_frame.shape[1] >= 32) else bgr_frame
+        gray = cv2.cvtColor(sample, cv2.COLOR_BGR2GRAY)
         mean_luma = float(np.mean(gray))
         std_luma = float(np.std(gray))
         if mean_luma > 85.0 and std_luma > 38.0:
@@ -137,7 +195,7 @@ class _InferenceBuffers:
             self.chw = np.empty((1, 3, self.size, self.size), dtype=np.float32)
 
     def prepare(self, bgr_frame: np.ndarray, target_size: int = 640) -> Tuple[np.ndarray, float, float, float]:
-        """Letterboxes BGR uint8 image into normalized NCHW RGB float32 tensor in-place."""
+        """Letterboxes BGR uint8 image into normalized NCHW RGB float32 tensor using SIMD OpenCV."""
         self.ensure_size(target_size)
         h, w = bgr_frame.shape[:2]
         scale = min(self.size / float(w), self.size / float(h))
@@ -148,14 +206,19 @@ class _InferenceBuffers:
 
         self.canvas.fill(114)
         interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
-        resized = cv2.resize(bgr_frame, (nw, nh), interpolation=interp) if (nw != w or nh != h) else bgr_frame
-        resized = self._apply_lowlight_enhancement(resized)
-        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-        self.canvas[top:top + nh, left:left + nw] = rgb
+        roi = self.canvas[top:top + nh, left:left + nw]
+        if nw != w or nh != h:
+            cv2.resize(bgr_frame, (nw, nh), dst=roi, interpolation=interp)
+        else:
+            np.copyto(roi, bgr_frame)
 
-        # Convert HWC uint8 -> CHW float32 [0, 1] directly into preallocated self.chw
-        np.divide(self.canvas.transpose(2, 0, 1), 255.0, out=self.chw[0], dtype=np.float32)
-        return self.chw, scale, float(left), float(top)
+        enhanced = self._apply_lowlight_enhancement(roi)
+        if enhanced is not roi:
+            np.copyto(roi, enhanced)
+
+        # Fused SIMD BGR->RGB, HWC->NCHW, and 1/255 float32 scaling (~2x faster than NumPy divide)
+        blob = cv2.dnn.blobFromImage(self.canvas, scalefactor=1.0 / 255.0, swapRB=True, crop=False)
+        return blob, scale, float(left), float(top)
 
 
 def decode_yolo_onnx_output(
@@ -429,8 +492,19 @@ class SharedONNXEngine:
             self.input_size = int(pshape[2].get_length())
         config = {"PERFORMANCE_HINT": "LATENCY"}
         if device == "CPU":
-            config["INFERENCE_NUM_THREADS"] = str(max(2, min(4, os.cpu_count() or 4)))
-        compiled = core.compile_model(ov_model, device, config)
+            eff_cpus = get_effective_cpu_count()
+            num_threads = max(1, min(4, eff_cpus))
+            config["INFERENCE_NUM_THREADS"] = str(num_threads)
+            config["NUM_STREAMS"] = "1"
+            if eff_cpus <= 2:
+                config["ENABLE_CPU_PINNING"] = "NO"
+        try:
+            compiled = core.compile_model(ov_model, device, config)
+        except Exception:
+            fallback_cfg = {"PERFORMANCE_HINT": "LATENCY"}
+            if device == "CPU":
+                fallback_cfg["INFERENCE_NUM_THREADS"] = config["INFERENCE_NUM_THREADS"]
+            compiled = core.compile_model(ov_model, device, fallback_cfg)
 
         # Probe real forward inference before declaring backend usable
         probe_x = np.zeros((1, 3, self.input_size, self.input_size), dtype=np.float32)
@@ -450,7 +524,7 @@ class SharedONNXEngine:
         import onnxruntime as ort
 
         opts = ort.SessionOptions()
-        opts.intra_op_num_threads = max(2, min(4, os.cpu_count() or 4))
+        opts.intra_op_num_threads = max(1, min(4, get_effective_cpu_count()))
         opts.inter_op_num_threads = 1
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         sess = ort.InferenceSession(self.model_path, sess_options=opts, providers=["CPUExecutionProvider"])

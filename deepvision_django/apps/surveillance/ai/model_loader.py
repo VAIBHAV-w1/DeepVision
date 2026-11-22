@@ -52,22 +52,24 @@ def _resolve_repo_paths():
     return root_dir, models_dir, cache_dir
 
 
-def get_shared_yolo_model():
+def get_shared_yolo_model(profile_override: Optional[str] = None):
     """
     Returns the singleton shared model instance (`SharedONNXEngine` by default,
     or legacy PyTorch `YOLO` when explicitly requested and permitted).
-    Loads from disk at most once per lifecycle. Thread-safe.
+    Loads from disk at most once per lifecycle unless explicitly reloaded for another profile.
     """
     global _shared_yolo_model, _model_load_count
     with _model_lock:
+        desired_name = resolve_selected_model_name(profile_override=profile_override)
         if _shared_yolo_model is not None:
-            return _shared_yolo_model
+            if not profile_override or getattr(_shared_yolo_model, "model_name", None) == desired_name:
+                return _shared_yolo_model
 
         backend_pref = (os.getenv("DEEPVISION_MODEL_BACKEND") or "onnx").strip().lower()
         _, models_dir, cache_dir = _resolve_repo_paths()
 
         if backend_pref != "pytorch":
-            candidate_names = [resolve_selected_model_name()]
+            candidate_names = [desired_name]
             for fallback_name in ("yolo26s.onnx", "yolo26n.onnx", "yolo11n.onnx"):
                 if fallback_name not in candidate_names:
                     candidate_names.append(fallback_name)
@@ -78,7 +80,13 @@ def get_shared_yolo_model():
                     continue
                 try:
                     engine = SharedONNXEngine(mpath, cache_dir=cache_dir)
-                    _model_load_count += 1
+                    if _shared_yolo_model is not None and isinstance(_shared_yolo_model, SharedONNXEngine):
+                        try:
+                            _shared_yolo_model.release()
+                        except Exception:
+                            pass
+                    else:
+                        _model_load_count += 1
                     _shared_yolo_model = engine
                     print(
                         f"[MODEL_LOADER] Loaded shared ONNX engine from {mpath} "
@@ -88,6 +96,9 @@ def get_shared_yolo_model():
                     return _shared_yolo_model
                 except Exception as onnx_err:
                     logger.warning(f"[MODEL_LOADER] ONNX candidate {fname} failed: {onnx_err}")
+
+        if _shared_yolo_model is not None:
+            return _shared_yolo_model
 
         # Legacy PyTorch (.pt) path only when explicitly opted in or no ONNX artifact loaded
         pt_path = os.path.join(models_dir, "yolo11n.pt")
@@ -144,6 +155,11 @@ def create_camera_model_wrapper():
 def get_model_instance_count() -> int:
     """Returns total number of per-camera wrappers created."""
     return _model_instance_count
+
+
+def reload_shared_yolo_model(profile_name: Optional[str] = None):
+    """Explicitly switches the shared singleton ONNX model when operator AI profile changes."""
+    return get_shared_yolo_model(profile_override=profile_name)
 
 
 def reset_shared_yolo_model():

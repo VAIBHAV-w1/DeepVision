@@ -4,15 +4,17 @@ Directly generates MJPEG streams for ORIGINAL and TRACKING+DETECTION modes
 using shared singleton CameraWorker and InferenceWorker without Flask.
 """
 
+import os
 import time
 try:
     import cv2
     import numpy as np
-    _JPEG_STREAM_QUALITY = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
+    _STREAM_Q = max(50, min(92, int(os.getenv("DEEPVISION_STREAM_JPEG_QUALITY", "80") or 80)))
+    _JPEG_STREAM_QUALITY = [int(cv2.IMWRITE_JPEG_QUALITY), _STREAM_Q]
 except (ImportError, Exception):
     cv2 = None
     np = None
-    _JPEG_STREAM_QUALITY = [1, 85]
+    _JPEG_STREAM_QUALITY = [1, 80]
 import logging
 from typing import Generator, Dict, Any, List
 
@@ -119,17 +121,17 @@ def generate_raw_stream(camera_id: int, user_id: int) -> Generator[bytes, None, 
             if cond is not None:
                 with cond:
                     while worker.running and worker.frame_id == last_processed_id:
-                        if not cond.wait(timeout=0.08):
+                        if not cond.wait(timeout=0.25):
                             break
                     if not worker.running:
                         break
                     current_id = worker.frame_id
-                    frame = worker.latest_frame.copy() if worker.latest_frame is not None else None
+                    frame = worker.latest_frame
                     cap_mono = getattr(worker, "last_capture_monotonic", time.monotonic())
             else:
                 with worker.lock:
                     current_id = worker.frame_id
-                    frame = worker.latest_frame.copy() if (worker.latest_frame is not None and current_id != last_processed_id) else None
+                    frame = worker.latest_frame if (worker.latest_frame is not None and current_id != last_processed_id) else None
                     cap_mono = getattr(worker, "last_capture_monotonic", time.monotonic())
 
             if current_id == last_processed_id or frame is None:
@@ -385,6 +387,10 @@ def render_annotated_frame(
         "fps": display_fps if display_fps > 0 else (ai_fps or (worker.fps if worker else 0.0)),
         "ai_fps": ai_fps,
         "latency_ms": latency_ms,
+        "p50_latency_ms": summary.get("p50_latency_ms", latency_ms),
+        "p95_latency_ms": summary.get("p95_latency_ms", latency_ms),
+        "frame_age_ms": round(stream_handoff_ms, 1),
+        "ai_profile": summary.get("ai_profile", "balanced"),
         "detector_backend": detector_backend,
         "tracker_backend": tracker_backend,
         "motion_active": summary.get("motion_active", False),
@@ -447,17 +453,17 @@ def generate_tracking_stream(camera_id: int, user_id: int) -> Generator[bytes, N
             if cond is not None:
                 with cond:
                     while worker.running and worker.frame_id == last_processed_id:
-                        if not cond.wait(timeout=0.08):
+                        if not cond.wait(timeout=0.25):
                             break
                     if not worker.running:
                         break
                     current_id = worker.frame_id
-                    frame = worker.latest_frame.copy() if worker.latest_frame is not None else None
+                    frame = worker.latest_frame
                     cap_mono = getattr(worker, "last_capture_monotonic", time.monotonic())
             else:
                 with worker.lock:
                     current_id = worker.frame_id
-                    frame = worker.latest_frame.copy() if (worker.latest_frame is not None and current_id != last_processed_id) else None
+                    frame = worker.latest_frame if (worker.latest_frame is not None and current_id != last_processed_id) else None
                     cap_mono = getattr(worker, "last_capture_monotonic", time.monotonic())
 
             if current_id == last_processed_id or frame is None:
