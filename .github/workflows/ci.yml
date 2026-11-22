@@ -232,9 +232,12 @@ jobs:
         run: |
           python verification/test_yolo_and_tracker.py
           python -c "
-          from apps.surveillance.ai.trackers.matching import linear_sum_assignment
+          import importlib.util
           import numpy as np
-          r, c = linear_sum_assignment(np.array([[1.0, 9.0], [8.0, 2.0]]))
+          spec = importlib.util.spec_from_file_location('matching', 'deepvision_django/apps/surveillance/ai/trackers/matching.py')
+          matching = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(matching)
+          r, c = matching.linear_sum_assignment(np.array([[1.0, 9.0], [8.0, 2.0]]))
           assert list(zip(r.tolist(), c.tolist())) == [(0, 0), (1, 1)]
           print('Pure-NumPy Crouse linear_sum_assignment parity PASS')
           "
