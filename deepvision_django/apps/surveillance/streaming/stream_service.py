@@ -31,16 +31,50 @@ logger = logging.getLogger(__name__)
 _stream_telemetry: Dict[int, Dict[str, Any]] = {}
 
 
-from apps.surveillance.ai.anomaly.zones import resolve_zone_pixel_bounds
+from apps.surveillance.ai.anomaly.zones import (
+    resolve_zone_pixel_bounds,
+    resolve_polygon_pixel_points,
+    point_in_polygon,
+)
 
-def _to_pixel_coords(x1: float, y1: float, x2: float, y2: float, fw: int, fh: int):
+
+def _to_pixel_coords(x1: float, y1: float, x2: float, y2: float, fw: int, fh: int, ref_width: int = None, ref_height: int = None):
     """Safely converts coordinates (normalized, 720p/1080p, or native pixels) to valid frame bounds."""
-    return resolve_zone_pixel_bounds(x1, y1, x2, y2, frame_width=fw, frame_height=fh)
+    return resolve_zone_pixel_bounds(
+        x1, y1, x2, y2, frame_width=fw, frame_height=fh, ref_width=ref_width, ref_height=ref_height
+    )
+
+
+def _zone_pixel_polygon(z: dict, fw: int, fh: int):
+    return resolve_polygon_pixel_points(
+        z.get("points"),
+        z.get("x1", 0),
+        z.get("y1", 0),
+        z.get("x2", 0),
+        z.get("y2", 0),
+        frame_width=fw,
+        frame_height=fh,
+        ref_width=z.get("ref_width"),
+        ref_height=z.get("ref_height"),
+    )
 
 
 def _point_in_zone(px: float, py: float, z: dict, fw: int, fh: int) -> bool:
-    """Checks whether a center point (px, py) falls inside a restricted zone."""
-    zx1, zy1, zx2, zy2 = _to_pixel_coords(z["x1"], z["y1"], z["x2"], z["y2"], fw, fh)
+    """Checks whether reference point (px, py) falls inside a polygon or rectangular zone."""
+    pts = z.get("points")
+    if isinstance(pts, (list, tuple)) and len(pts) >= 3:
+        poly = _zone_pixel_polygon(z, fw, fh)
+        return point_in_polygon(float(px), float(py), poly)
+    zx1, zy1, zx2, zy2 = _to_pixel_coords(
+        z["x1"],
+        z["y1"],
+        z["x2"],
+        z["y2"],
+        fw,
+        fh,
+        ref_width=z.get("ref_width"),
+        ref_height=z.get("ref_height"),
+    )
     return zx1 <= px <= zx2 and zy1 <= py <= zy2
 
 
@@ -53,6 +87,11 @@ def get_camera_telemetry(camera_id: int) -> Dict[str, Any]:
         "fps": 0.0,
         "status": "active"
     })
+
+
+def clear_camera_telemetry(camera_id: int) -> None:
+    """Clears cached per-camera stream telemetry on disconnect, source change, or deletion."""
+    _stream_telemetry.pop(int(camera_id), None)
 
 
 def generate_raw_stream(camera_id: int, user_id: int) -> Generator[bytes, None, None]:
@@ -178,10 +217,12 @@ def render_annotated_frame(
     active_items = []
     inf_comp_time = 0.0
     detector_backend = "inactive"
+    tracker_backend = "inactive"
     cached_anomalies = []
     cached_zones = []
     stage_timings = {}
     inf_handoff_ms = 0.0
+    summary = {}
 
     if inference_worker is not None:
         inf_res = inference_worker.get_cached_result()
@@ -194,16 +235,21 @@ def render_annotated_frame(
         inf_comp_time = inf_res[8] if len(inf_res) > 8 else 0.0
         tracker = getattr(inference_worker, "tracker", None)
         detector_backend = getattr(tracker, "detector_backend", "unknown") if tracker is not None else "unknown"
+        tracker_backend = getattr(tracker, "tracker_backend", "unknown") if tracker is not None else "unknown"
         cached_anomalies = getattr(inference_worker, "cached_anomalies", []) or []
         stage_timings = getattr(inference_worker, "last_stage_timings", None) or {}
         inf_handoff_ms = float(getattr(inference_worker, "last_handoff_ms", 0.0) or 0.0)
+        if hasattr(inference_worker, "get_telemetry_summary"):
+            summary = inference_worker.get_telemetry_summary()
 
         raw_zones = inference_worker.get_cached_zones(camera_id) if hasattr(inference_worker, "get_cached_zones") else []
-        seen_coords = set()
+        seen_sigs = set()
         for z in raw_zones:
-            coord_key = (int(z.get("x1", 0)), int(z.get("y1", 0)), int(z.get("x2", 0)), int(z.get("y2", 0)))
-            if coord_key not in seen_coords:
-                seen_coords.add(coord_key)
+            pts = z.get("points")
+            pts_sig = tuple((round(float(p["x"]), 4), round(float(p["y"]), 4)) for p in pts) if isinstance(pts, list) else None
+            coord_key = pts_sig or (int(z.get("x1", 0)), int(z.get("y1", 0)), int(z.get("x2", 0)), int(z.get("y2", 0)))
+            if coord_key not in seen_sigs:
+                seen_sigs.add(coord_key)
                 cached_zones.append(z)
 
     stream_handoff_ms = max(0.0, (now_mono - cap_mono) * 1000.0) if cap_mono > 0 else 0.0
@@ -218,65 +264,75 @@ def render_annotated_frame(
     is_stale_detection = (
         (current_id - inf_source_fid > 25) if (inf_source_fid and current_id) else (inference_age_ms > 2000.0 and inf_comp_time > 0)
     )
-    # Only hide boxes when inference is genuinely stalled (> 6s old), not on normal 1.4-5.3s CPU YOLO passes.
     hide_boxes = (inference_age_ms > 6000.0 and inf_comp_time > 0)
 
-    # Detect which zones currently have any active person center (or person-class track) inside
+    # Detect which zones currently contain any person's bottom-center foot reference point
     active_intrusions = set()
     if not hide_boxes:
-        person_centers = [p.get("center", (0, 0)) for p in (active_persons or [])]
-        if not person_centers and cached_tracks:
+        person_ref_points = []
+        for p in (active_persons or []):
+            if p.get("foot_point"):
+                person_ref_points.append(p["foot_point"])
+            else:
+                bx1, _, bx2, by2 = p["bbox"]
+                person_ref_points.append((0.5 * (bx1 + bx2), float(by2)))
+        if not person_ref_points and cached_tracks:
             for trk in cached_tracks:
                 if trk.get("class_name") == "person":
-                    person_centers.append((0.5 * (trk["x1"] + trk["x2"]), 0.5 * (trk["y1"] + trk["y2"])))
-        for pcx, pcy in person_centers:
+                    person_ref_points.append((0.5 * (trk["x1"] + trk["x2"]), float(trk["y2"])))
+        for rpx, rpy in person_ref_points:
             for z in cached_zones:
-                if z.get("enabled", True) and _point_in_zone(pcx, pcy, z, fw, fh):
+                if z.get("enabled", True) and _point_in_zone(rpx, rpy, z, fw, fh):
                     active_intrusions.add(z["id"])
 
-    # 1. Draw Restricted Zones (monitored boundaries)
+    # 1. Draw Restricted Zones (polygons or rectangles)
     for z in cached_zones:
         if not z.get("enabled", True):
             continue
-        zx1, zy1, zx2, zy2 = _to_pixel_coords(z["x1"], z["y1"], z["x2"], z["y2"], fw, fh)
+        poly_pts = _zone_pixel_polygon(z, fw, fh)
         zid = z["id"]
         zname = z.get("name", "Restricted Area")
         is_intruded = zid in active_intrusions
+        lx = poly_pts[0][0] if poly_pts else 10
+        ly = min((pt[1] for pt in poly_pts), default=24)
 
         if is_intruded:
             z_color = (0, 0, 235)
-            sub = out[zy1:zy2, zx1:zx2]
-            if sub.shape[0] > 0 and sub.shape[1] > 0 and np is not None:
-                red_layer = np.full_like(sub, (0, 0, 180), dtype=np.uint8)
-                cv2.addWeighted(sub, 0.78, red_layer, 0.22, 0, sub)
-                out[zy1:zy2, zx1:zx2] = sub
-            cv2.rectangle(out, (zx1, zy1), (zx2, zy2), z_color, 3)
-            zlabel = f"[!] INTRUSION DETECTED: {zname.upper()}"
-            cv2.putText(out, zlabel, (zx1 + 10, max(24, zy1 + 24)), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
+            if np is not None and len(poly_pts) >= 3:
+                overlay = out.copy()
+                pts_arr = np.array(poly_pts, dtype=np.int32).reshape((-1, 1, 2))
+                cv2.fillPoly(overlay, [pts_arr], (0, 0, 180))
+                cv2.addWeighted(out, 0.78, overlay, 0.22, 0, out)
+                cv2.polylines(out, [pts_arr], True, z_color, 3)
+            zlabel = f"[!] RESTRICTED ENTRY: {zname.upper()}"
+            cv2.putText(out, zlabel, (max(8, lx + 8), max(24, ly + 22)), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 0, 255), 2)
         else:
             z_color = (0, 165, 255)
-            cv2.rectangle(out, (zx1, zy1), (zx2, zy2), z_color, 2)
+            if np is not None and len(poly_pts) >= 3:
+                pts_arr = np.array(poly_pts, dtype=np.int32).reshape((-1, 1, 2))
+                cv2.polylines(out, [pts_arr], True, z_color, 2)
             zlabel = f"ZONE: {zname}"
-            cv2.putText(out, zlabel, (zx1 + 8, max(20, zy1 + 22)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, z_color, 2)
+            cv2.putText(out, zlabel, (max(8, lx + 8), max(20, ly + 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.52, z_color, 2)
 
     ui_tracks = []
     if not hide_boxes:
-        # 2. Persons (Green or Red if inside restricted zone)
+        # 2. Persons (Green or Red if foot point inside restricted zone)
         for p in (active_persons or []):
             tx1, ty1, tx2, ty2 = p["bbox"]
             tid = p.get("track_id", "")
             gid = p.get("global_id", "")
             tconf = p.get("confidence", 1.0)
-            pcx, pcy = p.get("center", ((tx1 + tx2) / 2.0, (ty1 + ty2) / 2.0))
-            in_zone = any(_point_in_zone(pcx, pcy, z, fw, fh) for z in cached_zones if z.get("enabled", True))
+            rpx, rpy = p.get("foot_point") or (0.5 * (tx1 + tx2), float(ty2))
+            in_zone = any(_point_in_zone(rpx, rpy, z, fw, fh) for z in cached_zones if z.get("enabled", True))
             if in_zone:
                 box_color = (0, 0, 235)
-                label = f"ALERT PERSON #{tid} (INTRUDER) {tconf:.2f}"
+                label = f"ALERT PERSON #{tid} (IN ZONE) {tconf:.2f}"
             else:
                 box_color = (0, 200, 100) if not is_stale_detection else (0, 180, 180)
                 short_gid = "-".join(str(gid).split("-")[:2]) if gid else ""
                 label = f"person #{tid} {tconf:.2f} ({short_gid})" if short_gid else f"person #{tid} {tconf:.2f}"
             cv2.rectangle(out, (tx1, ty1), (tx2, ty2), box_color, 2)
+            cv2.circle(out, (int(round(rpx)), int(round(rpy))), 4, box_color, -1)
             cv2.putText(out, label, (tx1, max(18, ty1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 2)
 
         # 3. Items (Orange)
@@ -318,10 +374,25 @@ def render_annotated_frame(
         "anomalies": cached_anomalies,
         "zones": cached_zones,
         "active_intrusions": list(active_intrusions),
+        "currently_visible_persons": summary.get("currently_visible_persons", len(active_persons)),
+        "active_tracks": summary.get("active_tracks", len(ui_tracks)),
+        "unique_persons_observed": summary.get("unique_persons_observed", len(active_persons)),
+        "total_detection_events": summary.get("total_detection_events", len(ui_tracks)),
+        "recent_detections": summary.get("recent_detections", []),
+        "recent_zone_events": summary.get("recent_zone_events", []),
+        "camera_purpose": summary.get("camera_purpose", "general"),
+        "restricted_entry_enabled": summary.get("restricted_entry_enabled", bool(cached_zones)),
         "fps": display_fps if display_fps > 0 else (ai_fps or (worker.fps if worker else 0.0)),
         "ai_fps": ai_fps,
         "latency_ms": latency_ms,
         "detector_backend": detector_backend,
+        "tracker_backend": tracker_backend,
+        "motion_active": summary.get("motion_active", False),
+        "motion_ratio": summary.get("motion_ratio", 0.0),
+        "motion_lighting_shift": summary.get("motion_lighting_shift", False),
+        "motion_backend": summary.get("motion_backend", "mog2"),
+        "inference_dropped_frames": summary.get("inference_dropped_frames", 0),
+        "session_started_at": summary.get("session_started_at", ""),
         "stage_timings": {
             "acquisition_ms": round(acq_ms, 2),
             "handoff_ms": round(inf_handoff_ms, 2),

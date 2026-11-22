@@ -17,7 +17,7 @@ from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.db import connection
+from django.db import connection, close_old_connections, OperationalError, InterfaceError
 from apps.accounts.decorators import login_required
 from apps.cameras.models import Camera
 from apps.alerts.models import Alert, IncidentCase
@@ -25,29 +25,32 @@ from apps.recordings.models import Recording
 from apps.evidence.models import Evidence
 from apps.notifications.models import Notification
 from apps.core.chatbot_service import answer_query
+from apps.core.rate_limiter import ratelimit
 from apps.ai.engine import get_engine_health
 
 
 @login_required
 def dashboard_view(request):
     """
-    Renders the DeepVision SOC Dashboard with real SQLite database statistics.
-    Camera video streaming remains on Flask; Django presents real DB records.
+    Renders the DeepVision SOC Dashboard with scoped SQLite database statistics.
     """
-    user_cameras = list(Camera.objects.all().order_by('id'))
+    from apps.cameras.views import get_accessible_cameras_qs
+
+    user_cameras = list(get_accessible_cameras_qs(request.user))
     total_cameras = len(user_cameras)
     online_cameras = sum(1 for c in user_cameras if c.status == 'online')
     active_cameras = sum(1 for c in user_cameras if c.is_active)
 
-    new_alerts_count = Alert.objects.filter(status__in=['new', 'unresolved', 'active', 'OPEN']).count()
-    high_critical_count = Alert.objects.filter(severity__in=['high', 'critical', 'HIGH', 'CRITICAL']).count()
-    total_recordings = Recording.objects.count()
-    total_evidence = Evidence.objects.count()
-    total_cases = IncidentCase.objects.count()
-    unread_notifications = Notification.objects.filter(user_id=request.user.id, is_read=False).count()
+    uid = request.user.id
+    new_alerts_count = Alert.objects.filter(user_id=uid, status__in=['new', 'unresolved', 'active', 'OPEN']).count()
+    high_critical_count = Alert.objects.filter(user_id=uid, severity__in=['high', 'critical', 'HIGH', 'CRITICAL']).count()
+    total_recordings = Recording.objects.filter(user_id=uid).count()
+    total_evidence = Evidence.objects.filter(user_id=uid).count()
+    total_cases = IncidentCase.objects.filter(user_id=uid).count()
+    unread_notifications = Notification.objects.filter(user_id=uid, is_read=False).count()
 
-    recent_alerts = list(Alert.objects.select_related('camera').order_by('-id')[:5])
-    recent_recordings = list(Recording.objects.select_related('camera').order_by('-id')[:4])
+    recent_alerts = list(Alert.objects.filter(user_id=uid).select_related('camera').order_by('-id')[:5])
+    recent_recordings = list(Recording.objects.filter(user_id=uid).select_related('camera').order_by('-id')[:4])
 
     context = {
         'cameras': user_cameras,
@@ -76,6 +79,7 @@ def help_view(request):
 
 
 @login_required
+@ratelimit(scope="assistant", limit=30, window=60)
 @require_http_methods(["POST"])
 def assistant_chat_view(request):
     """
@@ -87,9 +91,11 @@ def assistant_chat_view(request):
     except Exception:
         data = {}
 
-    message = data.get("message", "").strip()
+    message = str(data.get("message", "") or "").strip()
     if not message:
         return JsonResponse({"success": False, "error": "Message is required."}, status=400)
+    if len(message) > 1000:
+        return JsonResponse({"success": False, "error": "Message exceeds maximum allowed length (1000 characters)."}, status=400)
 
     reply = answer_query(message)
     return JsonResponse({"success": True, "reply": reply})
@@ -103,25 +109,45 @@ def profile_view(request):
     return render(request, 'profile.html', {'user': request.user})
 
 
+def liveness_check_view(request):
+    """
+    Lightweight process liveness probe (zero database dependency).
+    Confirms the Django/Gunicorn web worker is alive and responding.
+    """
+    return JsonResponse({
+        "status": "alive",
+        "django_app": "online",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }, status=200)
+
+
 def health_check_view(request):
     """
-    Django Application & System Health Endpoint.
+    Django Application & System Readiness/Health Endpoint.
     Checks:
     1. Django process liveness
-    2. Database connectivity via real query execution (SELECT 1)
+    2. Database connectivity via real query execution (SELECT 1, self-healing once on stale pooled socket)
     3. Schema readiness (existence of required tables: users, cameras, alerts)
     4. Serverless environment persistence guarantees
     5. Canonical surveillance engine reachability & status
     """
     db_ok = False
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-            row = cursor.fetchone()
-            db_ok = (row is not None and row[0] == 1)
-    except Exception as e:
-        logger.error(f"Health check DB connection error: {type(e).__name__}: {e}")
-        db_ok = False
+    for attempt in range(2):
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                row = cursor.fetchone()
+                db_ok = (row is not None and row[0] == 1)
+            break
+        except (OperationalError, InterfaceError) as e:
+            if attempt == 0:
+                close_old_connections()
+                continue
+            logger.error(f"Health check DB connection error: {type(e).__name__}: {e}")
+            db_ok = False
+        except Exception as e:
+            logger.error(f"Health check DB connection error: {type(e).__name__}: {e}")
+            db_ok = False
 
     db_vendor = getattr(connection, 'vendor', 'unknown')
     tables = []
@@ -273,7 +299,18 @@ def react_app_view(request, *args, **kwargs):
     dist_index = settings.BASE_DIR / 'static' / 'dist' / 'index.html'
     if dist_index.exists():
         with open(dist_index, 'r', encoding='utf-8') as f:
-            return HttpResponse(f.read(), content_type='text/html')
+            response = HttpResponse(f.read(), content_type='text/html')
+            response["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com data:; "
+                "img-src 'self' data: blob: https: http:; "
+                "media-src 'self' blob: https: http:; "
+                "connect-src 'self' https: http: ws: wss:; "
+                "frame-ancestors 'none';"
+            )
+            return response
 
     # Fallback to templates/pages/dashboard/index.html if dist not yet built
     return dashboard_view(request)

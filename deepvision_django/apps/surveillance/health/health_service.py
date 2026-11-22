@@ -77,20 +77,23 @@ def update_camera_health(camera_id: int, status: str = None, stream_active: bool
         if last_error is not None:
             health["last_error"] = last_error
 
-        # When stream count drops to 0, deactivate active streaming flags
+        # When stream count drops to 0, only deactivate active flags if no active camera worker (e.g. browser ingest) is running
         if health["stream_count"] == 0:
-            health["stream_active"] = False
-            health["detection_active"] = False
-            health["tracking_active"] = False
-            health["fps"] = 0.0
-            health["ai_fps"] = None
-            health["inference_latency_ms"] = None
+            worker_running = False
             try:
                 from apps.surveillance.camera.registry import get_camera_registry
                 worker = get_camera_registry().get_active_worker(camera_id)
-                if not (worker and worker.running):
-                    health["status"] = "offline"
+                worker_running = bool(worker and worker.running)
             except Exception:
+                worker_running = False
+
+            if not worker_running:
+                health["stream_active"] = False
+                health["detection_active"] = False
+                health["tracking_active"] = False
+                health["fps"] = 0.0
+                health["ai_fps"] = None
+                health["inference_latency_ms"] = None
                 health["status"] = "offline"
 
         health["updated_at"] = now_iso

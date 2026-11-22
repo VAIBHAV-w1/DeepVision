@@ -143,7 +143,14 @@ class CameraWorker:
                 if not self.running:
                     self.capture = safe_open_video_capture(self.cap_source)
                     if not self.capture.isOpened():
-                        raise RuntimeError(f"Failed to open video capture source for camera {self.camera_id}.")
+                        err_detail = getattr(self.capture, "last_error", None)
+                        try:
+                            self.capture.release()
+                        except Exception:
+                            pass
+                        self.capture = None
+                        suffix = f" ({err_detail})" if err_detail else ""
+                        raise RuntimeError(f"Failed to open video capture source for camera {self.camera_id}{suffix}.")
                     probed = getattr(self.capture, "_probed_frame", None)
                     if probed is not None and getattr(probed, "size", 0) > 0:
                         now = time.time()
@@ -281,9 +288,19 @@ class CameraWorker:
                             try:
                                 from apps.cameras.models import Camera
                                 from apps.surveillance.camera.registry import get_camera_registry
+                                from apps.accounts.email_service import send_camera_offline_email
                                 bound = set(get_camera_registry().get_bound_camera_ids(self.physical_source_id))
                                 bound.add(self.camera_id)
-                                Camera.objects.filter(id__in=bound).exclude(status="offline").update(status="offline")
+                                transitioned = list(
+                                    Camera.objects.filter(id__in=bound).exclude(status="offline").values_list("id", flat=True)
+                                )
+                                if transitioned:
+                                    Camera.objects.filter(id__in=transitioned).update(status="offline")
+                                    for cid in transitioned:
+                                        try:
+                                            send_camera_offline_email(cid, reason="Max capture reconnect attempts exceeded.")
+                                        except Exception:
+                                            pass
                             except Exception:
                                 pass
                             break
@@ -336,16 +353,18 @@ class CameraWorker:
             self.running = False
             self.state = "OFFLINE"
             self.frame_condition.notify_all()
-        if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=2.0)
+        thread_ref = self.thread
+        if thread_ref and thread_ref.is_alive():
+            thread_ref.join(timeout=2.5)
+        if thread_ref is None or not thread_ref.is_alive():
             self.thread = None
-        with self.lock:
-            cap = self.capture
-            self.capture = None
-        if cap:
-            try:
-                cap.release()
-            except Exception:
-                pass
+            with self.lock:
+                cap = self.capture
+                self.capture = None
+            if cap:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
         print(f"[CAMERA_WORKER_RELEASED] camera_id={self.camera_id}")
 

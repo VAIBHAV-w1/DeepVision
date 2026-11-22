@@ -14,12 +14,9 @@ logger = logging.getLogger(__name__)
 def get_client_ip(request) -> str:
     if request is None:
         return ""
-    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    if xff:
-        ip = xff.split(",")[0].strip()
-    else:
-        ip = request.META.get("REMOTE_ADDR", "") or ""
-    return ip[:45]
+    from apps.core.rate_limiter import get_client_ip as _trusted_get_client_ip
+
+    return _trusted_get_client_ip(request)[:45]
 
 
 def log_audit(

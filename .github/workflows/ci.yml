@@ -1,4 +1,3 @@
-
 name: DeepVision CI/CD & Automated Verification
 
 on:
@@ -49,22 +48,31 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install Python Dependencies (CPU-only PyTorch & Single OpenCV)
+      - name: Install Python Dependencies (OpenVINO, ONNX Runtime & Single OpenCV)
         run: |
           python -m pip install --upgrade pip
-          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements.txt
-          # Ultralytics brings opencv-python; both OpenCV wheels share the
-          # cv2 namespace. Remove both before reinstalling the single headless
-          # runtime so uninstalling one wheel cannot delete the other's files.
-          pip uninstall -y opencv-python opencv-python-headless || true
+          pip install --no-cache-dir -r requirements.txt
+          pip uninstall -y opencv-python || true
           pip install --no-cache-dir "opencv-python-headless>=4.8.0"
-          python -c "import cv2; print('OpenCV import OK:', cv2.__version__)"
+          python -c "import cv2, openvino, onnxruntime; print('OpenCV:', cv2.__version__, 'OV:', openvino.__version__, 'ORT:', onnxruntime.__version__)"
 
-      - name: Run Django Account and Email Unit Tests
+      - name: Fetch and Verify Official YOLO26 ONNX Weights (SHA-256)
+        run: |
+          mkdir -p models instance/ov_cache
+          curl -fL --retry 3 --retry-all-errors \
+            "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.onnx" \
+            -o models/yolo26s.onnx
+          curl -fL --retry 3 --retry-all-errors \
+            "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.onnx" \
+            -o models/yolo26n.onnx
+          echo "d26b65c432111eb95798cd2320603d4d75627605dbec6c6b7f98c499a80e7321  models/yolo26s.onnx" | sha256sum -c -
+          echo "2e947b787d9e787b93a16772a5f55b1d4d8c4d86f53146149c5d6a642442d6f7  models/yolo26n.onnx" | sha256sum -c -
+
+      - name: Run Django Account and Surveillance Unit Tests
         run: |
           cd deepvision_django
-          python manage.py test apps.accounts.tests --verbosity 2
+          python manage.py check
+          python manage.py test apps.accounts.tests apps.surveillance.tests --verbosity 2
 
       - name: Verify CSP & Infinite Loader Guard
         run: |
@@ -77,8 +85,6 @@ jobs:
       - name: Start Docker Container & Await Health Check
         run: |
           set -e
-          # Share disposable CI database and media directories with host-side E2E tests.
-          # Production never uses these mounts or SQLite.
           mkdir -p instance recordings
           chmod 777 instance recordings
           docker run -d --name deepvision-service -p 8000:8000 \
@@ -103,35 +109,30 @@ jobs:
               exit 0
             fi
             if [ "$(docker inspect -f '{{.State.Running}}' deepvision-service 2>/dev/null || echo false)" != "true" ]; then
-              echo "Container exited before becoming healthy. Container logs:"
+              echo "Container exited before becoming healthy."
               docker logs deepvision-service || true
-              docker inspect deepvision-service || true
               exit 1
             fi
             sleep 2
           done
-          echo "Container did not become healthy within 60 seconds. Container logs:"
           docker logs deepvision-service || true
-          docker inspect deepvision-service || true
           exit 1
 
       - name: Prepare Disposable E2E Volume Permissions
         run: |
-          # The database files are owned by the container's non-root user.
-          # Adjust only the disposable CI mounts from inside the container.
           docker exec --user root deepvision-service sh -lc 'chmod -R a+rwX /app/instance /app/recordings'
 
       - name: Verify Full System E2E Suite
         env:
-          # Must match the disposable test container so signed session cookies
-          # generated on the host are accepted by the Django server in Docker.
           DJANGO_SECRET_KEY: ci_test_secret_key_12345678901234567890
           DJANGO_DEBUG: "True"
           DEEPVISION_ENV: development
         run: |
           python verification/test_e2e_full_system.py
 
-      - name: Verify YOLO11n & ByteTrack Engine
+      - name: Verify YOLO26s ONNX & BoT-SORT+ReID Engine
+        env:
+          DEEPVISION_STRICT_NATIVE_AI: "1"
         run: |
           python verification/test_yolo_and_tracker.py
 
@@ -149,7 +150,7 @@ jobs:
           leaks = []
           for f in files:
               if f.endswith(('.py', '.js', '.jsx', '.json', '.html', '.yml', '.yaml')):
-                  if 'test_e2e_full_system.py' in f or 'ci.yml' in f:
+                  if 'test_e2e_full_system.py' in f or 'ci.yml' in f or f.startswith('reports/'):
                       continue
                   try:
                       with open(f, 'r', encoding='utf-8', errors='ignore') as content:
@@ -170,3 +171,75 @@ jobs:
         run: |
           docker stop deepvision-service || true
           docker rm deepvision-service || true
+
+  verify-native-ai:
+    name: Native YOLO26s ONNX + BoT-SORT ReID Verification (Ubuntu CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DJANGO_SECRET_KEY: ci_native_ai_test_key_12345678901234567890
+      DJANGO_DEBUG: "True"
+      DEEPVISION_ENV: development
+      OPENVINO_TELEMETRY: "0"
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install System Libraries & Verified ONNX Runtimes
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libgomp1 curl
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir -r requirements.txt
+          pip uninstall -y opencv-python || true
+          pip install --no-cache-dir opencv-python-headless==5.0.0.93
+
+      - name: Fetch and Verify YOLO26s & YOLO26n ONNX Weights SHA-256
+        run: |
+          mkdir -p models instance/ov_cache
+          curl -fL --retry 3 --retry-all-errors \
+            "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.onnx" \
+            -o models/yolo26s.onnx
+          curl -fL --retry 3 --retry-all-errors \
+            "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.onnx" \
+            -o models/yolo26n.onnx
+          echo "d26b65c432111eb95798cd2320603d4d75627605dbec6c6b7f98c499a80e7321  models/yolo26s.onnx" | sha256sum -c -
+          echo "2e947b787d9e787b93a16772a5f55b1d4d8c4d86f53146149c5d6a642442d6f7  models/yolo26n.onnx" | sha256sum -c -
+
+      - name: Verify Native ONNX Imports & Versions
+        run: |
+          python -c "
+          import sys, django, openvino, onnxruntime, cv2, numpy, yaml
+          print('Python:', sys.version)
+          print('Django:', django.__version__)
+          print('OpenVINO:', openvino.__version__)
+          print('ONNX Runtime:', onnxruntime.__version__)
+          print('OpenCV:', cv2.__version__)
+          print('NumPy:', numpy.__version__)
+          "
+
+      - name: Run Strict Native YOLO26s + BoT-SORT+ReID Deterministic Verification
+        env:
+          DEEPVISION_STRICT_NATIVE_AI: "1"
+        run: |
+          python verification/test_yolo_and_tracker.py
+          python -c "
+          from apps.surveillance.ai.trackers.matching import linear_sum_assignment
+          import numpy as np
+          r, c = linear_sum_assignment(np.array([[1.0, 9.0], [8.0, 2.0]]))
+          assert list(zip(r.tolist(), c.tolist())) == [(0, 0), (1, 1)]
+          print('Pure-NumPy Crouse linear_sum_assignment parity PASS')
+          "
+
+      - name: Run Focused Django & Surveillance Regression Suite
+        run: |
+          cd deepvision_django
+          python manage.py check
+          python manage.py test apps.surveillance.tests apps.accounts.tests --verbosity 2

@@ -2,12 +2,16 @@
 Native DirectShow and HTTP/HTTPS MJPEG Camera Capture Layer.
 Provides safe, robust VideoCapture handles for OpenCV in Django.
 """
+import http.client
+import ipaddress
 import os
 import sys
 import time
 import socket
 import ssl
 import threading
+import urllib.error
+import urllib.parse
 import urllib.request
 try:
     import cv2
@@ -16,20 +20,156 @@ except (ImportError, Exception):
     cv2 = None
     np = None
 
-from apps.surveillance.camera.sources import mask_url_credentials
+from apps.surveillance.camera.sources import mask_url_credentials, validate_network_stream_url
 
 _hardware_webcam_lock = threading.Lock()
+_MAX_MJPEG_REDIRECTS = 3
+
+
+def _env_allows_self_signed_lan_camera() -> bool:
+    """Explicit opt-in flag for self-signed TLS certificates on private LAN cameras only."""
+    return os.getenv("DEEPVISION_ALLOW_SELF_SIGNED_LAN_CAMERA", "false").strip().lower() in ("true", "1", "yes")
+
+
+def _is_private_lan_ip(ip_obj) -> bool:
+    """Returns True strictly for non-loopback, non-link-local, non-multicast private LAN IPs (RFC1918 / ULA)."""
+    mapped = getattr(ip_obj, "ipv4_mapped", None)
+    candidate = mapped if mapped is not None else ip_obj
+    return bool(
+        candidate.is_private
+        and not candidate.is_loopback
+        and not candidate.is_link_local
+        and not candidate.is_unspecified
+        and not candidate.is_multicast
+        and not candidate.is_reserved
+    )
+
+
+def _is_authorized_private_lan_url(url: str) -> bool:
+    """
+    Checks whether url passes full SSRF policy AND resolves strictly to a private LAN IP.
+    Prevents relaxed TLS contexts from ever being applied to public internet hosts or unsafe destinations.
+    """
+    try:
+        validated = validate_network_stream_url(url)
+    except Exception:
+        return False
+
+    parsed = urllib.parse.urlsplit(validated)
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        return False
+
+    try:
+        ip_obj = ipaddress.ip_address(host)
+        return _is_private_lan_ip(ip_obj)
+    except ValueError:
+        pass
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False
+    if not infos:
+        return False
+
+    saw_ip = False
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr or not sockaddr[0]:
+            continue
+        raw_ip = str(sockaddr[0]).split("%", 1)[0]
+        try:
+            resolved_ip = ipaddress.ip_address(raw_ip)
+        except ValueError:
+            return False
+        if not _is_private_lan_ip(resolved_ip):
+            return False
+        saw_ip = True
+    return saw_ip
+
+
+class _SafeMjpegRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Validates every HTTP redirect destination against DeepVision's SSRF network policy."""
+    max_redirects = _MAX_MJPEG_REDIRECTS
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        resolved_url = urllib.parse.urljoin(req.full_url, str(newurl))
+        parsed_next = urllib.parse.urlsplit(resolved_url)
+        scheme = (parsed_next.scheme or "").lower()
+        if scheme not in ("http", "https"):
+            raise ValueError(f"Security Error: Prohibited HTTP redirect protocol '{scheme or 'none'}'.")
+
+        validated_url = validate_network_stream_url(resolved_url)
+
+        hops = int(getattr(req, "_dv_redirect_hops", 0)) + 1
+        if hops > self.max_redirects:
+            raise urllib.error.HTTPError(
+                validated_url,
+                code,
+                f"Exceeded maximum safe HTTP redirects ({self.max_redirects}).",
+                headers,
+                fp,
+            )
+
+        next_req = super().redirect_request(req, fp, code, msg, headers, validated_url)
+        if next_req is None:
+            return None
+
+        orig_parsed = urllib.parse.urlsplit(req.full_url)
+        if (orig_parsed.scheme.lower(), orig_parsed.netloc.lower()) != (
+            parsed_next.scheme.lower(),
+            parsed_next.netloc.lower(),
+        ):
+            next_req.remove_header("Authorization")
+            next_req.remove_header("Proxy-authorization")
+
+        next_req._dv_redirect_hops = hops
+        return next_req
+
+
+class _ScopedMjpegHTTPSHandler(urllib.request.HTTPSHandler):
+    """
+    Enforces strict TLS certificate verification by default, allowing self-signed certs
+    ONLY when explicitly opted in AND scoped per-request strictly to private LAN hosts.
+    """
+    def __init__(self, allow_self_signed_lan: bool = False):
+        self.allow_self_signed_lan = bool(allow_self_signed_lan)
+        self._strict_ctx = ssl.create_default_context()
+        self._relaxed_ctx = None
+        if self.allow_self_signed_lan:
+            relaxed = ssl.create_default_context()
+            relaxed.check_hostname = False
+            relaxed.verify_mode = ssl.CERT_NONE
+            self._relaxed_ctx = relaxed
+        super().__init__(context=self._strict_ctx)
+
+    def https_open(self, req):
+        chosen_ctx = self._strict_ctx
+        if (
+            self.allow_self_signed_lan
+            and self._relaxed_ctx is not None
+            and _is_authorized_private_lan_url(req.full_url)
+        ):
+            chosen_ctx = self._relaxed_ctx
+        return self.do_open(http.client.HTTPSConnection, req, context=chosen_ctx)
 
 
 class HttpMjpegCapture:
     """
     Standard-compliant video capture for HTTP/HTTPS MJPEG network streams.
     Implements isOpened(), read(), get(), and release() matching cv2.VideoCapture.
-    Provides narrowly scoped SSL context for self-signed certificates.
+    Revalidates every HTTP redirect destination and restricts relaxed TLS strictly
+    to explicitly opted-in private LAN camera targets.
     """
-    def __init__(self, url, timeout=2.5):
+    def __init__(self, url, timeout=2.5, allow_self_signed=None):
         self.url = str(url)
         self.timeout = float(timeout) if timeout is not None else 2.5
+        self.allow_self_signed = (
+            _env_allows_self_signed_lan_camera()
+            if allow_self_signed is None
+            else bool(allow_self_signed)
+        )
         self.response = None
         self._opened = False
         self._http_connected = False
@@ -45,22 +185,25 @@ class HttpMjpegCapture:
         self._open_stream()
 
     def _open_stream(self):
-        ctx = None
-        if isinstance(self.url, str) and self.url.lower().startswith("https://"):
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-
-        req = urllib.request.Request(
-            self.url,
-            headers={
-                "User-Agent": "DeepVision-Surveillance/1.0",
-                "Accept": "multipart/x-mixed-replace, image/*, */*",
-                "Connection": "keep-alive"
-            }
-        )
         try:
-            self.response = urllib.request.urlopen(req, context=ctx, timeout=self.timeout)
+            scheme = (urllib.parse.urlsplit(self.url).scheme or "").lower()
+            if scheme not in ("http", "https"):
+                raise ValueError(f"Unsupported HTTP MJPEG scheme: {scheme or 'none'}")
+            validated_url = validate_network_stream_url(self.url)
+
+            req = urllib.request.Request(
+                validated_url,
+                headers={
+                    "User-Agent": "DeepVision-Surveillance/1.0",
+                    "Accept": "multipart/x-mixed-replace, image/*, */*",
+                    "Connection": "keep-alive",
+                },
+            )
+            opener = urllib.request.build_opener(
+                _SafeMjpegRedirectHandler(),
+                _ScopedMjpegHTTPSHandler(allow_self_signed_lan=self.allow_self_signed),
+            )
+            self.response = opener.open(req, timeout=self.timeout)
             status = getattr(self.response, "status", 200)
             self._http_status = status
             if status == 200:
@@ -278,14 +421,15 @@ def safe_open_video_capture(capture_source, timeout=None):
     else:
         is_https = isinstance(capture_source, str) and capture_source.lower().startswith("https://")
         is_http = isinstance(capture_source, str) and capture_source.lower().startswith("http://")
-        is_rtsp = isinstance(capture_source, str) and capture_source.lower().startswith("rtsp://")
+        is_rtsp = isinstance(capture_source, str) and capture_source.lower().startswith(("rtsp://", "rtsps://"))
 
         if is_rtsp:
+            os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;4000000")
             import urllib.parse
             try:
                 parsed = urllib.parse.urlsplit(capture_source)
                 host = parsed.hostname
-                port = parsed.port or 554
+                port = parsed.port or (322 if capture_source.lower().startswith("rtsps://") else 554)
                 if host:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(2.5)
@@ -298,7 +442,7 @@ def safe_open_video_capture(capture_source, timeout=None):
                         except Exception:
                             pass
                         print(f"[ERROR] Network source {mask_url_credentials(capture_source)} unreachable: {probe_err}")
-                        return cv2.VideoCapture()
+                        return DummyVideoCapture(last_error=str(probe_err))
             except Exception:
                 pass
 

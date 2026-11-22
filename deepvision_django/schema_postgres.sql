@@ -1,7 +1,7 @@
 -- ==============================================================================
 -- DeepVision 1.1.0 PostgreSQL / Supabase Canonical Schema
 -- Target: Supabase Free PostgreSQL / PostgreSQL 14+
--- Translated from canonical SQLite schema (18 tables, 11 secondary indexes)
+-- Translated from canonical SQLite schema (18 tables, 22 secondary indexes)
 -- ==============================================================================
 
 BEGIN;
@@ -103,6 +103,12 @@ CREATE TABLE IF NOT EXISTS alerts (
     response_state VARCHAR(20) DEFAULT 'NEW'
 );
 
+CREATE INDEX IF NOT EXISTS ix_alerts_camera_id ON alerts (camera_id);
+CREATE INDEX IF NOT EXISTS ix_alerts_detected_at ON alerts (detected_at);
+CREATE INDEX IF NOT EXISTS ix_alerts_severity ON alerts (severity);
+CREATE INDEX IF NOT EXISTS ix_alerts_status ON alerts (status);
+CREATE INDEX IF NOT EXISTS ix_alerts_user_id ON alerts (user_id);
+
 -- 6. Audit Logs
 CREATE TABLE IF NOT EXISTS audit_logs (
     id SERIAL PRIMARY KEY,
@@ -174,6 +180,10 @@ CREATE TABLE IF NOT EXISTS evidence (
     duration_seconds DOUBLE PRECISION,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS ix_evidence_alert_id ON evidence (alert_id);
+CREATE INDEX IF NOT EXISTS ix_evidence_created_at ON evidence (created_at);
+CREATE INDEX IF NOT EXISTS ix_evidence_type ON evidence (evidence_type);
 
 -- 10. Incident Cases
 CREATE TABLE IF NOT EXISTS incident_cases (
@@ -269,14 +279,21 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
 );
 
 -- 15. Notifications
+-- NOTE: fk_notifications_alert is attached AFTER historical import via
+-- deepvision_django/schema_postgres_post_import.sql (and at the end of
+-- deepvision_postgres_data_remediated.sql) using NOT VALID so the 15 legacy
+-- orphan notifications (IDs 3997-4011 referencing purged alerts 5007-5026) are
+-- preserved untouched while new inserts and alert deletions remain enforced.
 CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    alert_id INTEGER NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+    alert_id INTEGER,
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     read_at TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS ix_notifications_user_unread ON notifications (user_id, is_read);
 
 -- 16. Products
 CREATE TABLE IF NOT EXISTS products (
@@ -310,6 +327,8 @@ CREATE TABLE IF NOT EXISTS recordings (
 );
 
 CREATE INDEX IF NOT EXISTS ix_recordings_camera_id ON recordings (camera_id);
+CREATE INDEX IF NOT EXISTS ix_recordings_started_at ON recordings (started_at);
+CREATE INDEX IF NOT EXISTS ix_recordings_status ON recordings (status);
 CREATE INDEX IF NOT EXISTS ix_recordings_user_id ON recordings (user_id);
 
 -- 18. Restricted Zones

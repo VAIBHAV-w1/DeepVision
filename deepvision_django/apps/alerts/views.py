@@ -8,9 +8,10 @@ without altering database schema or duplicating the surveillance alert-generatio
 import logging
 from datetime import datetime
 from django.shortcuts import render, get_object_or_404, redirect
-from django.http import Http404, JsonResponse
+from django.http import Http404, HttpResponseForbidden, JsonResponse
 from django.contrib import messages
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.cache import never_cache
 from django.core.paginator import Paginator
@@ -130,6 +131,10 @@ def alert_acknowledge_view(request, alert_id):
     Transitions an alert from 'new' to 'acknowledged'.
     Modifies only existing SQLite columns.
     """
+    if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+        if request.headers.get('Accept') == 'application/json' or request.content_type == 'application/json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
+        return HttpResponseForbidden("Permission denied.")
     alert = get_object_or_404(Alert, id=alert_id, user_id=request.user.id)
     if alert.status == 'new':
         alert.status = 'acknowledged'
@@ -151,7 +156,10 @@ def alert_acknowledge_view(request, alert_id):
 
     if request.headers.get('Accept') == 'application/json' or request.content_type == 'application/json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({"status": "ok", "success": True, "alert_status": alert.status, "message": msg})
-    return redirect(request.META.get('HTTP_REFERER') or f'/alerts/{alert_id}/')
+    ref = request.META.get('HTTP_REFERER')
+    fallback = f'/alerts/{alert_id}/'
+    target = ref if (ref and url_has_allowed_host_and_scheme(ref, allowed_hosts={request.get_host()})) else fallback
+    return redirect(target)
 
 
 @require_POST
@@ -161,6 +169,10 @@ def alert_resolve_view(request, alert_id):
     Transitions an alert from 'new' or 'acknowledged' to 'resolved'.
     Modifies only existing SQLite columns.
     """
+    if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+        if request.headers.get('Accept') == 'application/json' or request.content_type == 'application/json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
+        return HttpResponseForbidden("Permission denied.")
     alert = get_object_or_404(Alert, id=alert_id, user_id=request.user.id)
     if alert.status in ('new', 'acknowledged'):
         alert.status = 'resolved'
@@ -182,7 +194,10 @@ def alert_resolve_view(request, alert_id):
 
     if request.headers.get('Accept') == 'application/json' or request.content_type == 'application/json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({"status": "ok", "success": True, "alert_status": alert.status, "message": msg})
-    return redirect(request.META.get('HTTP_REFERER') or f'/alerts/{alert_id}/')
+    ref = request.META.get('HTTP_REFERER')
+    fallback = f'/alerts/{alert_id}/'
+    target = ref if (ref and url_has_allowed_host_and_scheme(ref, allowed_hosts={request.get_host()})) else fallback
+    return redirect(target)
 
 
 # =========================================================================

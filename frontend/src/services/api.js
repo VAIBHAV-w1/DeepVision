@@ -7,131 +7,221 @@ import { getCsrfToken, fetchCsrfToken, setCsrfToken } from '../utils/csrf';
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 
+const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504]);
+const inFlightMutations = new Map();
+let isBackendUnavailable = false;
+
+function emitBackendStatus(detail) {
+  if (detail && detail.available === false) {
+    isBackendUnavailable = true;
+  } else if (detail && detail.available === true) {
+    if (!isBackendUnavailable) {
+      return;
+    }
+    isBackendUnavailable = false;
+  }
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('backend:status', { detail }));
+  }
+}
+
 async function request(endpoint, options = {}) {
   const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
   const timeoutMs = options.timeout || 25000;
+  const method = (options.method || 'GET').toUpperCase();
+  const isIdempotentRead = method === 'GET' || method === 'HEAD';
+  const maxRetries = typeof options.maxRetries === 'number'
+    ? options.maxRetries
+    : (isIdempotentRead ? 4 : 0);
 
   const headers = {
     'Accept': 'application/json',
     ...(options.headers || {}),
   };
 
-  const method = (options.method || 'GET').toUpperCase();
-
+  let bodyToSend = options.body;
   // If sending JSON body, set Content-Type
-  if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
+  if (bodyToSend && typeof bodyToSend === 'object' && !(bodyToSend instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
-    options.body = JSON.stringify(options.body);
+    bodyToSend = JSON.stringify(bodyToSend);
   }
 
-  // Include CSRF Token for mutating methods BEFORE starting the request timeout timer
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-    let csrfToken = getCsrfToken();
-    if (!csrfToken) {
-      csrfToken = await fetchCsrfToken();
-    }
-    if (csrfToken) {
-      headers['X-CSRFToken'] = csrfToken;
-    }
+  // Prevent duplicate concurrent non-idempotent mutations (excluding high-frequency ingest frames and FormData uploads)
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  const skipDedup = endpoint.includes('/ingest-frame') || bodyToSend instanceof FormData;
+  const dedupKey = (isMutation && !skipDedup)
+    ? `${method}:${url}:${typeof bodyToSend === 'string' ? bodyToSend : ''}`
+    : null;
+
+  if (dedupKey && inFlightMutations.has(dedupKey)) {
+    return inFlightMutations.get(dedupKey);
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    let response = await fetch(url, {
-      ...options,
-      signal: options.signal || controller.signal,
-      method,
-      headers,
-      credentials: 'include',
-    });
-
-    // Automatic single same-origin retry only for idempotent GET requests when backend gateway returns 502/504
-    if (method === 'GET' && (response.status === 502 || response.status === 504) && !options._retried) {
-      await new Promise((r) => setTimeout(r, 1200));
-      response = await fetch(url, {
-        ...options,
-        _retried: true,
-        signal: options.signal || controller.signal,
-        method,
-        headers,
-        credentials: 'include',
-      });
+  const executeAttempt = async () => {
+    // Include CSRF Token for mutating methods BEFORE starting the request timeout timer
+    if (isMutation) {
+      let csrfToken = getCsrfToken();
+      if (!csrfToken) {
+        csrfToken = await fetchCsrfToken();
+      }
+      if (csrfToken) {
+        headers['X-CSRFToken'] = csrfToken;
+      }
     }
 
-    clearTimeout(timeoutId);
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        const backoffMs = Math.min(8000, 1000 * (2 ** (attempt - 1)));
+        emitBackendStatus({
+          available: false,
+          waking: true,
+          retrying: true,
+          attempt,
+          maxRetries,
+          message: `Backend server is waking up or temporarily unreachable. Retrying automatically (${attempt}/${maxRetries})...`,
+        });
+        await new Promise((r) => setTimeout(r, backoffMs));
+      }
 
-    // Handle unauthenticated response
-    if (response.status === 401 && !url.includes('/api/auth/me')) {
-      // Session expired or login required
-      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
-    }
-
-    // Special clean handling for auth/me unauthenticated state
-    if (response.status === 401 && url.includes('/api/auth/me')) {
-      return { authenticated: false, user: null };
-    }
-
-    // Parse JSON response
-    let data = null;
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      try {
-        data = await response.json();
-        if (data && typeof data === 'object' && data.csrfToken) {
-          setCsrfToken(data.csrfToken);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      let onCallerAbort = null;
+      if (options.signal) {
+        if (options.signal.aborted) {
+          clearTimeout(timeoutId);
+          throw new DOMException('Aborted', 'AbortError');
         }
-      } catch (e) {
-        data = null;
+        onCallerAbort = () => controller.abort();
+        options.signal.addEventListener('abort', onCallerAbort, { once: true });
       }
-    } else {
-      data = await response.text();
-    }
 
-    if (!response.ok) {
-      let errorMsg;
-      if (data && typeof data === 'object' && (data.error || data.message || data.detail)) {
-        errorMsg = data.error || data.message || data.detail;
-      } else if (response.status === 502 || response.status === 504) {
-        errorMsg = 'Backend server is waking up or temporarily unreachable (HTTP ' + response.status + '). Please retry in a few seconds.';
-      } else if (response.status === 503) {
-        errorMsg = 'Database or service temporarily unavailable. Please retry in a few moments.';
-      } else if (response.status === 403 && typeof data === 'string' && data.includes('CSRF')) {
-        setCsrfToken('');
-        errorMsg = 'Security validation failed (CSRF token expired). Please refresh the page.';
-      } else if (response.status === 401) {
-        errorMsg = 'Authentication required. Please sign in to proceed.';
-      } else {
-        errorMsg = `Request failed (${response.status}). Please try again later.`;
+      try {
+        const fetchOptions = {
+          ...options,
+          body: bodyToSend,
+          signal: controller.signal,
+          method,
+          headers,
+          credentials: 'include',
+        };
+        delete fetchOptions.timeout;
+        delete fetchOptions.maxRetries;
+
+        const response = await fetch(url, fetchOptions);
+        clearTimeout(timeoutId);
+
+        if (isIdempotentRead && TRANSIENT_GATEWAY_STATUSES.has(response.status) && attempt < maxRetries) {
+          continue;
+        }
+
+        // Backend answered cleanly if not a gateway/availability failure
+        if (!TRANSIENT_GATEWAY_STATUSES.has(response.status)) {
+          emitBackendStatus({ available: true, waking: false, retrying: false, status: response.status });
+        }
+
+        // Handle unauthenticated response
+        if (response.status === 401 && !url.includes('/api/auth/me')) {
+          window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+        }
+
+        // Special clean handling for auth/me unauthenticated state
+        if (response.status === 401 && url.includes('/api/auth/me')) {
+          return { authenticated: false, user: null };
+        }
+
+        // Parse JSON response
+        let data = null;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          try {
+            data = await response.json();
+            if (data && typeof data === 'object' && data.csrfToken) {
+              setCsrfToken(data.csrfToken);
+            }
+          } catch (e) {
+            data = null;
+          }
+        } else {
+          data = await response.text();
+        }
+
+        if (!response.ok) {
+          let errorMsg;
+          if (data && typeof data === 'object' && (data.error || data.message || data.detail)) {
+            errorMsg = data.error || data.message || data.detail;
+          } else if (response.status === 502 || response.status === 504) {
+            errorMsg = 'Backend server is waking up or temporarily unreachable (HTTP ' + response.status + '). Please retry in a few seconds.';
+            emitBackendStatus({ available: false, waking: true, retrying: false, status: response.status, message: errorMsg });
+          } else if (response.status === 503) {
+            errorMsg = 'Database or service temporarily unavailable. Please retry in a few moments.';
+            emitBackendStatus({ available: false, waking: true, retrying: false, status: 503, message: errorMsg });
+          } else if (response.status === 403 && typeof data === 'string' && data.includes('CSRF')) {
+            setCsrfToken('');
+            errorMsg = 'Security validation failed (CSRF token expired). Please refresh the page.';
+          } else if (response.status === 401) {
+            errorMsg = 'Authentication required. Please sign in to proceed.';
+          } else {
+            errorMsg = `Request failed (${response.status}). Please try again later.`;
+          }
+          const error = new Error(errorMsg);
+          error.status = response.status;
+          error.data = data;
+          error.isTransientUnavailable = TRANSIENT_GATEWAY_STATUSES.has(response.status);
+          throw error;
+        }
+
+        return data;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        const callerAborted = Boolean(options.signal && options.signal.aborted);
+        const isTransientNetError = !callerAborted && (err.name === 'AbortError' || err.name === 'TypeError');
+        if (isIdempotentRead && isTransientNetError && attempt < maxRetries) {
+          continue;
+        }
+        if (err.name === 'AbortError') {
+          const timeoutErr = new Error(`Request timed out after ${timeoutMs}ms: ${endpoint}`);
+          timeoutErr.name = 'TimeoutError';
+          timeoutErr.status = 408;
+          timeoutErr.isTransientUnavailable = !callerAborted;
+          if (!callerAborted) {
+            emitBackendStatus({ available: false, waking: true, retrying: false, status: 408, message: 'Backend server is taking longer than expected to respond.' });
+          }
+          throw timeoutErr;
+        }
+        if (err.name === 'TypeError') {
+          emitBackendStatus({ available: false, waking: true, retrying: false, status: 0, message: 'Unable to reach backend server. Retrying connection...' });
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeoutId);
+        if (options.signal && onCallerAbort) {
+          options.signal.removeEventListener('abort', onCallerAbort);
+        }
       }
-      const error = new Error(errorMsg);
-      error.status = response.status;
-      error.data = data;
-      throw error;
     }
+  };
 
-    return data;
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (err.name === 'AbortError') {
-      const timeoutErr = new Error(`Request timed out after ${timeoutMs}ms: ${endpoint}`);
-      timeoutErr.name = 'TimeoutError';
-      timeoutErr.status = 408;
-      throw timeoutErr;
-    }
-    throw err;
+  const promise = executeAttempt();
+  if (dedupKey) {
+    inFlightMutations.set(dedupKey, promise);
+    promise.finally(() => {
+      if (inFlightMutations.get(dedupKey) === promise) {
+        inFlightMutations.delete(dedupKey);
+      }
+    });
   }
+  return promise;
 }
 
 export const api = {
   system: {
-    health: () => request('/api/health/', { timeout: 5000 }),
+    health: (options = {}) => request('/api/health/', { timeout: 12000, maxRetries: 2, ...options }),
+    live: (options = {}) => request('/api/health/live/', { timeout: 8000, maxRetries: 1, ...options }),
   },
 
   // Authentication
   auth: {
-    me: (options = {}) => request('/api/auth/me/', { timeout: 6000, ...options }),
+    me: (options = {}) => request('/api/auth/me/', { timeout: 12000, maxRetries: 3, ...options }),
     csrf: () => request('/api/auth/csrf/'),
     login: (email, password) => request('/api/auth/login/', { method: 'POST', body: { email, password } }),
     verifyLoginOtp: (email, otp) => request('/api/auth/verify-login-otp/', { method: 'POST', body: { email, otp } }),
@@ -273,6 +363,10 @@ export const api = {
       return request(`/api/notifications/${q ? '?' + q : ''}`);
     },
     unreadCount: () => request('/api/notifications/unread-count/'),
+    getPreferences: () => request('/api/notifications/preferences/'),
+    savePreferences: (data) => request('/api/notifications/preferences/', { method: 'POST', body: data }),
+    getDeliveryStatus: (limit = 30) => request(`/api/notifications/delivery-status/?limit=${limit}`),
+    sendTestEmail: (recipient = '') => request('/api/notifications/test-email/', { method: 'POST', body: recipient ? { recipient } : {} }),
     markRead: (id) => request(`/notifications/${id}/read/`, { method: 'POST' }),
     markAsRead: (id) => request(`/notifications/${id}/read/`, { method: 'POST' }),
     markAllRead: () => request('/notifications/read-all/', { method: 'POST' }),

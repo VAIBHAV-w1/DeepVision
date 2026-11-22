@@ -92,14 +92,14 @@ export function Legal({ initialTab = 'privacy', onNavigate }) {
             A. Real-Time Neural Processing
           </h3>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginBottom: '1.25rem' }}>
-            When running in Tracking &amp; Detection mode, video frames are processed locally or within authorized serverless boundaries using YOLO11n object detection and ByteTrack tracking. Extracted bounding boxes and trajectories are rendered in-stream. No biometric facial recognition data or biometric templates are stored unless explicitly configured by the site administrator.
+            When running in Detection &amp; Tracking mode, video frames are processed within the authorized server runtime using YOLO26s ONNX object detection and BoT-SORT+ReID tracking (or configurable ByteTrack/OC-SORT trackers). Extracted bounding boxes and track IDs are rendered in-stream without storing biometric facial recognition templates.
           </p>
 
           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
             B. Video Recordings &amp; Forensic Evidence
           </h3>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginBottom: '1.25rem' }}>
-            Continuous recordings and incident snapshots captured by operators or trigger rules are persisted into designated encrypted storage volumes. Media files are accessible only to authenticated operators assigned to the respective surveillance channels.
+            Manual recordings and incident evidence snapshots/clips are stored in access-controlled server volumes (or configured cloud object storage buckets). Media assets are served exclusively through authenticated, tenant-scoped endpoints and remain stored until deleted by an authorized operator or capacity-managed by host storage policies.
           </p>
 
           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
@@ -169,10 +169,10 @@ export function Legal({ initialTab = 'privacy', onNavigate }) {
                   <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', color: 'var(--text-main)' }}>deepvision_django_session</td>
                   <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>HTTP Cookie (Signed)</td>
                   <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>Maintains operator authenticated session state</td>
-                  <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>Session / 14 Days</td>
+                  <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>Session / 30 Days</td>
                 </tr>
                 <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                  <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', color: 'var(--text-main)' }}>csrftoken</td>
+                  <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', color: 'var(--text-main)' }}>deepvision_django_csrftoken</td>
                   <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>HTTP Cookie</td>
                   <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>Cross-Site Request Forgery (CSRF) protection token</td>
                   <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>1 Year</td>
@@ -186,7 +186,7 @@ export function Legal({ initialTab = 'privacy', onNavigate }) {
                 <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
                   <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', color: 'var(--text-main)' }}>deepvision_lang</td>
                   <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>localStorage</td>
-                  <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>Stores selected operator interface language (22 languages)</td>
+                  <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>Stores selected operator interface language (English, Hindi, Kannada)</td>
                   <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>Persistent</td>
                 </tr>
               </tbody>

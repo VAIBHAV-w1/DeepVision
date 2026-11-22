@@ -9,8 +9,8 @@ export function AuthProvider({ children }) {
 
   const checkAuth = async () => {
     try {
-      // Verify active session with backend (with explicit 5-second timeout)
-      const res = await authService.me({ timeout: 5000 }).catch(() => null);
+      // Verify active session with backend (allows bounded retries during Render cold-start wakeup)
+      const res = await authService.me({ timeout: 15000, maxRetries: 3 }).catch(() => null);
       if (res && res.authenticated && res.user) {
         setUser(res.user);
         return;
@@ -25,7 +25,7 @@ export function AuthProvider({ children }) {
   };
 
   useEffect(() => {
-    // Hard ceiling: ensure loading state is never stuck longer than 5 seconds under any condition
+    // Hard ceiling: ensure loading state is never stuck longer than 20 seconds under any condition
     const startupTimeout = setTimeout(() => {
       setLoading((prev) => {
         if (prev) {
@@ -34,7 +34,7 @@ export function AuthProvider({ children }) {
         }
         return prev;
       });
-    }, 5000);
+    }, 20000);
 
     checkAuth().finally(() => {
       clearTimeout(startupTimeout);
@@ -44,10 +44,28 @@ export function AuthProvider({ children }) {
       setUser(null);
     };
 
+    let syncingMe = false;
+    const handleBackendStatus = (ev) => {
+      if (ev?.detail?.available === true && !syncingMe) {
+        // Edge-triggered recovery: re-verify session silently at most once per recovery transition
+        syncingMe = true;
+        authService.me({ timeout: 8000, maxRetries: 0 })
+          .then((res) => {
+            if (res && res.authenticated && res.user) {
+              setUser(res.user);
+            }
+          })
+          .catch(() => {})
+          .finally(() => { syncingMe = false; });
+      }
+    };
+
     window.addEventListener('auth:unauthorized', handleUnauthorized);
+    window.addEventListener('backend:status', handleBackendStatus);
     return () => {
       clearTimeout(startupTimeout);
       window.removeEventListener('auth:unauthorized', handleUnauthorized);
+      window.removeEventListener('backend:status', handleBackendStatus);
     };
   }, []);
 
@@ -59,33 +77,8 @@ export function AuthProvider({ children }) {
     return res;
   };
 
-  const loginAsDemo = async () => {
-    const fallbackUser = {
-      id: 9999,
-      username: 'soc_operator_demo',
-      email: 'operator@deepvision.internal',
-      first_name: 'SOC',
-      last_name: 'Operator',
-      role: 'operator',
-      is_staff: false,
-    };
-    try {
-      localStorage.setItem('deepvision_demo_session', 'true');
-    } catch (_) {}
-    try {
-      const res = await authService.demoLogin();
-      if (res && res.user) {
-        setUser(res.user);
-        return res.user;
-      }
-    } catch (_) {}
-    setUser(fallbackUser);
-    return fallbackUser;
-  };
-
   const logout = async () => {
     try {
-      localStorage.removeItem('deepvision_demo_session');
       await authService.logout();
     } finally {
       setUser(null);
@@ -99,7 +92,6 @@ export function AuthProvider({ children }) {
         isAuthenticated: !!user,
         loading,
         login,
-        loginAsDemo,
         logout,
         checkAuth,
       }}

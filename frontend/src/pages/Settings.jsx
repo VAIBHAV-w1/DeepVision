@@ -25,13 +25,25 @@ export function Settings({ onNavigate }) {
     return localStorage.getItem("deepvision_theme") || "dark";
   });
 
-  // 3. Notification Preferences
+  // 3. Notification Preferences (Client Audio/Banner + Backend Email Preferences & Delivery Status)
   const [soundAlerts, setSoundAlerts] = useState(() => {
     return localStorage.getItem("deepvision_sound_alerts") !== "false";
   });
   const [bannerAlerts, setBannerAlerts] = useState(() => {
     return localStorage.getItem("deepvision_banner_alerts") !== "false";
   });
+  const [emailPrefs, setEmailPrefs] = useState({
+    enabled: true,
+    notify_critical: true,
+    notify_high: true,
+    notify_medium: false,
+    notify_restricted_entry: true,
+    notify_loitering: true,
+    notify_unusual_movement: true,
+    notify_abandoned_object: true,
+  });
+  const [deliveryStatus, setDeliveryStatus] = useState(null);
+  const [testingEmail, setTestingEmail] = useState(false);
 
   // 4. Camera & Detection Settings (persisted to SQLite DetectionProfile + live InferenceRegistry)
   const [confThreshold, setConfThreshold] = useState(() => {
@@ -102,6 +114,24 @@ export function Settings({ onNavigate }) {
       }
     };
 
+    const loadNotificationSettings = async () => {
+      try {
+        const [prefRes, dlvRes] = await Promise.allSettled([
+          api.notifications.getPreferences(),
+          api.notifications.getDeliveryStatus(10),
+        ]);
+        if (!mounted) return;
+        if (prefRes.status === "fulfilled" && prefRes.value?.preferences) {
+          setEmailPrefs((prev) => ({ ...prev, ...prefRes.value.preferences }));
+        }
+        if (dlvRes.status === "fulfilled" && dlvRes.value) {
+          setDeliveryStatus(dlvRes.value);
+        }
+      } catch {
+        // non-blocking
+      }
+    };
+
     const loadEngineHealth = async () => {
       try {
         const [survRes, sysRes] = await Promise.allSettled([
@@ -148,11 +178,27 @@ export function Settings({ onNavigate }) {
     };
 
     loadBackendSettings();
+    loadNotificationSettings();
     loadEngineHealth();
     return () => {
       mounted = false;
     };
   }, []);
+
+  const handleSendTestEmail = async () => {
+    if (testingEmail) return;
+    setTestingEmail(true);
+    try {
+      const res = await api.notifications.sendTestEmail();
+      addToast(res?.message || t("settings.testEmailSent", "Test email dispatched"), res?.success ? "success" : "warning");
+      const dlv = await api.notifications.getDeliveryStatus(10);
+      if (dlv) setDeliveryStatus(dlv);
+    } catch (err) {
+      addToast(err?.message || t("settings.testEmailFailed", "Failed to send test email"), "error");
+    } finally {
+      setTestingEmail(false);
+    }
+  };
 
   const handleSaveAll = async () => {
     setSaving(true);
@@ -178,10 +224,13 @@ export function Settings({ onNavigate }) {
     );
 
     try {
-      await api.settings.saveDetection({
-        confidence_threshold: confThreshold,
-        rules: anomalyRules,
-      });
+      await Promise.all([
+        api.settings.saveDetection({
+          confidence_threshold: confThreshold,
+          rules: anomalyRules,
+        }),
+        api.notifications.savePreferences(emailPrefs),
+      ]);
       addToast(
         t(
           "settings.savedSuccess",
@@ -711,6 +760,60 @@ export function Settings({ onNavigate }) {
                 )}
               </span>
             </label>
+
+            <div style={{ borderTop: "1px solid var(--border-color, #1A2436)", paddingTop: "10px", marginTop: "4px", display: "flex", flexDirection: "column", gap: "8px" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", fontSize: "0.82rem", fontWeight: 700, color: "var(--text-main, #F8FAFC)" }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(emailPrefs.enabled)}
+                  onChange={(e) => setEmailPrefs((p) => ({ ...p, enabled: e.target.checked }))}
+                  data-testid="email-alerts-enabled"
+                  style={{ width: "16px", height: "16px", accentColor: "var(--dv-cyan-500, #00E5FF)" }}
+                />
+                <span>{t("settings.emailAlertsEnabled", "Enable email notifications for security alerts")}</span>
+              </label>
+
+              {emailPrefs.enabled && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "6px", paddingLeft: "6px", fontSize: "0.78rem", color: "var(--text-secondary, #94A3B8)" }}>
+                  {[
+                    { k: "notify_critical", lbl: t("settings.notifyCritical", "Critical severity") },
+                    { k: "notify_high", lbl: t("settings.notifyHigh", "High severity") },
+                    { k: "notify_medium", lbl: t("settings.notifyMedium", "Medium severity") },
+                    { k: "notify_restricted_entry", lbl: t("settings.notifyRestricted", "Restricted-zone entry") },
+                    { k: "notify_loitering", lbl: t("settings.notifyLoitering", "Loitering alerts") },
+                    { k: "notify_unusual_movement", lbl: t("settings.notifyMovement", "Rapid/unusual motion") },
+                    { k: "notify_abandoned_object", lbl: t("settings.notifyAbandoned", "Abandoned object") },
+                  ].map((item) => (
+                    <label key={item.k} style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(emailPrefs[item.k])}
+                        onChange={(e) => setEmailPrefs((p) => ({ ...p, [item.k]: e.target.checked }))}
+                        style={{ accentColor: "var(--dv-cyan-500, #00E5FF)" }}
+                      />
+                      <span>{item.lbl}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", paddingTop: "6px" }}>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-muted, #94A3B8)" }}>
+                  {deliveryStatus
+                    ? `SMTP: ${deliveryStatus.smtp_configured ? "Configured" : "Not configured"} · Sent: ${deliveryStatus.summary?.sent ?? 0} · Failed: ${deliveryStatus.summary?.failed ?? 0}`
+                    : "Email delivery status loading..."}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSendTestEmail}
+                  disabled={testingEmail}
+                  className="btn btn-secondary btn-sm"
+                  data-testid="send-test-email-btn"
+                >
+                  {testingEmail ? t("settings.sendingTestEmail", "Sending...") : t("settings.sendTestEmail", "Send Test Email")}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 

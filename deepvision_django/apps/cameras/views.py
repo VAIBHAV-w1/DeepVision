@@ -37,6 +37,19 @@ from apps.ai.engine import (
 logger = logging.getLogger(__name__)
 
 
+def _is_viewer_role(user) -> bool:
+    return getattr(user, "role", "") == "viewer" and not getattr(user, "is_superuser", False)
+
+
+def _get_writable_camera_or_403(user, camera_id):
+    if _is_viewer_role(user):
+        return None, JsonResponse({"success": False, "error": "Permission denied."}, status=403)
+    try:
+        return get_user_camera_or_404(user, camera_id, require_write=True), None
+    except PermissionDenied as exc:
+        return None, JsonResponse({"success": False, "error": str(exc)}, status=403)
+
+
 def get_accessible_cameras_qs(user):
     """
     Returns queryset of active cameras accessible to user:
@@ -65,6 +78,8 @@ def get_user_camera_or_404(user, camera_id, require_write=False):
     camera = get_object_or_404(Camera, id=camera_id)
 
     if require_write:
+        if _is_viewer_role(user):
+            raise PermissionDenied("Viewer accounts have read-only access.")
         if camera.user_id == user.id or is_staff_role:
             return camera
         raise PermissionDenied("Insufficient privileges to modify this camera or its security zones.")
@@ -246,6 +261,8 @@ def camera_snapshot_view(request, camera_id):
     camera = get_user_camera_or_404(request.user, camera_id)
 
     if request.method == "POST":
+        if _is_viewer_role(request.user):
+            return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
         jpeg_bytes = get_camera_snapshot(camera.id, camera.user_id)
         if not jpeg_bytes:
             return JsonResponse({
@@ -267,7 +284,7 @@ def camera_snapshot_view(request, camera_id):
                 f.write(jpeg_bytes)
         except Exception as e:
             logger.error(f"[SNAPSHOT_SAVE_ERROR] Failed writing snapshot to disk: {e}")
-            return JsonResponse({"success": False, "error": f"Filesystem write failed: {e}"}, status=500)
+            return JsonResponse({"success": False, "error": "Failed to save snapshot file."}, status=500)
 
         from apps.alerts.models import Alert
         from apps.evidence.models import Evidence
@@ -306,7 +323,7 @@ def camera_snapshot_view(request, camera_id):
                 pass
         except Exception as e:
             logger.error(f"[SNAPSHOT_DB_ERROR] Failed creating Evidence metadata: {e}")
-            return JsonResponse({"success": False, "error": f"Database recording failed: {e}"}, status=500)
+            return JsonResponse({"success": False, "error": "Failed to record snapshot metadata."}, status=500)
 
         log_audit(
             request,
@@ -393,8 +410,10 @@ def surveillance_health_api_view(request):
 def camera_record_start_view(request, camera_id):
     """
     Proxies recording start request to canonical surveillance engine.
-    Strictly enforces authorization: any user authorized to access this camera can record.
+    Strictly enforces authorization: non-viewer users authorized to access this camera can record.
     """
+    if _is_viewer_role(request.user):
+        return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
     camera = get_user_camera_or_404(request.user, camera_id)
     result = start_camera_recording(camera.id, request.user.id)
     if isinstance(result, dict) and "success" not in result:
@@ -415,8 +434,10 @@ def camera_record_start_view(request, camera_id):
 def camera_record_stop_view(request, camera_id):
     """
     Proxies recording stop request to canonical surveillance engine.
-    Strictly enforces authorization: any user authorized to access this camera can stop recording.
+    Strictly enforces authorization: non-viewer users authorized to access this camera can stop recording.
     """
+    if _is_viewer_role(request.user):
+        return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
     camera = get_user_camera_or_404(request.user, camera_id)
     result = stop_camera_recording(camera.id, request.user.id)
     if isinstance(result, dict) and "success" not in result:
@@ -439,6 +460,8 @@ def camera_test_connection_view(request):
     Tests camera connection parameters via canonical surveillance engine.
     Supports optional username/password credentials for RTSP/HTTP cameras.
     """
+    if _is_viewer_role(request.user):
+        return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
     data = {}
     if request.body:
         try:
@@ -471,7 +494,9 @@ def camera_test_view(request, camera_id):
     Tests existing registered camera via canonical surveillance engine and updates its operational status.
     """
     from django.utils import timezone
-    camera = get_user_camera_or_404(request.user, camera_id)
+    camera, err_resp = _get_writable_camera_or_403(request.user, camera_id)
+    if err_resp is not None:
+        return err_resp
     result = test_existing_camera(camera.id, camera.user_id)
     new_status = "online" if result.get("success") else "offline"
     if camera.status != new_status:
@@ -530,7 +555,9 @@ def camera_ingest_frame_view(request, camera_id):
     from apps.surveillance.camera.registry import get_camera_registry
     from apps.surveillance.ai.registry import get_inference_registry
 
-    camera = get_user_camera_or_404(request.user, camera_id)
+    camera, err_resp = _get_writable_camera_or_403(request.user, camera_id)
+    if err_resp is not None:
+        return err_resp
 
     if _check_ingest_rate_limit(request.user.id, camera.id, max_fps=15, window_sec=1.0):
         resp = JsonResponse(
@@ -596,6 +623,8 @@ def camera_ingest_frame_view(request, camera_id):
     anomalies_list = []
     zones_list = []
     detector_backend = "inactive"
+    tracker_backend = "inactive"
+    summary = {}
     if inf_worker is not None:
         raw_tracks = getattr(inf_worker, "cached_tracks", []) or []
         tracks_list = [
@@ -615,6 +644,9 @@ def camera_ingest_frame_view(request, camera_id):
             zones_list = list(inf_worker.get_cached_zones(camera.id) or [])
         tracker = getattr(inf_worker, "tracker", None)
         detector_backend = getattr(tracker, "detector_backend", "unknown") if tracker is not None else "unknown"
+        tracker_backend = getattr(tracker, "tracker_backend", "unknown") if tracker is not None else "unknown"
+        if hasattr(inf_worker, "get_telemetry_summary"):
+            summary = inf_worker.get_telemetry_summary()
 
     try:
         from apps.surveillance.health.health_service import update_camera_health
@@ -631,6 +663,7 @@ def camera_ingest_frame_view(request, camera_id):
     except Exception:
         pass
 
+    visible_persons_default = sum(1 for t in tracks_list if str(t.get("class_name", "")).lower() == "person")
     return JsonResponse({
         "success": True,
         "camera_id": camera.id,
@@ -640,11 +673,20 @@ def camera_ingest_frame_view(request, camera_id):
         "latency_ms": round(float(getattr(inf_worker, "latency_ms", 0.0) or 0.0), 2) if inf_worker else 0.0,
         "tracks": len(tracks_list),
         "tracks_list": tracks_list,
+        "currently_visible_persons": summary.get("currently_visible_persons", visible_persons_default),
+        "active_tracks": summary.get("active_tracks", len(tracks_list)),
+        "unique_persons_observed": summary.get("unique_persons_observed", visible_persons_default),
+        "total_detection_events": summary.get("total_detection_events", len(tracks_list)),
+        "recent_detections": summary.get("recent_detections", []),
+        "recent_zone_events": summary.get("recent_zone_events", []),
+        "camera_purpose": summary.get("camera_purpose", "general"),
+        "restricted_entry_enabled": summary.get("restricted_entry_enabled", bool(zones_list)),
         "anomalies": len(anomalies_list),
         "anomalies_list": anomalies_list,
         "zones": zones_list,
         "inference_active": bool(inf_worker and getattr(inf_worker, "running", False)),
         "detector_backend": detector_backend,
+        "tracker_backend": tracker_backend,
         "frame_width": fw,
         "frame_height": fh,
         "camera_status": "online",
@@ -661,7 +703,9 @@ def camera_disconnect_view(request, camera_id):
     from django.utils import timezone
     from apps.surveillance.camera.registry import get_camera_registry
 
-    camera = get_user_camera_or_404(request.user, camera_id)
+    camera, err_resp = _get_writable_camera_or_403(request.user, camera_id)
+    if err_resp is not None:
+        return err_resp
     if is_camera_recording(camera.id, camera.user_id):
         try:
             stop_camera_recording(camera.id, camera.user_id)
@@ -670,6 +714,16 @@ def camera_disconnect_view(request, camera_id):
 
     try:
         get_camera_registry().remove_camera(camera.id)
+    except Exception:
+        pass
+
+    try:
+        from apps.surveillance.ai.registry import get_inference_registry
+        from apps.surveillance.ai.reid import registry as reid_registry
+        from apps.surveillance.streaming.stream_service import clear_camera_telemetry
+        get_inference_registry().remove_worker(camera.id)
+        reid_registry.clear_camera(camera.id)
+        clear_camera_telemetry(camera.id)
     except Exception:
         pass
 
@@ -683,6 +737,9 @@ def camera_disconnect_view(request, camera_id):
         update_camera_health(
             camera.id,
             status="offline",
+            fps=0.0,
+            ai_fps=0.0,
+            inference_latency_ms=0.0,
             stream_active=False,
             detection_active=False,
             tracking_active=False,

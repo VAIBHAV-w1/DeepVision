@@ -33,6 +33,15 @@ export function Login({ onNavigate, onNeedsVerification }) {
     if (!getCsrfToken()) {
       fetchCsrfToken();
     }
+    const handleBackendStatus = (ev) => {
+      if (ev?.detail?.available === true) {
+        setError((prev) => (
+          prev && /waking up|unreachable|unavailable|timed out/i.test(prev) ? null : prev
+        ));
+      }
+    };
+    window.addEventListener('backend:status', handleBackendStatus);
+    return () => window.removeEventListener('backend:status', handleBackendStatus);
   }, []);
 
   useEffect(() => {
@@ -65,6 +74,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
 
   const handleCredentialsSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
       setError(t('auth.emailRequired', 'Email is required.'));
@@ -278,7 +288,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
               <circle cx="295" cy="80" r="2" fill="#00F5D4" />
               <circle cx="295" cy="110" r="2" fill="#00F5D4" />
               {/* Status Power LED */}
-              <circle cx="288" cy="132" r="3" fill="#10B981" boxShadow="0 0 6px #10B981" />
+              <circle cx="288" cy="132" r="3" fill="#10B981" style={{ filter: 'drop-shadow(0 0 6px #10B981)' }} />
             </svg>
           </div>
 

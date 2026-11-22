@@ -73,14 +73,26 @@ def get_engine_status() -> Dict[str, Any]:
     unique_cam_workers = len(set(cam_reg.workers.values())) if cam_reg.workers else 0
     active_inference = len(set(inf_reg.workers.values())) if inf_reg.workers else 0
 
+    from apps.surveillance.ai.model_loader import get_shared_yolo_model, get_model_load_count
+    shared_m = None
+    try:
+        shared_m = get_shared_yolo_model()
+    except Exception:
+        pass
+    model_desc = (
+        f"models/{shared_m.model_name} ({shared_m.runtime_kind}: {shared_m.device_detail})"
+        if hasattr(shared_m, "model_name")
+        else "models/yolo11n.pt (native singleton)"
+    )
+
     return {
         "engine_url": "in-process (native Django)",
         "reachable": True,
         "mode": "native_django_surveillance",
-        "yolo_model": "models/yolo11n.pt (native singleton)",
-        "tracker": "ByteTrack (native singleton)",
+        "yolo_model": model_desc,
+        "tracker": "BoT-SORT+ReID (native pure-NumPy singleton)",
         "camera_registry": f"native (active_cameras={len(cam_reg.workers)}, hardware_handles={unique_cam_workers}, active_inference={active_inference})",
-        "django_yolo_loads": 1 if active_inference > 0 else 0,
+        "django_yolo_loads": get_model_load_count(),
         "django_camera_handles": unique_cam_workers,
     }
 
@@ -292,6 +304,8 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
     zones_list = telemetry.get("zones", [])
     active_intrusions = telemetry.get("active_intrusions", [])
     detector_backend = telemetry.get("detector_backend", "unknown")
+    tracker_backend = telemetry.get("tracker_backend", "unknown")
+    summary = {}
 
     cam_reg = get_camera_registry()
     active_worker = cam_reg.get_active_worker(camera_id) if cam_reg else None
@@ -300,6 +314,9 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
     if inf_worker is not None and getattr(inf_worker, "running", False):
         tracker = getattr(inf_worker, "tracker", None)
         detector_backend = getattr(tracker, "detector_backend", detector_backend) if tracker is not None else detector_backend
+        tracker_backend = getattr(tracker, "tracker_backend", tracker_backend) if tracker is not None else tracker_backend
+        if hasattr(inf_worker, "get_telemetry_summary"):
+            summary = inf_worker.get_telemetry_summary()
         if not tracks_list:
             tracks_list = [
                 {
@@ -317,6 +334,9 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
             anomalies_list = list(getattr(inf_worker, "cached_anomalies", []) or [])
         if not zones_list and hasattr(inf_worker, "get_cached_zones"):
             zones_list = list(inf_worker.get_cached_zones(camera_id) or [])
+
+    from apps.cameras.surveillance_config import get_camera_surveillance_config
+    cam_cfg = get_camera_surveillance_config(camera_id, has_enabled_zones=bool(zones_list))
 
     is_rec = False
     try:
@@ -337,14 +357,30 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
         or (getattr(inf_worker, "latency_ms", 0.0) if inf_worker else 0.0)
         or 0.0
     )
+    visible_persons_default = sum(1 for t in tracks_list if str(t.get("class_name", "")).lower() == "person")
     return {
         "camera_id": camera_id,
         "tracks": tracks_list,
         "detections": len(tracks_list),
+        "currently_visible_persons": summary.get("currently_visible_persons", telemetry.get("currently_visible_persons", visible_persons_default)),
+        "active_tracks": summary.get("active_tracks", telemetry.get("active_tracks", len(tracks_list))),
+        "unique_persons_observed": summary.get("unique_persons_observed", telemetry.get("unique_persons_observed", visible_persons_default)),
+        "total_detection_events": summary.get("total_detection_events", telemetry.get("total_detection_events", len(tracks_list))),
+        "recent_detections": summary.get("recent_detections", telemetry.get("recent_detections", [])),
+        "recent_zone_events": summary.get("recent_zone_events", telemetry.get("recent_zone_events", [])),
+        "camera_purpose": summary.get("camera_purpose", cam_cfg.get("purpose", "general")),
+        "restricted_entry_enabled": summary.get("restricted_entry_enabled", cam_cfg.get("restricted_entry_enabled", bool(zones_list))),
+        "session_started_at": summary.get("session_started_at", telemetry.get("session_started_at", "")),
         "anomalies": anomalies_list,
         "zones": zones_list,
         "active_intrusions": active_intrusions,
         "detector_backend": detector_backend,
+        "tracker_backend": tracker_backend,
+        "motion_active": summary.get("motion_active", telemetry.get("motion_active", False)),
+        "motion_ratio": summary.get("motion_ratio", telemetry.get("motion_ratio", 0.0)),
+        "motion_lighting_shift": summary.get("motion_lighting_shift", telemetry.get("motion_lighting_shift", False)),
+        "motion_backend": summary.get("motion_backend", telemetry.get("motion_backend", "mog2")),
+        "inference_dropped_frames": summary.get("inference_dropped_frames", telemetry.get("inference_dropped_frames", 0)),
         "fps": real_fps,
         "capture_fps": round(float(cap_fps), 2),
         "ai_fps": inf_fps,

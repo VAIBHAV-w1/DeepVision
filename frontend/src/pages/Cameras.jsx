@@ -2,59 +2,151 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../components/common/Toast';
 import { useTranslation } from '../i18n/i18nContext';
+import {
+  RestrictedZoneEditor,
+  validatePolygonNormalized,
+  normalizeZonePoints,
+} from '../components/cameras/RestrictedZoneEditor';
 
-/**
- * DeepVision 4.0 — Cameras & Surveillance Hub
- * Faithful reconstruction of Figures 7.1.3, 7.1.4, 7.1.5, 7.1.6, and 7.1.10.
- *
- * Workspaces:
- * 1. Camera Management Interface (Figure 7.1.3)
- * 2. Real-Time Surveillance with YOLO Object Detection (Figure 7.1.4)
- * 3. Object Tracking with Tracking Identifiers (Figure 7.1.5)
- * 4. Restricted Zone Monitoring (Figure 7.1.6)
- * 5. Anomaly Detection Result (Figure 7.1.10)
- */
-export function Cameras({ onNavigate, pageParams }) {
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+const DEFAULT_CAMERA_FORM = {
+  name: '',
+  source_type: 'browser',
+  source: '0',
+  username: '',
+  password: '',
+  location: 'Gate-1',
+  restricted_entry_enabled: false,
+  entry_direction: 'enter',
+  schedule_mode: 'always',
+  schedule_days: [0, 1, 2, 3, 4, 5, 6],
+  schedule_start: '00:00',
+  schedule_end: '23:59',
+  alert_severity: 'high',
+  notification_recipients: '',
+  require_alert: true,
+  suppress_duplicates: true,
+  cooldown_seconds: 30,
+};
+
+function formatBackendLabel(detectorBackend, trackerBackend, t) {
+  const b = String(detectorBackend || '').toLowerCase();
+  if (b.startsWith('yolo26')) {
+    const arch = b.includes('yolo26n') ? 'YOLO26n' : b.includes('yolo26m') ? 'YOLO26m' : 'YOLO26s';
+    const rt = b.includes('openvino_gpu')
+      ? 'OpenVINO Iris Xe'
+      : b.includes('openvino_cpu')
+      ? 'OpenVINO CPU'
+      : b.includes('onnxruntime')
+      ? 'ONNX Runtime CPU'
+      : b.includes('opencv_dnn')
+      ? 'OpenCV DNN'
+      : 'ONNX';
+    const trk =
+      trackerBackend === 'botsort_reid'
+        ? 'BoT-SORT Re-ID'
+        : trackerBackend === 'ocsort'
+        ? 'OC-SORT'
+        : 'ByteTrack';
+    return `${arch} (${rt}) + ${trk}`;
+  }
+  if (detectorBackend === 'yolo11n' || b.startsWith('yolo11n')) {
+    return t('cameras.backendYolo', 'YOLO11n + ByteTrack');
+  }
+  if (detectorBackend === 'opencv_fallback') {
+    return t('cameras.backendOpenCV', 'OpenCV Vision Fallback');
+  }
+  if (detectorBackend === 'initializing') {
+    return t('cameras.backendInitializing', 'Initializing AI...');
+  }
+  if (trackerBackend && trackerBackend !== 'unknown' && trackerBackend !== 'inactive') {
+    return `${detectorBackend || 'AI'} (${trackerBackend})`;
+  }
+  return t('cameras.backendIdle', 'Idle');
+}
+
+export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   const { t } = useTranslation();
   const { addToast } = useToast();
 
-  // Active Workspace Sub-Tab
-  const [subTab, setSubTab] = useState(() => {
-    if (pageParams?.mode === 'tracking') return 'tracking';
-    if (pageParams?.mode === 'zone' || pageParams?.mode === 'perimeter') return 'zone';
-    if (pageParams?.mode === 'anomaly') return 'anomaly';
-    if (pageParams?.mode === 'yolo' || pageParams?.tab === 'live') return 'yolo';
-    return 'inventory'; // Default Figure 7.1.3
+  // Workspace view: 'management' (Camera Cards) | 'live' (Uncluttered Live Monitor)
+  const [workspaceView, setWorkspaceView] = useState(() => {
+    if (
+      pageParams?.tab === 'live' ||
+      pageParams?.mode === 'raw' ||
+      pageParams?.mode === 'tracking' ||
+      pageParams?.mode === 'yolo' ||
+      pageParams?.mode === 'zone' ||
+      pageParams?.mode === 'perimeter' ||
+      pageParams?.camera ||
+      pageParams?.id ||
+      initialCameraId
+    ) {
+      return 'live';
+    }
+    return 'management';
   });
 
+  // EXACT TWO operating modes in Live View: 'raw' | 'tracking'
+  const [viewMode, setViewMode] = useState(() => {
+    if (pageParams?.mode === 'raw' || pageParams?.mode === 'original') return 'raw';
+    return 'tracking';
+  });
+
+  const [zoneEditorOpen, setZoneEditorOpen] = useState(() => (
+    pageParams?.mode === 'zone' || pageParams?.mode === 'perimeter'
+  ));
+
   useEffect(() => {
-    if (pageParams?.mode === 'tracking') setSubTab('tracking');
-    else if (pageParams?.mode === 'zone' || pageParams?.mode === 'perimeter') setSubTab('zone');
-    else if (pageParams?.mode === 'anomaly') setSubTab('anomaly');
-    else if (pageParams?.mode === 'yolo' || pageParams?.tab === 'live') setSubTab('yolo');
-    else if (pageParams?.tab === 'management' || pageParams?.tab === 'inventory') setSubTab('inventory');
+    if (pageParams?.mode === 'raw' || pageParams?.mode === 'original') {
+      setViewMode('raw');
+      setWorkspaceView('live');
+      setZoneEditorOpen(false);
+    } else if (pageParams?.mode === 'zone' || pageParams?.mode === 'perimeter') {
+      setViewMode('tracking');
+      setWorkspaceView('live');
+      setZoneEditorOpen(true);
+    } else if (pageParams?.mode === 'tracking' || pageParams?.mode === 'yolo' || pageParams?.tab === 'live') {
+      setViewMode('tracking');
+      setWorkspaceView('live');
+    } else if (pageParams?.tab === 'management' || pageParams?.tab === 'inventory') {
+      setWorkspaceView('management');
+    }
   }, [pageParams?.mode, pageParams?.tab]);
 
+  const requestedCameraId = Number(pageParams?.camera || pageParams?.id || initialCameraId || 0) || 1;
   const [cameras, setCameras] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [selectedCameraId, setSelectedCameraId] = useState(1);
+  const [statusFilter, setStatusFilter] = useState('all'); // all | online | offline | restricted
+  const [selectedCameraId, setSelectedCameraId] = useState(requestedCameraId);
 
-  // Live Player Controls & Telemetry
-  const [detectionEnabled, setDetectionEnabled] = useState(true);
-  const [trackingEnabled, setTrackingEnabled] = useState(true);
+  useEffect(() => {
+    const nextId = Number(pageParams?.camera || pageParams?.id || initialCameraId || 0);
+    if (nextId > 0) {
+      setSelectedCameraId(nextId);
+    }
+  }, [pageParams?.camera, pageParams?.id, initialCameraId]);
+
+  // Live Player & Separated Telemetry States
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [isRecordingBusy, setIsRecordingBusy] = useState(false);
   const [measuredFps, setMeasuredFps] = useState(0);
   const [measuredAiFps, setMeasuredAiFps] = useState(0);
+  const [latencyMs, setLatencyMs] = useState(0);
+  const [visiblePersonsCount, setVisiblePersonsCount] = useState(0);
   const [activeTracksCount, setActiveTracksCount] = useState(0);
+  const [uniquePersonsObserved, setUniquePersonsObserved] = useState(0);
+  const [totalDetectionEvents, setTotalDetectionEvents] = useState(0);
   const [activeTracksList, setActiveTracksList] = useState([]);
+  const [recentDetections, setRecentDetections] = useState([]);
+  const [recentZoneEvents, setRecentZoneEvents] = useState([]);
   const [activeIntrusions, setActiveIntrusions] = useState([]);
-  const [detectorBackend, setDetectorBackend] = useState('');
-  const [sourceFrameSize, setSourceFrameSize] = useState({ width: 640, height: 480 });
+  const [detectorBackend, setDetectorBackend] = useState('unknown');
+  const [trackerBackend, setTrackerBackend] = useState('unknown');
   const [streamError, setStreamError] = useState(false);
   const [streamLoaded, setStreamLoaded] = useState(false);
   const [useSnapshotFallback, setUseSnapshotFallback] = useState(false);
@@ -63,12 +155,20 @@ export function Cameras({ onNavigate, pageParams }) {
   const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [isSavingCamera, setIsSavingCamera] = useState(false);
-  const [newZoneName, setNewZoneName] = useState('');
-  const [isZoneBusy, setIsZoneBusy] = useState(false);
-  const [openMenuCamId, setOpenMenuCamId] = useState(null);
   const snapshotUrlRef = useRef(null);
+  const viewportContainerRef = useRef(null);
 
-  // Browser Webcam / Mobile Camera Bridge (navigator.mediaDevices.getUserMedia)
+  // Restricted Zones & Visual Polygon Editor State
+  const [zones, setZones] = useState([]);
+  const [cameraAlerts, setCameraAlerts] = useState([]);
+  const [drawTool, setDrawTool] = useState('polygon'); // 'polygon' | 'rectangle'
+  const [draftPoints, setDraftPoints] = useState([]);
+  const [newZoneName, setNewZoneName] = useState('');
+  const [newZoneDirection, setNewZoneDirection] = useState('enter');
+  const [editingZone, setEditingZone] = useState(null);
+  const [isZoneBusy, setIsZoneBusy] = useState(false);
+
+  // Browser Webcam / Phone Camera Bridge
   const [browserBridgeActive, setBrowserBridgeActive] = useState(false);
   const [browserDevices, setBrowserDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
@@ -77,24 +177,15 @@ export function Cameras({ onNavigate, pageParams }) {
   const browserStreamRef = useRef(null);
   const activeBridgeCamIdRef = useRef(null);
   const streamReloadPendingRef = useRef(false);
-  const viewportContainerRef = useRef(null);
 
-  // Add / Edit Camera Modal
+  // Add / Edit Camera Modal & Delete Confirm
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingCamId, setEditingCamId] = useState(null);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState(null);
-  const [newCam, setNewCam] = useState({
-    name: '',
-    source_type: 'browser',
-    source: '0',
-    username: '',
-    password: '',
-    location: 'Gate-1',
-    description: '',
-  });
+  const [newCam, setNewCam] = useState(DEFAULT_CAMERA_FORM);
+  const [deleteTargetCam, setDeleteTargetCam] = useState(null);
 
-  // Enumerate browser video input devices when modal or browser bridge is used
   const refreshBrowserDevices = useCallback(async () => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return [];
     try {
@@ -150,15 +241,10 @@ export function Cameras({ onNavigate, pageParams }) {
     return undefined;
   }, [refreshBrowserDevices]);
 
-  // Stop browser media tracks cleanly
   const stopBrowserBridge = useCallback(() => {
     if (browserStreamRef.current) {
       browserStreamRef.current.getTracks().forEach((trk) => {
-        try {
-          trk.stop();
-        } catch {
-          // ignore
-        }
+        try { trk.stop(); } catch {}
       });
       browserStreamRef.current = null;
     }
@@ -169,17 +255,8 @@ export function Cameras({ onNavigate, pageParams }) {
     setBrowserBridgeActive(false);
   }, []);
 
-  useEffect(() => {
-    return () => {
-      stopBrowserBridge();
-    };
-  }, [stopBrowserBridge]);
+  useEffect(() => () => stopBrowserBridge(), [stopBrowserBridge]);
 
-  // Dynamic Camera Context Data (Zones and Alerts)
-  const [zones, setZones] = useState([]);
-  const [cameraAlerts, setCameraAlerts] = useState([]);
-
-  // Load cameras truthfully from backend
   const fetchCameras = useCallback(async () => {
     try {
       setLoading(true);
@@ -203,10 +280,8 @@ export function Cameras({ onNavigate, pageParams }) {
     fetchCameras();
   }, [fetchCameras]);
 
-  // Selected camera object
   const selectedCam = cameras.find((c) => c.id === Number(selectedCameraId)) || cameras[0] || null;
 
-  // Stop browser bridge if user switches to a different camera while streaming
   useEffect(() => {
     if (
       browserBridgeActive &&
@@ -218,28 +293,19 @@ export function Cameras({ onNavigate, pageParams }) {
     }
   }, [browserBridgeActive, selectedCam?.id, stopBrowserBridge]);
 
-  // Sync recording state when selected camera changes
   useEffect(() => {
     if (selectedCam) {
       setIsRecording(Boolean(selectedCam.is_recording));
     }
   }, [selectedCam?.id, selectedCam?.is_recording]);
 
-  // Truthful live status: online in DB, or actual MJPEG/snapshot frame loaded, or browser webcam bridge active
   const isCameraLive = Boolean(
     selectedCam && ((selectedCam.status === 'online' && !streamError) || streamLoaded || Boolean(snapshotUrl) || browserBridgeActive)
   );
 
-  const activeViewMode =
-    subTab === 'yolo'
-      ? (detectionEnabled ? 'tracking' : 'raw')
-      : subTab === 'tracking'
-        ? (trackingEnabled ? 'tracking' : 'raw')
-        : 'tracking';
-
-  // Poll live telemetry (FPS, AI FPS, Tracks, Detector backend, Recording state) when viewing a live surveillance tab
+  // Poll live telemetry when viewing Live Monitor in DETECTION & TRACKING mode (paused or raw mode skips unnecessary AI stat polling noise)
   useEffect(() => {
-    if (!selectedCam?.id || subTab === 'inventory' || !isPlaying) return undefined;
+    if (!selectedCam?.id || workspaceView !== 'live' || !isPlaying) return undefined;
     let active = true;
     const pollStats = async () => {
       try {
@@ -247,13 +313,32 @@ export function Cameras({ onNavigate, pageParams }) {
         if (!active || !stats) return;
         if (typeof stats.fps === 'number') setMeasuredFps(Math.round(stats.fps * 10) / 10);
         if (typeof stats.ai_fps === 'number') setMeasuredAiFps(Math.round(stats.ai_fps * 10) / 10);
+        if (typeof stats.latency_ms === 'number') setLatencyMs(Math.round(stats.latency_ms * 10) / 10);
+
         if (Array.isArray(stats.tracks)) {
           setActiveTracksList(stats.tracks);
+        }
+        if (typeof stats.currently_visible_persons === 'number') {
+          setVisiblePersonsCount(stats.currently_visible_persons);
+        } else if (Array.isArray(stats.tracks)) {
+          setVisiblePersonsCount(stats.tracks.filter((x) => String(x.class_name || '').toLowerCase() === 'person').length);
+        }
+        if (typeof stats.active_tracks === 'number') {
+          setActiveTracksCount(stats.active_tracks);
+        } else if (Array.isArray(stats.tracks)) {
           setActiveTracksCount(stats.tracks.length);
-        } else if (typeof stats.tracks === 'number') {
-          setActiveTracksCount(stats.tracks);
-        } else if (typeof stats.detections === 'number') {
-          setActiveTracksCount(stats.detections);
+        }
+        if (typeof stats.unique_persons_observed === 'number') {
+          setUniquePersonsObserved(stats.unique_persons_observed);
+        }
+        if (typeof stats.total_detection_events === 'number') {
+          setTotalDetectionEvents(stats.total_detection_events);
+        }
+        if (Array.isArray(stats.recent_detections)) {
+          setRecentDetections(stats.recent_detections);
+        }
+        if (Array.isArray(stats.recent_zone_events)) {
+          setRecentZoneEvents(stats.recent_zone_events);
         }
         if (Array.isArray(stats.active_intrusions)) {
           setActiveIntrusions(stats.active_intrusions);
@@ -261,7 +346,12 @@ export function Cameras({ onNavigate, pageParams }) {
         if (typeof stats.detector_backend === 'string' && stats.detector_backend) {
           setDetectorBackend(stats.detector_backend);
         }
-        if (typeof stats.is_recording === 'boolean') setIsRecording(stats.is_recording);
+        if (typeof stats.tracker_backend === 'string' && stats.tracker_backend) {
+          setTrackerBackend(stats.tracker_backend);
+        }
+        if (typeof stats.is_recording === 'boolean') {
+          setIsRecording(stats.is_recording);
+        }
         if (stats.status === 'online' && selectedCam.status !== 'online') {
           setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, status: 'online' } : c)));
         }
@@ -270,20 +360,20 @@ export function Cameras({ onNavigate, pageParams }) {
       }
     };
     pollStats();
-    const timer = setInterval(pollStats, 2500);
+    const timer = setInterval(pollStats, viewMode === 'tracking' ? 1800 : 3500);
     return () => {
       active = false;
       clearInterval(timer);
     };
-  }, [selectedCam?.id, selectedCam?.status, subTab, isPlaying]);
+  }, [selectedCam?.id, selectedCam?.status, workspaceView, viewMode, isPlaying]);
 
-  // Automatic server-annotated snapshot frame fallback whenever MJPEG <img /> fails or buffers (>1.8s)
+  // Snapshot fallback if MJPEG buffers >1.8s
   useEffect(() => {
     const camId = selectedCam?.id;
     const canStream = Boolean(
       camId &&
       isPlaying &&
-      subTab !== 'inventory' &&
+      workspaceView === 'live' &&
       (selectedCam?.status === 'online' || browserBridgeActive)
     );
     if (!canStream) {
@@ -311,7 +401,7 @@ export function Cameras({ onNavigate, pageParams }) {
         if (cancelled) return;
         try {
           const resp = await fetch(
-            `/api/cameras/${camId}/snapshot/?mode=${activeViewMode}&t=${Date.now()}`,
+            `/api/cameras/${camId}/snapshot/?mode=${viewMode}&t=${Date.now()}`,
             { credentials: 'include', cache: 'no-store' }
           );
           if (!cancelled && resp.ok) {
@@ -327,7 +417,7 @@ export function Cameras({ onNavigate, pageParams }) {
             }
           }
         } catch {
-          // Keep last valid frame on transient fetch drop
+          // ignore transient drop
         } finally {
           if (!cancelled) {
             pollTimer = setTimeout(fetchNextSnapshot, 180);
@@ -342,9 +432,9 @@ export function Cameras({ onNavigate, pageParams }) {
       if (fallbackArmTimer) clearTimeout(fallbackArmTimer);
       if (pollTimer) clearTimeout(pollTimer);
     };
-  }, [selectedCam?.id, selectedCam?.status, isPlaying, subTab, browserBridgeActive, streamLoaded, streamError, useSnapshotFallback, activeViewMode]);
+  }, [selectedCam?.id, selectedCam?.status, isPlaying, workspaceView, browserBridgeActive, streamLoaded, streamError, useSnapshotFallback, viewMode]);
 
-  // Browser Webcam / Phone Camera Frame Ingest Loop -> pushes frames to backend YOLO + ByteTrack + Recording
+  // Browser Webcam Ingest Loop
   useEffect(() => {
     if (!browserBridgeActive || !selectedCam?.id || !isPlaying) return undefined;
     let active = true;
@@ -380,23 +470,16 @@ export function Cameras({ onNavigate, pageParams }) {
           }
           if (typeof res.fps === 'number') setMeasuredFps(res.fps);
           if (typeof res.ai_fps === 'number') setMeasuredAiFps(res.ai_fps);
-          if (Array.isArray(res.tracks_list)) {
-            setActiveTracksList(res.tracks_list);
-            setActiveTracksCount(res.tracks_list.length);
-          } else if (typeof res.tracks === 'number') {
-            setActiveTracksCount(res.tracks);
-          }
-          if (typeof res.detector_backend === 'string' && res.detector_backend) {
-            setDetectorBackend(res.detector_backend);
-          }
-          if (typeof res.frame_width === 'number' && typeof res.frame_height === 'number' && res.frame_width > 0 && res.frame_height > 0) {
-            setSourceFrameSize({ width: res.frame_width, height: res.frame_height });
-          }
-          setCameras((prev) =>
-            prev.some((c) => c.id === selectedCam.id && c.status !== 'online')
-              ? prev.map((c) => (c.id === selectedCam.id ? { ...c, status: 'online' } : c))
-              : prev
-          );
+          if (typeof res.latency_ms === 'number') setLatencyMs(res.latency_ms);
+          if (Array.isArray(res.tracks_list)) setActiveTracksList(res.tracks_list);
+          if (typeof res.currently_visible_persons === 'number') setVisiblePersonsCount(res.currently_visible_persons);
+          if (typeof res.active_tracks === 'number') setActiveTracksCount(res.active_tracks);
+          if (typeof res.unique_persons_observed === 'number') setUniquePersonsObserved(res.unique_persons_observed);
+          if (typeof res.total_detection_events === 'number') setTotalDetectionEvents(res.total_detection_events);
+          if (Array.isArray(res.recent_detections)) setRecentDetections(res.recent_detections);
+          if (Array.isArray(res.recent_zone_events)) setRecentZoneEvents(res.recent_zone_events);
+          if (typeof res.detector_backend === 'string' && res.detector_backend) setDetectorBackend(res.detector_backend);
+          if (typeof res.tracker_backend === 'string' && res.tracker_backend) setTrackerBackend(res.tracker_backend);
         }
       } catch {
         // Ignore single frame drop
@@ -414,7 +497,6 @@ export function Cameras({ onNavigate, pageParams }) {
     };
   }, [browserBridgeActive, selectedCam?.id, isPlaying]);
 
-  // Ensure <video> srcObject remains attached across subtab transitions (e.g. inventory -> yolo after modal save)
   useEffect(() => {
     if (browserBridgeActive && browserVideoRef.current && browserStreamRef.current) {
       if (browserVideoRef.current.srcObject !== browserStreamRef.current) {
@@ -422,9 +504,70 @@ export function Cameras({ onNavigate, pageParams }) {
       }
       browserVideoRef.current.play().catch(() => {});
     }
-  }, [browserBridgeActive, subTab, selectedCam?.id]);
+  }, [browserBridgeActive, workspaceView, viewMode, selectedCam?.id]);
 
-  // Start Browser Webcam / Phone Camera Bridge via navigator.mediaDevices.getUserMedia
+  // Zones & scoped alerts refresh
+  const refreshCameraZonesAndAlerts = useCallback(async (camId) => {
+    if (!camId) return;
+    try {
+      const [zRes, aRes] = await Promise.allSettled([
+        api.cameras.getZones(camId),
+        api.alerts.list({ camera_id: camId, limit: 12 }),
+      ]);
+      if (zRes.status === 'fulfilled' && zRes.value?.zones) {
+        setZones(zRes.value.zones);
+      }
+      if (aRes.status === 'fulfilled') {
+        const rawAlerts = aRes.value?.alerts || aRes.value?.items || (Array.isArray(aRes.value) ? aRes.value : []);
+        setCameraAlerts(rawAlerts);
+      }
+    } catch {
+      // ignore transient poll error
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedCam?.id) {
+      setZones([]);
+      setCameraAlerts([]);
+      return;
+    }
+    setStreamError(false);
+    setStreamLoaded(false);
+    setUseSnapshotFallback(false);
+    setStreamTimestamp(Date.now());
+    setActiveTracksList([]);
+    setActiveTracksCount(0);
+    setVisiblePersonsCount(0);
+    setUniquePersonsObserved(0);
+    setTotalDetectionEvents(0);
+    setRecentDetections([]);
+    setRecentZoneEvents([]);
+    setDraftPoints([]);
+    setEditingZone(null);
+    refreshCameraZonesAndAlerts(selectedCam.id);
+  }, [selectedCam?.id, refreshCameraZonesAndAlerts]);
+
+  useEffect(() => {
+    if (!selectedCam?.id || workspaceView !== 'live' || !isCameraLive) return undefined;
+    const timer = setInterval(() => {
+      refreshCameraZonesAndAlerts(selectedCam.id);
+    }, 4500);
+    return () => clearInterval(timer);
+  }, [selectedCam?.id, workspaceView, isCameraLive, refreshCameraZonesAndAlerts]);
+
+  // Mode Switch Handler (RAW CAMERA FOOTAGE <-> DETECTION & TRACKING) cleanly reuses existing camera
+  const handleSwitchMode = (nextMode) => {
+    if (nextMode === viewMode) return;
+    setViewMode(nextMode);
+    if (nextMode === 'raw') {
+      setZoneEditorOpen(false);
+    }
+    setStreamLoaded(false);
+    setStreamError(false);
+    setStreamTimestamp(Date.now());
+  };
+
   const handleStartBrowserBridge = async (targetCam = null, overrideDeviceId = null) => {
     const camTarget = targetCam && targetCam.id ? targetCam : selectedCam;
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -473,15 +616,7 @@ export function Cameras({ onNavigate, pageParams }) {
       }, 50);
       addToast(`Connected browser camera for ${camTarget?.name || 'Camera'}`, 'success');
     } catch (err) {
-      const msg =
-        err?.name === 'NotAllowedError'
-          ? 'Camera permission denied by browser. Please allow camera access in site permissions.'
-          : err?.name === 'NotFoundError'
-          ? 'No physical webcam or camera device detected on this device.'
-          : err?.name === 'NotReadableError'
-          ? 'Camera device is in use by another app or tab. Close other camera apps and retry.'
-          : err?.message || 'Failed to access browser camera.';
-      addToast(msg, 'error');
+      addToast(err?.message || 'Failed to access browser camera.', 'error');
     }
   };
 
@@ -492,14 +627,12 @@ export function Cameras({ onNavigate, pageParams }) {
       await api.cameras.snapshot(selectedCam.id);
       addToast(t('surveillance.snapshotSaved', 'Snapshot captured and saved to Evidence Vault'), 'success');
     } catch (err) {
-      console.warn('Snapshot error:', err);
-      addToast(t('common.error', 'Error') + ': ' + (err.message || 'Snapshot failed'), 'error');
+      addToast(err.message || 'Snapshot failed', 'error');
     } finally {
       setIsCapturingSnapshot(false);
     }
   };
 
-  // Toggle Real Backend Video Recording (Start / Stop)
   const handleToggleRecording = async () => {
     if (!selectedCam?.id || isRecordingBusy) return;
     try {
@@ -526,7 +659,6 @@ export function Cameras({ onNavigate, pageParams }) {
     }
   };
 
-  // Reconnect / Test Camera Stream
   const handleReconnectCamera = async (camObj = selectedCam) => {
     const target = camObj || selectedCam;
     if (!target?.id || isReconnecting) return;
@@ -546,7 +678,7 @@ export function Cameras({ onNavigate, pageParams }) {
         setStreamLoaded(true);
         addToast(`Camera "${target.name}" connected (${res.width || 640}x${res.height || 480})`, 'success');
       } else {
-        addToast(res?.message || `Camera "${target.name}" is unreachable. You can also connect via Browser Webcam.`, 'warning');
+        addToast(res?.message || `Camera "${target.name}" is unreachable.`, 'warning');
       }
     } catch (err) {
       addToast(err.message || `Reconnect failed for ${target.name}`, 'error');
@@ -555,7 +687,6 @@ export function Cameras({ onNavigate, pageParams }) {
     }
   };
 
-  // Disconnect Camera Stream
   const handleDisconnectCamera = async (camObj = selectedCam) => {
     const target = camObj || selectedCam;
     if (!target?.id) return;
@@ -575,42 +706,22 @@ export function Cameras({ onNavigate, pageParams }) {
     }
   };
 
-  // Remove Camera with Confirmation
-  const handleRemoveCamera = async (camObj) => {
+  const confirmRemoveCamera = async () => {
+    const camObj = deleteTargetCam;
     if (!camObj?.id) return;
-    if (!window.confirm(`Remove camera "${camObj.name}" from active inventory?`)) return;
     try {
       if (browserBridgeActive && selectedCam?.id === camObj.id) {
         stopBrowserBridge();
       }
       await api.cameras.remove(camObj.id);
       addToast(`Camera "${camObj.name}" removed from inventory`, 'success');
-      setOpenMenuCamId(null);
+      setDeleteTargetCam(null);
       fetchCameras();
     } catch (err) {
       addToast(err.message || `Failed to remove camera "${camObj.name}"`, 'error');
     }
   };
 
-  // Open Edit Camera Modal
-  const handleOpenEditModal = (camObj) => {
-    if (!camObj) return;
-    setEditingCamId(camObj.id);
-    setConnectionTestResult(null);
-    setNewCam({
-      name: camObj.name || '',
-      source_type: camObj.source_type || 'webcam',
-      source: String(camObj.source ?? '0'),
-      username: '',
-      password: '',
-      location: camObj.location || 'Gate-1',
-      description: camObj.description || '',
-    });
-    setOpenMenuCamId(null);
-    setIsAddModalOpen(true);
-  };
-
-  // Toggle Fullscreen on Viewport
   const handleToggleFullscreen = () => {
     const el = viewportContainerRef.current;
     if (!el) return;
@@ -621,99 +732,57 @@ export function Cameras({ onNavigate, pageParams }) {
     }
   };
 
-  // Load zones & scoped alerts whenever selected camera changes + poll live alerts while viewing zone/anomaly
-  const refreshCameraZonesAndAlerts = useCallback(async (camId) => {
-    if (!camId) return;
-    try {
-      const [zRes, aRes] = await Promise.allSettled([
-        api.cameras.getZones(camId),
-        api.alerts.list({ camera_id: camId, limit: 10 }),
-      ]);
-      if (zRes.status === 'fulfilled' && zRes.value?.zones) {
-        setZones(zRes.value.zones);
-      }
-      if (aRes.status === 'fulfilled') {
-        const rawAlerts = aRes.value?.alerts || aRes.value?.items || (Array.isArray(aRes.value) ? aRes.value : []);
-        setCameraAlerts(rawAlerts);
-      }
-    } catch {
-      // ignore transient poll error
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!selectedCam?.id) {
-      setZones([]);
-      setCameraAlerts([]);
-      return;
-    }
-    setStreamError(false);
-    setStreamLoaded(false);
-    setUseSnapshotFallback(false);
-    setStreamTimestamp(Date.now());
-    setActiveTracksList([]);
-    setActiveTracksCount(0);
-    refreshCameraZonesAndAlerts(selectedCam.id);
-  }, [selectedCam?.id, refreshCameraZonesAndAlerts]);
-
-  useEffect(() => {
-    if (!selectedCam?.id || !isCameraLive || (subTab !== 'zone' && subTab !== 'anomaly' && !isRecording)) {
-      return undefined;
-    }
-    const timer = setInterval(() => {
-      refreshCameraZonesAndAlerts(selectedCam.id);
-    }, 4000);
-    return () => clearInterval(timer);
-  }, [selectedCam?.id, isCameraLive, subTab, isRecording, refreshCameraZonesAndAlerts]);
-
-  // Restricted Zone Create / Update / Toggle / Delete handlers
-  const handleCreateRestrictedZone = async (e) => {
+  // Save newly drawn polygon/rectangle or edited existing zone
+  const handleSaveZone = async (e) => {
     e?.preventDefault?.();
     if (!selectedCam?.id || isZoneBusy) return;
-    const zoneLabel = (newZoneName || '').trim() || `Zone ${zones.length + 1}`;
+
+    const pointsToSave = editingZone ? normalizeZonePoints(editingZone) : draftPoints;
+    if (pointsToSave.length < 3) {
+      addToast('Draw at least 3 boundary vertices on the video frame first.', 'warning');
+      return;
+    }
+    const validation = validatePolygonNormalized(pointsToSave);
+    if (!validation.valid) {
+      addToast(validation.error, 'error');
+      return;
+    }
+
+    const zoneLabel = editingZone
+      ? (editingZone.name || '').trim() || `Zone ${editingZone.id}`
+      : (newZoneName || '').trim() || `Restricted Zone ${zones.length + 1}`;
+    const shapeType = editingZone
+      ? (editingZone.shape || (pointsToSave.length === 4 && drawTool === 'rectangle' ? 'rectangle' : 'polygon'))
+      : drawTool;
+
     try {
       setIsZoneBusy(true);
       await api.cameras.createZone(selectedCam.id, {
+        zone_id: editingZone?.id,
         name: zoneLabel,
-        x1: 320,
-        y1: 144,
-        x2: 960,
-        y2: 612,
+        shape: shapeType,
+        points: pointsToSave,
+        entry_direction: editingZone ? editingZone.entry_direction : newZoneDirection,
         color: '#ef4444',
+        enabled: true,
       });
+      setDraftPoints([]);
       setNewZoneName('');
+      setEditingZone(null);
       await refreshCameraZonesAndAlerts(selectedCam.id);
-      addToast(`Restricted zone "${zoneLabel}" added`, 'success');
+      await fetchCameras();
+      addToast(`Restricted zone "${zoneLabel}" saved`, 'success');
     } catch (err) {
-      addToast(err.message || 'Failed to create restricted zone', 'error');
+      addToast(err.message || 'Failed to save restricted zone', 'error');
     } finally {
       setIsZoneBusy(false);
     }
   };
 
-  const handleRenameRestrictedZone = async (zoneObj) => {
-    if (!selectedCam?.id || !zoneObj?.id || isZoneBusy) return;
-    const nextName = window.prompt('Update restricted zone name:', zoneObj.name || '');
-    if (!nextName || !nextName.trim() || nextName.trim() === zoneObj.name) return;
-    try {
-      setIsZoneBusy(true);
-      await api.cameras.createZone(selectedCam.id, {
-        zone_id: zoneObj.id,
-        name: nextName.trim(),
-        x1: zoneObj.x1,
-        y1: zoneObj.y1,
-        x2: zoneObj.x2,
-        y2: zoneObj.y2,
-        enabled: zoneObj.enabled !== false,
-      });
-      await refreshCameraZonesAndAlerts(selectedCam.id);
-      addToast(`Updated zone to "${nextName.trim()}"`, 'success');
-    } catch (err) {
-      addToast(err.message || 'Failed to update zone', 'error');
-    } finally {
-      setIsZoneBusy(false);
-    }
-  };
+  const handleEditZoneVertices = useCallback((zoneId, updatedPoints) => {
+    setZones((prev) => prev.map((z) => (z.id === zoneId ? { ...z, points: updatedPoints } : z)));
+    setEditingZone((prev) => (prev && prev.id === zoneId ? { ...prev, points: updatedPoints } : prev));
+  }, []);
 
   const handleToggleRestrictedZone = async (zoneId) => {
     if (!selectedCam?.id || isZoneBusy) return;
@@ -721,6 +790,7 @@ export function Cameras({ onNavigate, pageParams }) {
       setIsZoneBusy(true);
       await api.cameras.toggleZone(selectedCam.id, zoneId);
       await refreshCameraZonesAndAlerts(selectedCam.id);
+      await fetchCameras();
     } catch (err) {
       addToast(err.message || 'Failed to toggle zone', 'error');
     } finally {
@@ -733,7 +803,9 @@ export function Cameras({ onNavigate, pageParams }) {
     try {
       setIsZoneBusy(true);
       await api.cameras.deleteZone(selectedCam.id, zoneId);
+      if (editingZone?.id === zoneId) setEditingZone(null);
       await refreshCameraZonesAndAlerts(selectedCam.id);
+      await fetchCameras();
       addToast('Restricted zone deleted', 'success');
     } catch (err) {
       addToast(err.message || 'Failed to delete zone', 'error');
@@ -742,44 +814,64 @@ export function Cameras({ onNavigate, pageParams }) {
     }
   };
 
-  // Test Camera Connection inside Modal before saving
+  const handleOpenAddModal = () => {
+    setEditingCamId(null);
+    setConnectionTestResult(null);
+    setNewCam({ ...DEFAULT_CAMERA_FORM, source: selectedDeviceId || '0' });
+    setIsAddModalOpen(true);
+  };
+
+  const handleOpenEditModal = (camObj) => {
+    if (!camObj) return;
+    setEditingCamId(camObj.id);
+    setConnectionTestResult(null);
+    const sched = camObj.schedule || {};
+    setNewCam({
+      name: camObj.name || '',
+      source_type: camObj.source_type || 'webcam',
+      source: String(camObj.source ?? '0'),
+      username: '',
+      password: '',
+      location: camObj.location || 'Gate-1',
+      restricted_entry_enabled: Boolean(camObj.restricted_entry_enabled),
+      entry_direction: camObj.entry_direction || 'enter',
+      schedule_mode: sched.mode || 'always',
+      schedule_days: Array.isArray(sched.days) && sched.days.length ? sched.days : [0, 1, 2, 3, 4, 5, 6],
+      schedule_start: sched.start_time || '00:00',
+      schedule_end: sched.end_time || '23:59',
+      alert_severity: camObj.alert_severity || 'high',
+      notification_recipients: Array.isArray(camObj.notification_recipients)
+        ? camObj.notification_recipients.join(', ')
+        : '',
+      require_alert: camObj.require_alert !== false,
+      suppress_duplicates: camObj.suppress_duplicates !== false,
+      cooldown_seconds: Number(camObj.cooldown_seconds || 30),
+    });
+    setIsAddModalOpen(true);
+  };
+
   const handleTestModalConnection = async () => {
     if (newCam.source_type === 'browser') {
       if (!navigator.mediaDevices?.getUserMedia) {
         const msg = 'Browser camera API (getUserMedia) is not supported in this browser.';
         setConnectionTestResult({ success: false, message: msg });
-        addToast(msg, 'error');
         return;
       }
       try {
         setIsTestingConnection(true);
         setConnectionTestResult(null);
         const chosenId = newCam.source && newCam.source !== '0' ? newCam.source : selectedDeviceId;
-        const videoConstraint = chosenId
-          ? { deviceId: { exact: chosenId }, width: { ideal: 640 }, height: { ideal: 480 } }
-          : { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } };
-        const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: false });
-        const track = stream.getVideoTracks()[0];
-        const settings = track?.getSettings ? track.getSettings() : {};
-        const label = track?.label || 'Browser Webcam';
-        const dims = settings.width && settings.height ? ` (${settings.width}x${settings.height})` : '';
-        stream.getTracks().forEach((t) => {
-          try { t.stop(); } catch {}
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: chosenId ? { deviceId: { exact: chosenId } } : { facingMode: 'user' },
+          audio: false,
         });
+        const trk = stream.getVideoTracks()[0];
+        const label = trk?.label || 'Browser Webcam';
+        stream.getTracks().forEach((tr) => { try { tr.stop(); } catch {} });
         await refreshBrowserDevices();
-        const msg = `Browser camera verified locally: ${label}${dims}`;
-        setConnectionTestResult({ success: true, message: msg });
-        addToast(msg, 'success');
+        setConnectionTestResult({ success: true, message: `Verified: ${label}` });
       } catch (err) {
-        const msg = err?.name === 'NotAllowedError'
-          ? 'Camera permission denied by browser. Please allow camera access in site permissions.'
-          : err?.name === 'NotFoundError'
-          ? 'No webcam detected by browser.'
-          : err?.name === 'NotReadableError'
-          ? 'Camera device is in use by another app or tab. Close other camera apps and retry.'
-          : err?.message || 'Browser camera test failed.';
-        setConnectionTestResult({ success: false, message: msg });
-        addToast(msg, 'warning');
+        setConnectionTestResult({ success: false, message: err?.message || 'Browser camera test failed.' });
       } finally {
         setIsTestingConnection(false);
       }
@@ -796,20 +888,13 @@ export function Cameras({ onNavigate, pageParams }) {
         newCam.password
       );
       setConnectionTestResult(res);
-      if (res?.success) {
-        addToast(res.message || 'Camera connection verified!', 'success');
-      } else {
-        addToast(res?.message || 'Camera connection test failed', 'warning');
-      }
     } catch (err) {
       setConnectionTestResult({ success: false, message: err.message || 'Connection test failed' });
-      addToast(err.message || 'Connection test failed', 'error');
     } finally {
       setIsTestingConnection(false);
     }
   };
 
-  // Handle Add / Edit Camera Submit
   const handleAddCameraSubmit = async (e) => {
     e.preventDefault();
     if (!newCam.name.trim() || isSavingCamera) return;
@@ -822,26 +907,48 @@ export function Cameras({ onNavigate, pageParams }) {
         location: newCam.location.trim() || 'Default Zone',
         username: newCam.username.trim(),
         password: newCam.password,
+        restricted_entry_enabled: Boolean(newCam.restricted_entry_enabled),
+        purpose: newCam.restricted_entry_enabled ? 'restricted_entry' : 'general',
+        entry_direction: newCam.entry_direction,
+        schedule: {
+          mode: newCam.schedule_mode,
+          days: newCam.schedule_days,
+          start_time: newCam.schedule_start,
+          end_time: newCam.schedule_end,
+        },
+        alert_severity: newCam.alert_severity,
+        notification_recipients: newCam.notification_recipients,
+        require_alert: Boolean(newCam.require_alert),
+        suppress_duplicates: Boolean(newCam.suppress_duplicates),
+        cooldown_seconds: Number(newCam.cooldown_seconds || 30),
       };
+
       let savedCam = null;
       if (editingCamId) {
         const updatedRes = await api.cameras.update(editingCamId, payload);
         savedCam = updatedRes?.camera || null;
-        addToast(`Camera "${newCam.name}" updated successfully`, 'success');
+        addToast(`Camera "${newCam.name}" updated`, 'success');
       } else {
         const createdRes = await api.cameras.create(payload);
         savedCam = createdRes?.camera || null;
-        addToast(`Camera "${newCam.name}" registered successfully`, 'success');
+        addToast(`Camera "${newCam.name}" registered`, 'success');
       }
+
       setIsAddModalOpen(false);
       setEditingCamId(null);
       setConnectionTestResult(null);
-      setNewCam({ name: '', source_type: 'browser', source: selectedDeviceId || '0', username: '', password: '', location: 'Gate-1', description: '' });
       await fetchCameras();
-      if (savedCam && savedCam.source_type === 'browser') {
+
+      if (savedCam && savedCam.source_type === 'browser' && !editingCamId) {
         setSelectedCameraId(savedCam.id);
-        setSubTab('yolo');
+        setWorkspaceView('live');
+        setViewMode('tracking');
         await handleStartBrowserBridge(savedCam, savedCam.source);
+      } else if (savedCam && !editingCamId && payload.restricted_entry_enabled) {
+        setSelectedCameraId(savedCam.id);
+        setWorkspaceView('live');
+        setViewMode('tracking');
+        setZoneEditorOpen(true);
       }
     } catch (err) {
       addToast(err.message || `Failed to save camera ${newCam.name}`, 'error');
@@ -850,10 +957,10 @@ export function Cameras({ onNavigate, pageParams }) {
     }
   };
 
-  // Filtered cameras for Figure 7.1.3
   const filteredCameras = cameras.filter((c) => {
     if (statusFilter === 'online' && c.status !== 'online') return false;
     if (statusFilter === 'offline' && c.status === 'online') return false;
+    if (statusFilter === 'restricted' && !c.restricted_entry_enabled) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
       return (c.name || '').toLowerCase().includes(q) || (c.location || '').toLowerCase().includes(q);
@@ -861,1936 +968,1362 @@ export function Cameras({ onNavigate, pageParams }) {
     return true;
   });
 
-  // Timestamp format helper for incident cards
-  const formatAlertTime = (isoString) => {
-    if (!isoString) return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  const formatTimeShort = (tsVal) => {
+    if (!tsVal) return '';
     try {
-      const d = new Date(isoString);
-      return isNaN(d.getTime())
-        ? String(isoString)
-        : d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) + ' ' +
-          d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+      const d = typeof tsVal === 'number' ? new Date(tsVal * 1000) : new Date(tsVal);
+      if (isNaN(d.getTime())) return String(tsVal);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch {
-      return String(isoString);
+      return '';
     }
   };
 
-  // Find real intrusion alert for Figure 7.1.6
-  const intrusionAlert = cameraAlerts.find((a) => {
-    const text = `${a.event_type || ''} ${a.title || ''} ${a.description || ''}`.toLowerCase();
-    return text.includes('intrusion') || text.includes('restricted') || text.includes('perimeter');
-  });
+  const backendBadgeLabel = formatBackendLabel(detectorBackend, trackerBackend, t);
 
-  // Find real anomaly alert for Figure 7.1.10
-  const anomalyAlert = cameraAlerts.find((a) => {
-    const text = `${a.event_type || ''} ${a.title || ''} ${a.anomaly_type || ''} ${a.description || ''}`.toLowerCase();
-    return text.includes('anomaly') || text.includes('fall') || text.includes('unusual') || text.includes('distress');
-  });
+  // =========================================================================
+  // RENDER: CAMERA MANAGEMENT CARDS VIEW
+  // =========================================================================
+  const renderCameraManagement = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '16px 20px',
+          backgroundColor: 'var(--bg-surface, #0F172A)',
+          border: '1px solid var(--border-color, #1E293B)',
+          borderRadius: '10px',
+        }}
+      >
+        <div>
+          <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: 'var(--text-main, #F8FAFC)' }}>
+            {t('cameras.managementTitle', 'Camera Management')}
+          </h1>
+          <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: 'var(--text-muted, #94A3B8)' }}>
+            {t('cameras.managementSubtitle', 'Manage camera streams, AI monitoring modes, and restricted-entry perimeter policies.')}
+          </p>
+        </div>
 
-  const renderTransportBar = () => (
-    <div
-      style={{
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: '48px',
-        backgroundColor: 'rgba(15, 23, 42, 0.92)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 16px',
-        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-        zIndex: 10,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-        <button
-          type="button"
-          onClick={() => setIsPlaying(!isPlaying)}
-          style={{ background: 'transparent', border: 'none', color: '#FFFFFF', cursor: 'pointer', padding: 0 }}
-          title={isPlaying ? t('common.pause', 'Pause') : t('common.play', 'Play')}
-        >
-          {isPlaying ? '⏸' : '▶'}
-        </button>
-        <button
-          type="button"
-          onClick={() => setIsMuted(!isMuted)}
-          style={{ background: 'transparent', border: 'none', color: '#FFFFFF', cursor: 'pointer', padding: 0 }}
-          title={isMuted ? t('common.unmute', 'Unmute') : t('common.mute', 'Mute')}
-        >
-          {isMuted ? '🔇' : '🔊'}
-        </button>
-        <button
-          type="button"
-          onClick={handleCaptureSnapshot}
-          disabled={isCapturingSnapshot}
-          title={t('surveillance.takeSnapshot', 'Take Snapshot')}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('cameras.searchPlaceholder', 'Search name or location...')}
+            style={{
+              padding: '8px 12px',
+              backgroundColor: 'var(--bg-body, #090D16)',
+              border: '1px solid var(--border-color, #1E293B)',
+              borderRadius: '8px',
+              color: 'var(--text-main, #F8FAFC)',
+              fontSize: '0.84rem',
+              minWidth: '210px',
+            }}
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            aria-label="Filter cameras"
+            style={{
+              padding: '8px 12px',
+              backgroundColor: 'var(--bg-body, #090D16)',
+              border: '1px solid var(--border-color, #1E293B)',
+              borderRadius: '8px',
+              color: 'var(--text-main, #F8FAFC)',
+              fontSize: '0.84rem',
+            }}
+          >
+            <option value="all">{t('cameras.filterAll', 'All Cameras')}</option>
+            <option value="online">{t('cameras.online', 'Online')}</option>
+            <option value="offline">{t('cameras.offline', 'Offline')}</option>
+            <option value="restricted">{t('cameras.filterRestricted', 'Restricted-Entry Only')}</option>
+          </select>
+          <button
+            type="button"
+            onClick={handleOpenAddModal}
+            className="btn btn-primary btn-sm"
+            style={{ padding: '9px 16px', fontWeight: 700, borderRadius: '8px' }}
+          >
+            + {t('cameras.addCamera', 'Add Camera')}
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted, #94A3B8)' }}>
+          {t('common.loading', 'Loading...')}
+        </div>
+      ) : filteredCameras.length === 0 ? (
+        <div
           style={{
-            background: 'transparent',
-            border: 'none',
-            color: isCapturingSnapshot ? '#38BDF8' : '#FFFFFF',
-            cursor: 'pointer',
-            padding: 0,
+            padding: '48px 24px',
+            textAlign: 'center',
+            backgroundColor: 'var(--bg-surface, #0F172A)',
+            border: '1px dashed var(--border-color, #334155)',
+            borderRadius: '12px',
+          }}
+        >
+          <p style={{ margin: '0 0 12px', color: 'var(--text-muted, #94A3B8)' }}>
+            {t('cameras.emptyState', 'No cameras match the current filter.')}
+          </p>
+          <button type="button" onClick={handleOpenAddModal} className="btn btn-primary btn-sm">
+            + {t('cameras.addCamera', 'Add Camera')}
+          </button>
+        </div>
+      ) : (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+            gap: '16px',
+          }}
+        >
+          {filteredCameras.map((cam) => {
+            const online = cam.status === 'online';
+            const isRestricted = Boolean(cam.restricted_entry_enabled || cam.purpose === 'restricted_entry');
+            return (
+              <div
+                key={cam.id}
+                style={{
+                  backgroundColor: 'var(--bg-surface, #0F172A)',
+                  border: `1px solid ${selectedCameraId === cam.id ? 'rgba(0, 229, 255, 0.45)' : 'var(--border-color, #1E293B)'}`,
+                  borderRadius: '12px',
+                  padding: '16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span
+                        style={{
+                          width: '9px',
+                          height: '9px',
+                          borderRadius: '50%',
+                          backgroundColor: online ? '#10B981' : '#64748B',
+                          display: 'inline-block',
+                        }}
+                      />
+                      <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-main, #F8FAFC)' }}>
+                        {cam.name}
+                      </h3>
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94A3B8)', marginTop: '3px' }}>
+                      {cam.location || 'Default Zone'} · {String(cam.source_type || 'camera').toUpperCase()}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                    <span
+                      className={`status-pill ${online ? 'status-live' : 'status-offline'}`}
+                      style={{ fontSize: '0.7rem', padding: '2px 8px' }}
+                    >
+                      {online ? t('cameras.online', 'Online') : t('cameras.offline', 'Offline')}
+                    </span>
+                    {cam.is_recording && (
+                      <span style={{ fontSize: '0.68rem', color: '#EF4444', fontWeight: 700 }}>
+                        ● {t('cameras.recordingActive', 'REC')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Purpose & Restricted-Entry Summary */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '6px',
+                    padding: '8px 10px',
+                    backgroundColor: 'var(--bg-body, #090D16)',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-color, #1E293B)',
+                    fontSize: '0.74rem',
+                  }}
+                >
+                  <span
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontWeight: 700,
+                      backgroundColor: isRestricted ? 'rgba(239, 68, 68, 0.14)' : 'rgba(56, 189, 248, 0.12)',
+                      color: isRestricted ? '#F87171' : '#38BDF8',
+                    }}
+                  >
+                    {isRestricted
+                      ? t('cameras.purposeRestricted', 'Restricted-Entry Camera')
+                      : t('cameras.purposeGeneral', 'General Monitoring')}
+                  </span>
+                  <span style={{ color: 'var(--text-muted, #94A3B8)', alignSelf: 'center' }}>
+                    {t('cameras.zonesLabel', 'Zones')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{cam.zone_count || 0}</strong>
+                  </span>
+                  {isRestricted && (
+                    <span style={{ color: 'var(--text-muted, #94A3B8)', alignSelf: 'center' }}>
+                      · {String(cam.alert_severity || 'high').toUpperCase()}
+                    </span>
+                  )}
+                </div>
+
+                {/* Card Action Buttons */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: 'auto' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCameraId(cam.id);
+                      setWorkspaceView('live');
+                      setViewMode('tracking');
+                    }}
+                    className="btn btn-primary btn-sm"
+                    style={{ flex: '1 1 120px' }}
+                  >
+                    {t('cameras.openLive', 'Live View')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCameraId(cam.id);
+                      setWorkspaceView('live');
+                      setViewMode('tracking');
+                      setZoneEditorOpen(true);
+                    }}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    {t('cameras.zonesButton', 'Zones')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditModal(cam)}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    {t('common.edit', 'Edit')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => (online ? handleDisconnectCamera(cam) : handleReconnectCamera(cam))}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    {online ? t('cameras.disconnect', 'Disconnect') : t('cameras.reconnect', 'Reconnect')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteTargetCam(cam)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ color: '#F87171', borderColor: 'rgba(248, 113, 113, 0.35)' }}
+                  >
+                    {t('common.remove', 'Remove')}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  // =========================================================================
+  // RENDER: CLEAN LIVE MONITORING VIEW (TWO MODES ONLY)
+  // =========================================================================
+  const streamImgSrc = selectedCam
+    ? `${api.cameras.getStreamUrl(selectedCam.id, viewMode)}&t=${streamTimestamp}`
+    : '';
+  const displayViewportSrc = snapshotUrl || streamImgSrc;
+  const showOverlays = viewMode === 'tracking';
+
+  const renderLiveMonitor = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* Top Bar: Back + Camera Selector + Exact 2 Mode Buttons + Backend Label */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          padding: '12px 16px',
+          backgroundColor: 'var(--bg-surface, #0F172A)',
+          border: '1px solid var(--border-color, #1E293B)',
+          borderRadius: '10px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setZoneEditorOpen(false);
+              setWorkspaceView('management');
+            }}
+            className="btn btn-secondary btn-sm"
+          >
+            ← {t('cameras.backToManagement', 'All Cameras')}
+          </button>
+
+          <select
+            value={selectedCam?.id || ''}
+            onChange={(e) => setSelectedCameraId(Number(e.target.value))}
+            aria-label="Select Active Camera"
+            style={{
+              padding: '7px 12px',
+              backgroundColor: 'var(--bg-body, #090D16)',
+              border: '1px solid var(--border-color, #1E293B)',
+              borderRadius: '8px',
+              color: 'var(--text-main, #F8FAFC)',
+              fontSize: '0.86rem',
+              fontWeight: 600,
+            }}
+          >
+            {cameras.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} ({c.location || 'Default'})
+              </option>
+            ))}
+          </select>
+
+          <span
+            className={`status-pill ${isCameraLive ? 'status-live' : 'status-offline'}`}
+            style={{ fontSize: '0.72rem', padding: '3px 10px' }}
+          >
+            {isCameraLive ? t('cameras.online', 'Online') : t('cameras.offline', 'Offline')}
+          </span>
+
+          {selectedCam?.restricted_entry_enabled && (
+            <span
+              style={{
+                padding: '3px 10px',
+                borderRadius: '999px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                backgroundColor: 'rgba(239, 68, 68, 0.16)',
+                color: '#F87171',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+              }}
+            >
+              {t('cameras.purposeRestrictedBadge', 'Restricted-Entry Camera')}
+            </span>
+          )}
+        </div>
+
+        {/* EXACT TWO OPERATING MODES */}
+        <div
+          role="tablist"
+          aria-label="Camera Operating Modes"
+          style={{
+            display: 'inline-flex',
+            backgroundColor: 'var(--bg-body, #090D16)',
+            padding: '4px',
+            borderRadius: '8px',
+            border: '1px solid var(--border-color, #1E293B)',
+            gap: '4px',
+          }}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'raw'}
+            onClick={() => handleSwitchMode('raw')}
+            data-testid="mode-raw-btn"
+            style={{
+              padding: '7px 14px',
+              borderRadius: '6px',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              letterSpacing: '0.03em',
+              backgroundColor: viewMode === 'raw' ? '#0891B2' : 'transparent',
+              color: viewMode === 'raw' ? '#FFFFFF' : 'var(--text-muted, #94A3B8)',
+            }}
+          >
+            {t('cameras.modeRaw', 'RAW CAMERA FOOTAGE')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'tracking'}
+            onClick={() => handleSwitchMode('tracking')}
+            data-testid="mode-tracking-btn"
+            style={{
+              padding: '7px 14px',
+              borderRadius: '6px',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              letterSpacing: '0.03em',
+              backgroundColor: viewMode === 'tracking' ? '#0891B2' : 'transparent',
+              color: viewMode === 'tracking' ? '#FFFFFF' : 'var(--text-muted, #94A3B8)',
+            }}
+          >
+            {t('cameras.modeTracking', 'DETECTION & TRACKING')}
+          </button>
+        </div>
+
+        {/* Honest AI Backend Indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span
+            style={{
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              padding: '4px 10px',
+              borderRadius: '6px',
+              backgroundColor:
+                String(detectorBackend || '').startsWith('yolo')
+                  ? 'rgba(16, 185, 129, 0.14)'
+                  : detectorBackend === 'opencv_fallback'
+                  ? 'rgba(245, 158, 11, 0.14)'
+                  : 'rgba(100, 116, 139, 0.16)',
+              color:
+                String(detectorBackend || '').startsWith('yolo')
+                  ? '#34D399'
+                  : detectorBackend === 'opencv_fallback'
+                  ? '#FBBF24'
+                  : 'var(--text-muted, #94A3B8)',
+              border: '1px solid rgba(148, 163, 184, 0.25)',
+            }}
+          >
+            AI: {viewMode === 'raw' ? t('cameras.rawNoOverlay', 'Raw Passthrough') : backendBadgeLabel}
+          </span>
+        </div>
+      </div>
+
+      {/* Main Split: Left Video + Bottom Controls | Right Telemetry & Zone Config (responsive wrap) */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '16px',
+          alignItems: 'flex-start',
+        }}
+      >
+        {/* Video Viewport + Controls Column */}
+        <div
+          style={{
+            flex: '1 1 600px',
+            minWidth: 0,
+            backgroundColor: 'var(--bg-surface, #0F172A)',
+            border: '1px solid var(--border-color, #1E293B)',
+            borderRadius: '12px',
+            overflow: 'hidden',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: isCapturingSnapshot ? 0.6 : 1,
+            flexDirection: 'column',
           }}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-            <circle cx="12" cy="13" r="4" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          onClick={() => handleReconnectCamera(selectedCam)}
-          disabled={isReconnecting}
-          title="Test & Reconnect Camera"
-          style={{
-            background: 'rgba(56, 189, 248, 0.14)',
-            border: '1px solid rgba(56, 189, 248, 0.35)',
-            color: '#38BDF8',
-            borderRadius: '6px',
-            padding: '3px 8px',
-            fontSize: '0.72rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          {isReconnecting ? 'Connecting...' : '↻ Reconnect'}
-        </button>
-        <button
-          type="button"
-          onClick={browserBridgeActive ? stopBrowserBridge : () => handleStartBrowserBridge(selectedCam)}
-          title="Stream local USB/Laptop/Phone camera via browser WebRTC/getUserMedia into AI pipeline"
-          style={{
-            background: browserBridgeActive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.18)',
-            border: `1px solid ${browserBridgeActive ? '#10B981' : 'rgba(99, 102, 241, 0.4)'}`,
-            color: browserBridgeActive ? '#10B981' : '#A5B4FC',
-            borderRadius: '6px',
-            padding: '3px 8px',
-            fontSize: '0.72rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          {browserBridgeActive ? '● Browser Cam Active' : '📷 Browser Cam'}
-        </button>
-      </div>
+          <div
+            ref={viewportContainerRef}
+            style={{
+              position: 'relative',
+              width: '100%',
+              aspectRatio: '16 / 9',
+              backgroundColor: '#020617',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Hidden video element captures browser camera frames cleanly for backend ingest */}
+            <video
+              ref={browserVideoRef}
+              muted
+              playsInline
+              style={{
+                position: 'absolute',
+                width: '1px',
+                height: '1px',
+                opacity: 0,
+                pointerEvents: 'none',
+              }}
+            />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span
-          style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            backgroundColor: isRecording ? '#EF4444' : '#64748B',
-            boxShadow: isRecording ? '0 0 6px #EF4444' : 'none',
-          }}
-        />
-        <button
-          type="button"
-          onClick={handleToggleRecording}
-          disabled={isRecordingBusy}
-          title={isRecording ? 'Stop Recording' : 'Start Recording'}
-          style={{
-            background: isRecording ? 'rgba(239, 68, 68, 0.18)' : 'transparent',
-            border: isRecording ? '1px solid rgba(239, 68, 68, 0.45)' : '1px solid transparent',
-            borderRadius: '6px',
-            padding: '2px 8px',
-            color: isRecording ? '#EF4444' : '#94A3B8',
-            fontSize: '0.75rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          {isRecordingBusy ? '...' : isRecording ? '■ STOP REC' : '● REC'}
-        </button>
-      </div>
+            {selectedCam ? (
+              <img
+                key={`${selectedCam.id}-${viewMode}-${streamTimestamp}`}
+                src={displayViewportSrc}
+                alt={`${selectedCam.name} ${viewMode}`}
+                onLoad={() => {
+                  setStreamLoaded(true);
+                  setStreamError(false);
+                }}
+                onError={() => {
+                  setStreamLoaded(false);
+                  setStreamError(true);
+                }}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  display: 'block',
+                  backgroundColor: '#020617',
+                }}
+              />
+            ) : (
+              <div style={{ color: '#94A3B8' }}>{t('cameras.noCameraSelected', 'Select or register a camera')}</div>
+            )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', color: '#94A3B8' }}>
-        <span style={{ fontSize: '0.75rem', color: isCameraLive ? '#10B981' : '#64748B', fontWeight: 700 }}>
-          {t('dashboard.fps', 'FPS')} {isCameraLive ? (measuredFps || 15) : 0}
-          {isCameraLive && measuredAiFps > 0 ? ` · AI ${measuredAiFps}` : ''}
-          {isCameraLive && activeTracksCount > 0 ? ` · IDs ${activeTracksCount}` : ''}
-        </span>
-        <button
-          type="button"
-          onClick={() => handleOpenEditModal(selectedCam)}
-          title="Edit Camera Settings"
-          style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 0, fontSize: '0.95rem' }}
-        >
-          ⚙
-        </button>
-        <button
-          type="button"
-          onClick={handleToggleFullscreen}
-          title="Toggle Fullscreen"
-          style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 0, fontSize: '0.95rem' }}
-        >
-          ⛶
-        </button>
+            {/* Restricted-Zone Polygon/Rectangle Interactive Editor Overlay (NEVER shown in RAW mode) */}
+            {showOverlays && (
+              <RestrictedZoneEditor
+                active={zoneEditorOpen}
+                zones={zones}
+                activeIntrusions={activeIntrusions}
+                editingZone={editingZone}
+                drawTool={drawTool}
+                draftPoints={draftPoints}
+                setDraftPoints={setDraftPoints}
+                onEditZoneVertices={handleEditZoneVertices}
+                showZones={zoneEditorOpen}
+              />
+            )}
+
+            {streamError && !snapshotUrl && !browserBridgeActive && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  backgroundColor: 'rgba(2, 6, 23, 0.86)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '12px',
+                  padding: '24px',
+                  textAlign: 'center',
+                  zIndex: 8,
+                }}
+              >
+                <p style={{ margin: 0, color: '#E2E8F0', fontSize: '0.92rem', fontWeight: 600 }}>
+                  {t('cameras.streamUnavailable', 'Live camera stream is currently offline or unreachable.')}
+                </p>
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                  <button type="button" onClick={() => handleReconnectCamera(selectedCam)} className="btn btn-primary btn-sm">
+                    {t('cameras.reconnect', 'Reconnect Camera')}
+                  </button>
+                  <button type="button" onClick={() => handleStartBrowserBridge(selectedCam)} className="btn btn-secondary btn-sm">
+                    {t('cameras.useBrowserCam', 'Use Browser Webcam')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Clean High-Contrast Bottom Control Bar */}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+              padding: '10px 14px',
+              backgroundColor: 'var(--bg-body, #090D16)',
+              borderTop: '1px solid var(--border-color, #1E293B)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setIsPlaying((p) => !p)}
+                className="btn btn-secondary btn-sm"
+                title={isPlaying ? 'Pause' : 'Resume'}
+              >
+                {isPlaying ? t('cameras.pause', 'Pause') : t('cameras.resume', 'Resume')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsMuted((m) => !m)}
+                className="btn btn-secondary btn-sm"
+                title="Toggle Audio Mute"
+              >
+                {isMuted ? t('cameras.muted', 'Muted') : t('cameras.audioOn', 'Audio On')}
+              </button>
+              <button
+                type="button"
+                onClick={handleCaptureSnapshot}
+                disabled={!selectedCam || isCapturingSnapshot}
+                className="btn btn-secondary btn-sm"
+              >
+                {isCapturingSnapshot ? t('common.saving', 'Saving...') : t('cameras.snapshot', 'Snapshot')}
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleRecording}
+                disabled={!selectedCam || isRecordingBusy}
+                className="btn btn-secondary btn-sm"
+                style={
+                  isRecording
+                    ? { backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#F87171', borderColor: '#EF4444' }
+                    : undefined
+                }
+              >
+                {isRecording ? t('cameras.stopRecord', 'Stop Rec') : t('cameras.startRecord', 'Record')}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleReconnectCamera(selectedCam)}
+                disabled={isReconnecting}
+                className="btn btn-secondary btn-sm"
+              >
+                {t('cameras.reconnect', 'Reconnect')}
+              </button>
+              {viewMode === 'tracking' && (
+                <button
+                  type="button"
+                  onClick={() => setZoneEditorOpen((z) => !z)}
+                  className={zoneEditorOpen ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+                >
+                  {zoneEditorOpen ? t('cameras.closeZoneEditor', 'Close Zone Editor') : t('cameras.editZones', 'Edit Zones')}
+                </button>
+              )}
+              <button type="button" onClick={handleToggleFullscreen} className="btn btn-secondary btn-sm">
+                {t('cameras.fullscreen', 'Fullscreen')}
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.76rem', color: 'var(--text-muted, #94A3B8)', fontFamily: 'var(--font-mono, monospace)' }}>
+              <span>{t('cameras.fpsShort', 'FPS')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{measuredFps || 0}</strong></span>
+              {viewMode === 'tracking' && (
+                <>
+                  <span>{t('cameras.aiFpsShort', 'AI FPS')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{measuredAiFps || 0}</strong></span>
+                  <span>{t('cameras.latencyShort', 'Lat')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{latencyMs || 0}ms</strong></span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right Telemetry & Restricted-Zone Side Panel */}
+        <div style={{ flex: '1 1 320px', maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {viewMode === 'raw' ? (
+            <div
+              style={{
+                padding: '18px',
+                backgroundColor: 'var(--bg-surface, #0F172A)',
+                border: '1px solid var(--border-color, #1E293B)',
+                borderRadius: '12px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: '0.96rem', color: 'var(--text-main, #F8FAFC)' }}>
+                {t('cameras.rawPanelTitle', 'Raw Camera Footage Mode')}
+              </h3>
+              <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted, #94A3B8)', lineHeight: 1.5 }}>
+                {t('cameras.rawPanelDesc', 'Displaying clean unannotated camera feed with zero AI bounding boxes or overlays. Switch to Detection & Tracking mode to view live detections, tracking IDs, counts, and restricted-zone monitoring.')}
+              </p>
+              <button type="button" onClick={() => handleSwitchMode('tracking')} className="btn btn-primary btn-sm">
+                {t('cameras.switchToTracking', 'Switch to Detection & Tracking')}
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* 4 Strictly Separated Counts */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  gap: '10px',
+                }}
+              >
+                {[
+                  { label: t('cameras.visiblePersons', 'Visible Persons'), value: visiblePersonsCount, accent: '#10B981', hint: 'Currently in frame' },
+                  { label: t('cameras.activeTracks', 'Active Tracks'), value: activeTracksCount, accent: '#38BDF8', hint: 'Confirmed IDs now' },
+                  { label: t('cameras.uniqueObserved', 'Unique Observed'), value: uniquePersonsObserved, accent: '#A855F7', hint: 'Distinct in session' },
+                  { label: t('cameras.detectionEvents', 'Detection Events'), value: totalDetectionEvents, accent: '#F59E0B', hint: 'Session object logs' },
+                ].map((metric) => (
+                  <div
+                    key={metric.label}
+                    style={{
+                      padding: '12px',
+                      backgroundColor: 'var(--bg-surface, #0F172A)',
+                      border: '1px solid var(--border-color, #1E293B)',
+                      borderRadius: '10px',
+                    }}
+                  >
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94A3B8)', fontWeight: 600 }}>{metric.label}</div>
+                    <div style={{ fontSize: '1.45rem', fontWeight: 800, color: metric.accent, lineHeight: 1.2, marginTop: '4px' }}>
+                      {metric.value}
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #64748B)', marginTop: '2px' }}>{metric.hint}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Zone Editor & Zones Manager */}
+              <div
+                style={{
+                  padding: '14px',
+                  backgroundColor: 'var(--bg-surface, #0F172A)',
+                  border: `1px solid ${zoneEditorOpen ? '#0891B2' : 'var(--border-color, #1E293B)'}`,
+                  borderRadius: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h4 style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-main, #F8FAFC)' }}>
+                    {t('cameras.restrictedZonesTitle', 'Restricted Zones')} ({zones.length})
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setZoneEditorOpen((z) => !z)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: '0.72rem', padding: '4px 10px' }}
+                  >
+                    {zoneEditorOpen ? t('common.done', 'Done') : t('cameras.drawZone', 'Draw / Edit')}
+                  </button>
+                </div>
+
+                {zoneEditorOpen && (
+                  <form onSubmit={handleSaveZone} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', backgroundColor: 'var(--bg-body, #090D16)', borderRadius: '8px' }}>
+                    {!editingZone && (
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button
+                          type="button"
+                          onClick={() => { setDrawTool('polygon'); setDraftPoints([]); }}
+                          className={drawTool === 'polygon' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+                          style={{ flex: 1, fontSize: '0.72rem' }}
+                        >
+                          Polygon ({draftPoints.length} pts)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setDrawTool('rectangle'); setDraftPoints([]); }}
+                          className={drawTool === 'rectangle' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+                          style={{ flex: 1, fontSize: '0.72rem' }}
+                        >
+                          Rectangle
+                        </button>
+                      </div>
+                    )}
+
+                    <input
+                      type="text"
+                      value={editingZone ? editingZone.name : newZoneName}
+                      onChange={(e) =>
+                        editingZone
+                          ? setEditingZone({ ...editingZone, name: e.target.value })
+                          : setNewZoneName(e.target.value)
+                      }
+                      placeholder={t('cameras.zoneNamePlaceholder', 'Zone name (e.g. Vault Gate)')}
+                      style={{
+                        padding: '7px 10px',
+                        backgroundColor: 'var(--bg-surface, #0F172A)',
+                        border: '1px solid var(--border-color, #1E293B)',
+                        borderRadius: '6px',
+                        color: 'var(--text-main, #F8FAFC)',
+                        fontSize: '0.8rem',
+                      }}
+                    />
+
+                    <select
+                      value={editingZone ? editingZone.entry_direction || 'enter' : newZoneDirection}
+                      onChange={(e) =>
+                        editingZone
+                          ? setEditingZone({ ...editingZone, entry_direction: e.target.value })
+                          : setNewZoneDirection(e.target.value)
+                      }
+                      aria-label="Zone Entry Direction"
+                      style={{
+                        padding: '7px 10px',
+                        backgroundColor: 'var(--bg-surface, #0F172A)',
+                        border: '1px solid var(--border-color, #1E293B)',
+                        borderRadius: '6px',
+                        color: 'var(--text-main, #F8FAFC)',
+                        fontSize: '0.78rem',
+                      }}
+                    >
+                      <option value="enter">{t('cameras.dirTriggerEntry', 'Trigger on Entry')}</option>
+                      <option value="any">{t('cameras.dirAnyCrossing', 'Any Crossing')}</option>
+                      <option value="exit">{t('cameras.dirTriggerExit', 'Trigger on Exit')}</option>
+                      <option value="left_to_right">{t('cameras.dirLeftToRight', 'Left to Right')}</option>
+                      <option value="right_to_left">{t('cameras.dirRightToLeft', 'Right to Left')}</option>
+                    </select>
+
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      {editingZone ? (
+                        <button type="button" onClick={() => setEditingZone(null)} className="btn btn-secondary btn-sm" style={{ flex: 1 }}>
+                          Cancel Edit
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setDraftPoints((p) => p.slice(0, -1))}
+                            disabled={draftPoints.length === 0}
+                            className="btn btn-secondary btn-sm"
+                          >
+                            Undo Point
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDraftPoints([])}
+                            disabled={draftPoints.length === 0}
+                            className="btn btn-secondary btn-sm"
+                          >
+                            Clear
+                          </button>
+                        </>
+                      )}
+                      <button type="submit" disabled={isZoneBusy} className="btn btn-primary btn-sm" style={{ flex: 1 }}>
+                        {isZoneBusy ? 'Saving...' : editingZone ? 'Save Changes' : 'Save Zone'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {zones.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--text-muted, #94A3B8)' }}>
+                    {t('cameras.noZonesConfigured', 'No restricted zones configured on this camera yet.')}
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '150px', overflowY: 'auto' }}>
+                    {zones.map((z) => (
+                      <div
+                        key={z.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '7px 9px',
+                          backgroundColor: 'var(--bg-body, #090D16)',
+                          borderRadius: '6px',
+                          border: `1px solid ${activeIntrusions.includes(z.id) ? '#EF4444' : 'var(--border-color, #1E293B)'}`,
+                          fontSize: '0.76rem',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 700, color: 'var(--text-main, #F8FAFC)' }}>{z.name}</div>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94A3B8)' }}>
+                            {z.shape === 'polygon' ? `Polygon (${z.points?.length || 0} pts)` : 'Rectangle'} · {z.enabled ? 'Active' : 'Paused'}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          {zoneEditorOpen && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingZone(z)}
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '2px 7px', fontSize: '0.68rem' }}
+                            >
+                              Vertices
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleRestrictedZone(z.id)}
+                            className="btn btn-secondary btn-sm"
+                            style={{ padding: '2px 7px', fontSize: '0.68rem' }}
+                          >
+                            {z.enabled ? 'Disable' : 'Enable'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRestrictedZone(z.id)}
+                            className="btn btn-secondary btn-sm"
+                            style={{ padding: '2px 7px', fontSize: '0.68rem', color: '#F87171' }}
+                          >
+                            Del
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Active Tracked Objects */}
+              <div
+                style={{
+                  padding: '14px',
+                  backgroundColor: 'var(--bg-surface, #0F172A)',
+                  border: '1px solid var(--border-color, #1E293B)',
+                  borderRadius: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <h4 style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-main, #F8FAFC)' }}>
+                  {t('cameras.activeTracksList', 'Live Tracked Subjects')} ({activeTracksList.length})
+                </h4>
+                {activeTracksList.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--text-muted, #94A3B8)' }}>
+                    {t('cameras.noActiveSubjects', 'No confirmed subjects in frame right now.')}
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
+                    {activeTracksList.slice(0, 8).map((trk, i) => (
+                      <div
+                        key={`${trk.track_id}-${i}`}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          fontSize: '0.76rem',
+                          padding: '6px 8px',
+                          backgroundColor: 'var(--bg-body, #090D16)',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <span style={{ fontWeight: 700, color: '#38BDF8' }}>
+                          {trk.track_id} · {trk.class_name}
+                        </span>
+                        <span style={{ color: 'var(--text-muted, #94A3B8)' }}>
+                          {Math.round((trk.confidence || 0) * 100)}% · {trk.behavior || 'normal'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Restricted-Zone Events & Recent Camera Alerts */}
+              <div
+                style={{
+                  padding: '14px',
+                  backgroundColor: 'var(--bg-surface, #0F172A)',
+                  border: '1px solid var(--border-color, #1E293B)',
+                  borderRadius: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <h4 style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-main, #F8FAFC)' }}>
+                  {t('cameras.zoneEventsTitle', 'Restricted-Zone & Security Events')}
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '180px', overflowY: 'auto' }}>
+                  {recentZoneEvents.length === 0 && cameraAlerts.length === 0 ? (
+                    <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--text-muted, #94A3B8)' }}>
+                      {t('cameras.noRecentZoneEvents', 'No security or zone boundary events triggered yet.')}
+                    </p>
+                  ) : (
+                    <>
+                      {recentZoneEvents.slice(0, 5).map((ev, idx) => (
+                        <div
+                          key={`zv-${idx}`}
+                          style={{
+                            padding: '6px 8px',
+                            borderRadius: '6px',
+                            backgroundColor: ev.event_type === 'restricted_area_entry' ? 'rgba(239,68,68,0.12)' : 'var(--bg-body, #090D16)',
+                            borderLeft: `3px solid ${ev.event_type === 'restricted_area_entry' ? '#EF4444' : '#38BDF8'}`,
+                            fontSize: '0.74rem',
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, color: 'var(--text-main, #F8FAFC)' }}>
+                            {ev.event_type === 'restricted_area_entry' ? 'Security Alert: Zone Entry' : 'Zone Exit'} · {ev.zone_name || 'Zone'}
+                          </div>
+                          <div style={{ color: 'var(--text-muted, #94A3B8)', fontSize: '0.7rem' }}>
+                            {ev.explanation || ev.message} · {formatTimeShort(ev.timestamp)}
+                          </div>
+                        </div>
+                      ))}
+                      {recentZoneEvents.length === 0 && cameraAlerts.slice(0, 5).map((al) => (
+                        <div
+                          key={`al-${al.id}`}
+                          style={{
+                            padding: '6px 8px',
+                            borderRadius: '6px',
+                            backgroundColor: 'var(--bg-body, #090D16)',
+                            borderLeft: `3px solid ${al.severity === 'critical' || al.severity === 'high' ? '#EF4444' : '#F59E0B'}`,
+                            fontSize: '0.74rem',
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, color: 'var(--text-main, #F8FAFC)' }}>
+                            {al.title || al.event_type}
+                          </div>
+                          <div style={{ color: 'var(--text-muted, #94A3B8)', fontSize: '0.7rem' }}>
+                            {String(al.severity || '').toUpperCase()} · {formatTimeShort(al.detected_at)}
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
 
-  // Small PIP preview <video> capturing local browser getUserMedia frames for backend ingestion
-  const renderBrowserBridgeVideo = () =>
-    browserBridgeActive ? (
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 56,
-          right: 12,
-          width: '136px',
-          height: '94px',
-          borderRadius: '8px',
-          border: '2px solid #10B981',
-          backgroundColor: '#000',
-          zIndex: 9,
-          overflow: 'hidden',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
-        }}
-      >
-        <video
-          ref={browserVideoRef}
-          muted
-          playsInline
-          autoPlay
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-        />
-        <span
-          style={{
-            position: 'absolute',
-            top: 3,
-            left: 4,
-            backgroundColor: 'rgba(15, 23, 42, 0.85)',
-            color: '#10B981',
-            fontSize: '0.62rem',
-            fontWeight: 700,
-            padding: '1px 5px',
-            borderRadius: '4px',
-          }}
-        >
-          LOCAL CAM
-        </span>
-      </div>
-    ) : null;
-
-  const getDetectorBadgeLabel = () => {
-    if (detectorBackend === 'opencv_fallback') return 'OpenCV Fallback';
-    if (detectorBackend === 'initializing') return 'AI Initializing...';
-    return t('cameras.yoloModel', 'YOLOv11');
-  };
-
-  // Shared Live Feed Image Renderer (MJPEG stream with automatic snapshot fallback on buffer/error)
-  const renderLiveFeedElement = (altText, aiMode = 'tracking') => {
-    if (!selectedCam || !isPlaying) return null;
-    const mjpegSrc = `/api/cameras/${selectedCam.id}/stream/?mode=${aiMode}&t=${streamTimestamp}`;
-    const showSnapshot = Boolean(snapshotUrl && (!streamLoaded || streamError || useSnapshotFallback));
-
-    return (
-      <>
-        {!useSnapshotFallback && (
-          <img
-            src={mjpegSrc}
-            alt={altText}
-            onError={() => {
-              setStreamError(true);
-              setStreamLoaded(false);
-              setUseSnapshotFallback(true);
-            }}
-            onLoad={(e) => {
-              const img = e.currentTarget;
-              if (img?.naturalWidth > 0 && img?.naturalHeight > 0) {
-                setSourceFrameSize({ width: img.naturalWidth, height: img.naturalHeight });
-              }
-              setStreamError(false);
-              setStreamLoaded(true);
-              setUseSnapshotFallback(false);
-            }}
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'contain',
-              display: showSnapshot ? 'none' : 'block',
-              backgroundColor: '#050914',
-            }}
-          />
-        )}
-        {showSnapshot && (
-          <img
-            src={snapshotUrl}
-            alt={altText}
-            onLoad={(e) => {
-              const img = e.currentTarget;
-              if (img?.naturalWidth > 0 && img?.naturalHeight > 0) {
-                setSourceFrameSize({ width: img.naturalWidth, height: img.naturalHeight });
-              }
-            }}
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'contain',
-              display: 'block',
-              backgroundColor: '#050914',
-            }}
-          />
-        )}
-        {isCameraLive && !streamLoaded && !snapshotUrl && (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: '#090E1A',
-              color: '#94A3B8',
-              gap: '8px',
-              pointerEvents: 'none',
-            }}
-          >
-            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#38BDF8' }}>{t('cameras.connectingLiveStream', 'Connecting Live AI Video Stream...')}</span>
-            <span style={{ fontSize: '0.78rem', color: '#64748B' }}>{t('cameras.syncingAnnotatedFrames', 'Synchronizing annotated camera frames')}</span>
-          </div>
-        )}
-        {isCameraLive && (streamLoaded || snapshotUrl) && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 10,
-              left: 12,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              backgroundColor: 'rgba(15, 23, 42, 0.78)',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              borderRadius: '6px',
-              padding: '3px 8px',
-              fontSize: '0.72rem',
-              fontWeight: 700,
-              color: '#E2E8F0',
-              pointerEvents: 'none',
-              zIndex: 6,
-            }}
-          >
-            <span style={{ color: '#10B981' }}>●</span>
-            <span>{aiMode === 'raw' ? 'RAW' : getDetectorBadgeLabel()}</span>
-            {activeTracksCount > 0 && (
-              <span style={{ color: '#38BDF8' }}>· {activeTracksCount} tracked</span>
-            )}
-          </div>
-        )}
-      </>
-    );
-  };
-
-  return (
+  // =========================================================================
+  // MODALS: ADD/EDIT CAMERA (WITH RESTRICTED-ENTRY CONFIG) & DELETE CONFIRM
+  // =========================================================================
+  const renderCameraModal = () => (
     <div
-      className="cameras-page-container"
       style={{
-        maxWidth: '1440px',
-        margin: '0 auto',
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(2, 6, 23, 0.82)',
         display: 'flex',
-        flexDirection: 'column',
-        gap: '16px',
-        color: '#F8FAFC',
-        fontFamily: 'var(--font-sans, system-ui, -apple-system, sans-serif)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 60,
+        padding: '16px',
       }}
     >
-      {/* Workspace Sub-Tab Switcher matching Figures 7.1.3 - 7.1.6 & 7.1.10 */}
       <div
         style={{
+          width: '100%',
+          maxWidth: '580px',
+          maxHeight: '92vh',
+          overflowY: 'auto',
+          backgroundColor: 'var(--bg-surface, #0F172A)',
+          border: '1px solid var(--border-color, #1E293B)',
+          borderRadius: '14px',
+          padding: '22px',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '12px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-          paddingBottom: '12px',
+          flexDirection: 'column',
+          gap: '14px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {[
-            { id: 'inventory', label: t('cameras.subtabInventory', 'Camera Management (Fig 7.1.3)') },
-            { id: 'yolo', label: t('cameras.subtabYolo', 'Real-Time YOLO (Fig 7.1.4)') },
-            { id: 'tracking', label: t('cameras.subtabTracking', 'Object Tracking (Fig 7.1.5)') },
-            { id: 'zone', label: t('cameras.subtabZone', 'Restricted Zone (Fig 7.1.6)') },
-            { id: 'anomaly', label: t('cameras.subtabAnomaly', 'Anomaly Detection (Fig 7.1.10)') },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              id={`tab-btn-${tab.id}`}
-              onClick={() => setSubTab(tab.id)}
-              style={{
-                background: subTab === tab.id ? 'linear-gradient(90deg, #6366F1, #8B5CF6)' : 'transparent',
-                color: subTab === tab.id ? '#FFFFFF' : '#94A3B8',
-                border: subTab === tab.id ? 'none' : '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '8px',
-                padding: '7px 14px',
-                fontSize: '0.82rem',
-                fontWeight: subTab === tab.id ? 700 : 500,
-                cursor: 'pointer',
-                boxShadow: subTab === tab.id ? '0 2px 10px rgba(99, 102, 241, 0.35)' : 'none',
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-main, #F8FAFC)' }}>
+            {editingCamId ? t('cameras.editCameraTitle', 'Edit Camera & Monitoring Policy') : t('cameras.addCameraTitle', 'Register New Camera')}
+          </h2>
+          <button type="button" onClick={() => setIsAddModalOpen(false)} className="btn btn-secondary btn-sm">
+            ✕
+          </button>
         </div>
 
-        {subTab === 'inventory' && (
-          <button
-            type="button"
-            id="btn-add-camera"
-            onClick={() => {
-              setEditingCamId(null);
-              setConnectionTestResult(null);
-              refreshBrowserDevices();
-              setNewCam({
-                name: '',
-                source_type: 'browser',
-                source: selectedDeviceId || browserDevices[0]?.deviceId || '0',
-                username: '',
-                password: '',
-                location: 'Gate-1',
-                description: '',
-              });
-              setIsAddModalOpen(true);
-            }}
-            style={{
-              backgroundColor: '#6366F1',
-              color: '#FFFFFF',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '8px 16px',
-              fontSize: '0.85rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 2px 8px rgba(99, 102, 241, 0.4)',
-            }}
-          >
-            <span>+</span>
-            <span>{t('cameras.addCamera', 'Add Camera')}</span>
-          </button>
-        )}
-      </div>
-
-      {/* =========================================================================
-          VIEW 1: Figure 7.1.3 — Camera Management Interface
-          ========================================================================= */}
-      {subTab === 'inventory' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div>
-            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#FFFFFF', margin: '0 0 4px 0' }}>
-              {t('cameras.title', 'Cameras')}
-            </h1>
-            <p style={{ fontSize: '0.88rem', color: '#94A3B8', margin: 0 }}>
-              {t('cameras.subtitle', 'Manage and monitor your camera sources')}
-            </p>
-          </div>
-
-          {/* Search bar & Status Filter matching Figure 7.1.3 */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                backgroundColor: '#0F172A',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '8px',
-                padding: '8px 14px',
-                width: '320px',
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2">
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
+        <form onSubmit={handleAddCameraSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.76rem', color: 'var(--text-muted, #94A3B8)', marginBottom: '4px' }}>
+                {t('cameras.nameLabel', 'Camera Name *')}
+              </label>
               <input
+                required
                 type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={t('cameras.searchPlaceholder', 'Search cameras...')}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#FFFFFF',
-                  fontSize: '0.86rem',
-                  outline: 'none',
-                  width: '100%',
-                }}
+                value={newCam.name}
+                onChange={(e) => setNewCam({ ...newCam, name: e.target.value })}
+                placeholder="e.g. Gate-1 Entrance"
+                style={{ width: '100%', padding: '8px 10px', backgroundColor: 'var(--bg-body, #090D16)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '8px', color: 'var(--text-main, #F8FAFC)' }}
               />
             </div>
-
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              style={{
-                backgroundColor: '#0F172A',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                color: '#CBD5E1',
-                borderRadius: '8px',
-                padding: '8px 14px',
-                fontSize: '0.86rem',
-                outline: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <option value="all">{t('cameras.allStatus', 'All Status')}</option>
-              <option value="online">{t('common.online', 'Online')}</option>
-              <option value="offline">{t('common.offline', 'Offline')}</option>
-            </select>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.76rem', color: 'var(--text-muted, #94A3B8)', marginBottom: '4px' }}>
+                {t('cameras.locationLabel', 'Location / Area')}
+              </label>
+              <input
+                type="text"
+                value={newCam.location}
+                onChange={(e) => setNewCam({ ...newCam, location: e.target.value })}
+                placeholder="e.g. Server Room"
+                style={{ width: '100%', padding: '8px 10px', backgroundColor: 'var(--bg-body, #090D16)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '8px', color: 'var(--text-main, #F8FAFC)' }}
+              />
+            </div>
           </div>
 
-          {/* Grid of Camera Cards matching Figure 7.1.3 */}
-          {filteredCameras.length > 0 ? (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
-                gap: '20px',
-                marginTop: '8px',
-              }}
-            >
-              {filteredCameras.map((cam) => {
-                const isOnline = cam.status === 'online';
-                return (
-                  <div
-                    key={cam.id}
-                    onClick={() => {
-                      setSelectedCameraId(cam.id);
-                      setSubTab('yolo');
-                    }}
-                    role="button"
-                    tabIndex={0}
-                    style={{
-                      backgroundColor: '#0F172A',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      borderRadius: '12px',
-                      overflow: 'hidden',
-                      cursor: 'pointer',
-                      transition: 'border-color 0.15s',
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#38BDF8')}
-                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)')}
-                  >
-                    {/* Camera Snapshot / Video Poster */}
-                    <div style={{ position: 'relative', width: '100%', height: '200px', backgroundColor: '#090E1A', overflow: 'hidden' }}>
-                      <img
-                        src={`/api/cameras/${cam.id}/snapshot/`}
-                        alt={cam.name}
-                        loading="lazy"
-                        style={{
-                          position: 'absolute',
-                          inset: 0,
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover',
-                          display: 'block',
-                          zIndex: 1,
-                        }}
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
-                      <div
-                        style={{
-                          position: 'absolute',
-                          inset: 0,
-                          background: 'linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.6) 100%)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          zIndex: 0,
-                        }}
-                      >
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5">
-                          <path d="M23 7l-7 5 7 5V7z" />
-                          <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                        </svg>
-                      </div>
-
-                      {/* Top Right: Status Pill & Actions Menu matching Figure 7.1.3 */}
-                      <div style={{ position: 'absolute', top: '12px', right: '12px', display: 'flex', alignItems: 'center', gap: '8px', zIndex: 5 }}>
-                        <span
-                          style={{
-                            backgroundColor: isOnline ? '#10B981' : '#EF4444',
-                            color: '#FFFFFF',
-                            fontSize: '0.72rem',
-                            fontWeight: 700,
-                            padding: '3px 10px',
-                            borderRadius: '12px',
-                          }}
-                        >
-                          {isOnline ? t('common.online', 'Online') : t('common.offline', 'Offline')}
-                        </span>
-                        <div style={{ position: 'relative' }} onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenMenuCamId(openMenuCamId === cam.id ? null : cam.id);
-                            }}
-                            style={{
-                              background: 'rgba(0, 0, 0, 0.65)',
-                              border: '1px solid rgba(255,255,255,0.18)',
-                              color: '#FFFFFF',
-                              borderRadius: '50%',
-                              width: '26px',
-                              height: '26px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: 'pointer',
-                            }}
-                            title="Camera Actions"
-                          >
-                            ⋮
-                          </button>
-                          {openMenuCamId === cam.id && (
-                            <div
-                              style={{
-                                position: 'absolute',
-                                top: '30px',
-                                right: 0,
-                                width: '168px',
-                                backgroundColor: '#0F172A',
-                                border: '1px solid rgba(255,255,255,0.14)',
-                                borderRadius: '8px',
-                                boxShadow: '0 8px 24px rgba(0,0,0,0.65)',
-                                padding: '4px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '2px',
-                                zIndex: 20,
-                              }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenMenuCamId(null);
-                                  handleReconnectCamera(cam);
-                                }}
-                                style={{
-                                  background: 'transparent',
-                                  border: 'none',
-                                  color: '#38BDF8',
-                                  fontSize: '0.78rem',
-                                  fontWeight: 600,
-                                  padding: '6px 10px',
-                                  textAlign: 'left',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                ↻ Test / Reconnect
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenMenuCamId(null);
-                                  setSelectedCameraId(cam.id);
-                                  setSubTab('yolo');
-                                  handleStartBrowserBridge(cam);
-                                }}
-                                style={{
-                                  background: 'transparent',
-                                  border: 'none',
-                                  color: '#10B981',
-                                  fontSize: '0.78rem',
-                                  fontWeight: 600,
-                                  padding: '6px 10px',
-                                  textAlign: 'left',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                📷 Use Browser Webcam
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenEditModal(cam)}
-                                style={{
-                                  background: 'transparent',
-                                  border: 'none',
-                                  color: '#E2E8F0',
-                                  fontSize: '0.78rem',
-                                  fontWeight: 600,
-                                  padding: '6px 10px',
-                                  textAlign: 'left',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                ⚙ Edit Camera
-                              </button>
-                              {isOnline && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOpenMenuCamId(null);
-                                    handleDisconnectCamera(cam);
-                                  }}
-                                  style={{
-                                    background: 'transparent',
-                                    border: 'none',
-                                    color: '#F59E0B',
-                                    fontSize: '0.78rem',
-                                    fontWeight: 600,
-                                    padding: '6px 10px',
-                                    textAlign: 'left',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  ⏸ Disconnect Stream
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveCamera(cam)}
-                                style={{
-                                  background: 'transparent',
-                                  border: 'none',
-                                  color: '#EF4444',
-                                  fontSize: '0.78rem',
-                                  fontWeight: 600,
-                                  padding: '6px 10px',
-                                  textAlign: 'left',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                🗑 Remove Camera
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Card Footer: Camera Name & Location matching Figure 7.1.3 */}
-                    <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div>
-                        <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#FFFFFF' }}>{cam.name}</div>
-                        <div style={{ fontSize: '0.8rem', color: '#94A3B8' }}>{cam.location}</div>
-                      </div>
-                      <span style={{ fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600 }}>{t('cameras.openStream', 'Open Stream →')}</span>
-                    </div>
-                  </div>
-                );
-              })}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.76rem', color: 'var(--text-muted, #94A3B8)', marginBottom: '4px' }}>
+                {t('cameras.sourceTypeLabel', 'Source Type')}
+              </label>
+              <select
+                value={newCam.source_type}
+                onChange={(e) => setNewCam({ ...newCam, source_type: e.target.value })}
+                style={{ width: '100%', padding: '8px 10px', backgroundColor: 'var(--bg-body, #090D16)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '8px', color: 'var(--text-main, #F8FAFC)' }}
+              >
+                <option value="browser">{t('cameras.srcBrowser', 'Browser Webcam (Client)')}</option>
+                <option value="webcam">{t('cameras.srcWebcam', 'Local USB / Built-In Webcam (0)')}</option>
+                <option value="phone">{t('cameras.srcPhone', 'Phone / IP Camera (HTTP MJPEG)')}</option>
+                <option value="rtsp">{t('cameras.srcRtsp', 'RTSP Network Camera')}</option>
+              </select>
             </div>
-          ) : (
-            <div style={{ padding: '48px 24px', textAlign: 'center', backgroundColor: '#0F172A', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8' }}>
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5" style={{ display: 'block', margin: '0 auto 12px' }}>
-                <path d="M23 7l-7 5 7 5V7z" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-              </svg>
-              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#E2E8F0' }}>{t('cameras.noCamerasFound', 'No Cameras Found')}</div>
-              <div style={{ fontSize: '0.84rem', color: '#64748B', marginTop: 4 }}>
-                {loading ? t('cameras.connectingInventory', 'Connecting to camera inventory...') : t('cameras.noMatchingCameras', 'No camera sources match the selected criteria.')}
-              </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.76rem', color: 'var(--text-muted, #94A3B8)', marginBottom: '4px' }}>
+                {t('cameras.sourceLabel', 'Source / Stream URL')}
+              </label>
+              <input
+                type="text"
+                value={newCam.source}
+                onChange={(e) => setNewCam({ ...newCam, source: e.target.value })}
+                placeholder={newCam.source_type === 'webcam' ? '0' : 'http://... or 0'}
+                style={{ width: '100%', padding: '8px 10px', backgroundColor: 'var(--bg-body, #090D16)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '8px', color: 'var(--text-main, #F8FAFC)' }}
+              />
+            </div>
+          </div>
+
+          {(newCam.source_type === 'rtsp' || newCam.source_type === 'phone') && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <input
+                type="text"
+                value={newCam.username}
+                onChange={(e) => setNewCam({ ...newCam, username: e.target.value })}
+                placeholder="Stream username (optional)"
+                style={{ padding: '8px 10px', backgroundColor: 'var(--bg-body, #090D16)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '8px', color: 'var(--text-main, #F8FAFC)' }}
+              />
+              <input
+                type="password"
+                value={newCam.password}
+                onChange={(e) => setNewCam({ ...newCam, password: e.target.value })}
+                placeholder="Stream password (optional)"
+                style={{ padding: '8px 10px', backgroundColor: 'var(--bg-body, #090D16)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '8px', color: 'var(--text-main, #F8FAFC)' }}
+              />
             </div>
           )}
-        </div>
-      )}
 
-      {/* =========================================================================
-          VIEW 2: Figure 7.1.4 — Real-Time Surveillance with YOLO Object Detection
-          ========================================================================= */}
-      {subTab === 'yolo' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {/* Top Bar matching Figure 7.1.4 */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <select
-                value={selectedCameraId}
-                onChange={(e) => setSelectedCameraId(Number(e.target.value))}
-                style={{
-                  backgroundColor: '#0F172A',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  color: '#FFFFFF',
-                  borderRadius: '8px',
-                  padding: '6px 12px',
-                  fontSize: '0.9rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                {cameras.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.location})</option>
-                ))}
-              </select>
-              <span
-                style={{
-                  backgroundColor: isCameraLive ? '#10B981' : '#64748B',
-                  color: '#FFFFFF',
-                  fontSize: '0.72rem',
-                  fontWeight: 700,
-                  padding: '3px 10px',
-                  borderRadius: '12px',
-                }}
-              >
-                {isCameraLive ? t('cameras.live', 'Live') : t('cameras.offline', 'Offline')}
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span style={{ fontSize: '0.85rem', color: '#CBD5E1', fontWeight: 600 }}>{t('cameras.detection', 'Detection')}</span>
-              <button
-                type="button"
-                onClick={() => setDetectionEnabled(!detectionEnabled)}
-                style={{
-                  width: '42px',
-                  height: '24px',
-                  borderRadius: '12px',
-                  backgroundColor: detectionEnabled ? '#3B82F6' : '#334155',
-                  border: 'none',
-                  cursor: 'pointer',
-                  position: 'relative',
-                  padding: '2px',
-                  transition: 'background-color 0.2s',
-                }}
-              >
-                <div
-                  style={{
-                    width: '20px',
-                    height: '20px',
-                    borderRadius: '50%',
-                    backgroundColor: '#FFFFFF',
-                    transform: detectionEnabled ? 'translateX(18px)' : 'translateX(0)',
-                    transition: 'transform 0.2s',
-                  }}
-                />
-              </button>
-              <span
-                title={`Active detector backend: ${detectorBackend || 'yolo11n'}`}
-                style={{ backgroundColor: '#1E293B', color: detectorBackend === 'opencv_fallback' ? '#FBBF24' : '#94A3B8', fontSize: '0.75rem', fontWeight: 700, padding: '4px 10px', borderRadius: '6px' }}
-              >
-                {getDetectorBadgeLabel()}
-              </span>
-            </div>
-          </div>
-
-          {/* Surveillance Viewport */}
+          {/* Restricted-Entry Camera Registration Configuration */}
           <div
-            ref={viewportContainerRef}
             style={{
-              position: 'relative',
-              width: '100%',
-              height: '520px',
-              backgroundColor: '#090E1A',
-              borderRadius: '12px',
-              overflow: 'hidden',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: '12px',
+              backgroundColor: 'var(--bg-body, #090D16)',
+              border: `1px solid ${newCam.restricted_entry_enabled ? 'rgba(239, 68, 68, 0.45)' : 'var(--border-color, #1E293B)'}`,
+              borderRadius: '10px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
             }}
           >
-            {renderLiveFeedElement(selectedCam?.name || 'YOLO Surveillance Feed', detectionEnabled ? 'tracking' : 'raw')}
-            {renderBrowserBridgeVideo()}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontWeight: 700, fontSize: '0.86rem', color: 'var(--text-main, #F8FAFC)' }}>
+              <input
+                type="checkbox"
+                checked={newCam.restricted_entry_enabled}
+                onChange={(e) => setNewCam({ ...newCam, restricted_entry_enabled: e.target.checked })}
+                data-testid="toggle-restricted-entry"
+                style={{ width: '16px', height: '16px', accentColor: '#EF4444' }}
+              />
+              <span>{t('cameras.enableRestrictedEntry', 'Enable Restricted-Entry Monitoring')}</span>
+            </label>
 
-            {/* Offline or Error State Display */}
-            {(!selectedCam || !isCameraLive || !isPlaying) && (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: 'rgba(9, 14, 26, 0.94)',
-                  color: '#94A3B8',
-                  gap: 12,
-                  padding: 20,
-                  textAlign: 'center',
-                }}
-              >
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5">
-                  <path d="M23 7l-7 5 7 5V7z" />
-                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                  <line x1="1" y1="1" x2="23" y2="23" stroke="#EF4444" strokeWidth="2" />
-                </svg>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
-                  {!isPlaying
-                    ? t('cameras.streamPaused', 'Surveillance Stream Paused')
-                    : t('cameras.cameraOfflineTitle', '{name} is Offline', { name: selectedCam?.name || 'Camera' })}
-                </div>
-                <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 420 }}>
-                  {!isPlaying
-                    ? t('cameras.streamPausedDesc', 'Stream playback is currently paused. Press play on the transport bar to resume.')
-                    : t('cameras.cameraOfflineDesc', 'The camera feed is disconnected or waiting for the video pipeline to start. Ensure camera is powered and network stream is reachable.')}
-                </div>
-                {isPlaying && selectedCam && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
-                    <button
-                      type="button"
-                      onClick={() => handleReconnectCamera(selectedCam)}
-                      disabled={isReconnecting}
-                      style={{
-                        backgroundColor: '#2563EB',
-                        color: '#FFFFFF',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '8px 16px',
-                        fontSize: '0.82rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
+            {newCam.restricted_entry_enabled && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '4px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted, #94A3B8)', marginBottom: '4px' }}>
+                      {t('cameras.entryDirectionLabel', 'Allowed / Trigger Direction')}
+                    </label>
+                    <select
+                      value={newCam.entry_direction}
+                      onChange={(e) => setNewCam({ ...newCam, entry_direction: e.target.value })}
+                      style={{ width: '100%', padding: '7px 9px', backgroundColor: 'var(--bg-surface, #0F172A)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '6px', color: 'var(--text-main, #F8FAFC)', fontSize: '0.8rem' }}
                     >
-                      {isReconnecting ? 'Reconnecting...' : '↻ Reconnect Camera'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleStartBrowserBridge(selectedCam)}
-                      style={{
-                        backgroundColor: '#10B981',
-                        color: '#FFFFFF',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '8px 16px',
-                        fontSize: '0.82rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      📷 Connect Browser Webcam / Phone
-                    </button>
+                      <option value="enter">{t('cameras.dirTriggerZoneEntry', 'Trigger on Zone Entry')}</option>
+                      <option value="any">{t('cameras.dirAnyPerimeter', 'Any Perimeter Crossing')}</option>
+                      <option value="exit">{t('cameras.dirTriggerZoneExit', 'Trigger on Zone Exit')}</option>
+                      <option value="left_to_right">{t('cameras.dirLeftToRight', 'Left to Right')}</option>
+                      <option value="right_to_left">{t('cameras.dirRightToLeft', 'Right to Left')}</option>
+                      <option value="top_to_bottom">{t('cameras.dirTopToBottom', 'Top to Bottom')}</option>
+                      <option value="bottom_to_top">{t('cameras.dirBottomToTop', 'Bottom to Top')}</option>
+                    </select>
                   </div>
-                )}
-              </div>
-            )}
-
-            {/* Bottom Transport Controls Bar matching Figure 7.1.4 */}
-            {renderTransportBar()}
-          </div>
-        </div>
-      )}
-
-      {/* =========================================================================
-          VIEW 3: Figure 7.1.5 — Object Tracking with Tracking Identifiers
-          ========================================================================= */}
-      {subTab === 'tracking' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>{t('cameras.subtabTracking', 'Object Tracking')}</div>
-              <select
-                value={selectedCameraId}
-                onChange={(e) => setSelectedCameraId(Number(e.target.value))}
-                style={{
-                  backgroundColor: '#0F172A',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  color: '#CBD5E1',
-                  borderRadius: '6px',
-                  padding: '4px 10px',
-                  fontSize: '0.85rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                {cameras.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.location})</option>
-                ))}
-              </select>
-              <span
-                style={{
-                  backgroundColor: isCameraLive ? '#10B981' : '#64748B',
-                  color: '#FFFFFF',
-                  fontSize: '0.72rem',
-                  fontWeight: 700,
-                  padding: '3px 10px',
-                  borderRadius: '12px',
-                }}
-              >
-                {isCameraLive ? t('cameras.live', 'Live') : t('cameras.offline', 'Offline')}
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span style={{ fontSize: '0.85rem', color: '#CBD5E1', fontWeight: 600 }}>{t('cameras.tracking', 'Tracking')}</span>
-              <button
-                type="button"
-                onClick={() => setTrackingEnabled(!trackingEnabled)}
-                style={{
-                  width: '42px',
-                  height: '24px',
-                  borderRadius: '12px',
-                  backgroundColor: trackingEnabled ? '#8B5CF6' : '#334155',
-                  border: 'none',
-                  cursor: 'pointer',
-                  position: 'relative',
-                  padding: '2px',
-                }}
-              >
-                <div
-                  style={{
-                    width: '20px',
-                    height: '20px',
-                    borderRadius: '50%',
-                    backgroundColor: '#FFFFFF',
-                    transform: trackingEnabled ? 'translateX(18px)' : 'translateX(0)',
-                    transition: 'transform 0.2s',
-                  }}
-                />
-              </button>
-              <span style={{ backgroundColor: '#1E293B', color: '#A78BFA', fontSize: '0.75rem', fontWeight: 700, padding: '4px 10px', borderRadius: '6px' }}>
-                {t('cameras.byteTrack', 'ByteTrack')}
-              </span>
-            </div>
-          </div>
-
-          <div
-            ref={viewportContainerRef}
-            style={{
-              position: 'relative',
-              width: '100%',
-              height: '520px',
-              backgroundColor: '#090E1A',
-              borderRadius: '12px',
-              overflow: 'hidden',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-            }}
-          >
-            {renderLiveFeedElement('Live Tracking', trackingEnabled ? 'tracking' : 'raw')}
-            {renderBrowserBridgeVideo()}
-
-            {(!selectedCam || !isCameraLive) && (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: 'rgba(9, 14, 26, 0.94)',
-                  color: '#94A3B8',
-                  gap: 12,
-                  padding: 20,
-                  textAlign: 'center',
-                }}
-              >
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5">
-                  <path d="M23 7l-7 5 7 5V7z" />
-                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                </svg>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
-                  {t('cameras.trackingDisconnectedTitle', '{name} Tracking Pipeline Disconnected', { name: selectedCam?.name || 'Camera' })}
-                </div>
-                <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 420 }}>
-                  {t('cameras.trackingDisconnectedDesc', 'Camera is currently offline. Multi-object tracking with ByteTrack will resume automatically upon camera reconnection.')}
-                </div>
-                {selectedCam && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
-                    <button
-                      type="button"
-                      onClick={() => handleReconnectCamera(selectedCam)}
-                      disabled={isReconnecting}
-                      style={{ backgroundColor: '#2563EB', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted, #94A3B8)', marginBottom: '4px' }}>
+                      {t('cameras.alertSeverityLabel', 'Default Alert Severity')}
+                    </label>
+                    <select
+                      value={newCam.alert_severity}
+                      onChange={(e) => setNewCam({ ...newCam, alert_severity: e.target.value })}
+                      style={{ width: '100%', padding: '7px 9px', backgroundColor: 'var(--bg-surface, #0F172A)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '6px', color: 'var(--text-main, #F8FAFC)', fontSize: '0.8rem' }}
                     >
-                      {isReconnecting ? 'Reconnecting...' : '↻ Reconnect'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleStartBrowserBridge(selectedCam)}
-                      style={{ backgroundColor: '#10B981', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
-                    >
-                      📷 Use Browser Camera
-                    </button>
+                      <option value="critical">{t('severity.critical', 'Critical')}</option>
+                      <option value="high">{t('severity.high', 'High')}</option>
+                      <option value="medium">{t('severity.medium', 'Medium')}</option>
+                    </select>
                   </div>
-                )}
-              </div>
-            )}
+                </div>
 
-            {/* Bottom Transport Controls Bar matching Figure 7.1.5 */}
-            {renderTransportBar()}
-          </div>
-
-          {activeTracksList.length > 0 && (
-            <div
-              style={{
-                backgroundColor: '#0F172A',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '10px',
-                padding: '10px 14px',
-                display: 'flex',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                gap: '8px',
-              }}
-            >
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
-                Active Track IDs ({activeTracksList.length}):
-              </span>
-              {activeTracksList.map((trk, idx) => (
-                <span
-                  key={`${trk.track_id || idx}-${idx}`}
-                  style={{
-                    backgroundColor: 'rgba(139, 92, 246, 0.16)',
-                    border: '1px solid rgba(139, 92, 246, 0.35)',
-                    color: '#DDD6FE',
-                    fontSize: '0.76rem',
-                    fontWeight: 700,
-                    padding: '3px 9px',
-                    borderRadius: '6px',
-                  }}
-                >
-                  {trk.track_id} {trk.class_name} ({Math.round((Number(trk.confidence || 0)) * 100)}%) · {trk.behavior || 'normal'}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* =========================================================================
-          VIEW 4: Figure 7.1.6 — Restricted Zone Monitoring
-          ========================================================================= */}
-      {subTab === 'zone' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>{t('cameras.zoneMonitoringTitle', 'Restricted Zone Monitoring')}</div>
-              <select
-                value={selectedCameraId}
-                onChange={(e) => setSelectedCameraId(Number(e.target.value))}
-                style={{
-                  backgroundColor: '#0F172A',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  color: '#CBD5E1',
-                  borderRadius: '6px',
-                  padding: '4px 10px',
-                  fontSize: '0.85rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                {cameras.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.location})</option>
-                ))}
-              </select>
-              <span
-                style={{
-                  backgroundColor: isCameraLive ? '#10B981' : '#64748B',
-                  color: '#FFFFFF',
-                  fontSize: '0.72rem',
-                  fontWeight: 700,
-                  padding: '3px 10px',
-                  borderRadius: '12px',
-                }}
-              >
-                {isCameraLive ? t('cameras.live', 'Live') : t('cameras.offline', 'Offline')}
-              </span>
-              <span style={{ fontSize: '0.85rem', color: '#94A3B8' }}>
-                {t('cameras.zoneLabel', 'Zone: {name}', { name: zones[0]?.name || selectedCam?.location || 'Gate-1' })}
-              </span>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '20px' }}>
-            {/* Viewport with Real DB Restricted Zones */}
-            <div
-              ref={viewportContainerRef}
-              style={{
-                position: 'relative',
-                width: '100%',
-                height: '480px',
-                backgroundColor: '#090E1A',
-                borderRadius: '12px',
-                overflow: 'hidden',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-              }}
-            >
-              {renderLiveFeedElement('Restricted Zone Stream', 'tracking')}
-              {renderBrowserBridgeVideo()}
-
-              {/* Real Database Restricted Zone Indicator Overlay (shown when offline/unannotated or synced) */}
-              {zones.length > 0 && !streamLoaded && !snapshotUrl && (
-                <svg
-                  viewBox={`0 0 ${sourceFrameSize.width || 640} ${sourceFrameSize.height || 480}`}
-                  preserveAspectRatio="xMidYMid meet"
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
-                >
-                  {zones.filter((z) => z.enabled !== false).map((z) => {
-                    const fw = sourceFrameSize.width || 640;
-                    const fh = sourceFrameSize.height || 480;
-                    const rx1 = Number(z.x1 || 0);
-                    const ry1 = Number(z.y1 || 0);
-                    const rx2 = Number(z.x2 || 0);
-                    const ry2 = Number(z.y2 || 0);
-                    const isNorm = Math.max(rx1, rx2) <= 1.0 && Math.max(ry1, ry2) <= 1.0 && Math.max(rx2, ry2) > 0;
-                    const exceeds = !isNorm && (Math.max(rx1, rx2) > fw || Math.max(ry1, ry2) > fh);
-                    const refW = exceeds ? (Math.max(rx1, rx2) <= 1280 && Math.max(ry1, ry2) <= 720 ? 1280 : 1920) : fw;
-                    const refH = exceeds ? (refW === 1280 ? 720 : 1080) : fh;
-                    const zx1 = isNorm ? rx1 * fw : (exceeds ? (rx1 * fw) / refW : rx1);
-                    const zy1 = isNorm ? ry1 * fh : (exceeds ? (ry1 * fh) / refH : ry1);
-                    const zx2 = isNorm ? rx2 * fw : (exceeds ? (rx2 * fw) / refW : rx2);
-                    const zy2 = isNorm ? ry2 * fh : (exceeds ? (ry2 * fh) / refH : ry2);
-                    const intruded = activeIntrusions.includes(z.id);
-                    return (
-                      <g key={z.id}>
-                        <rect
-                          x={zx1}
-                          y={zy1}
-                          width={Math.max(10, zx2 - zx1)}
-                          height={Math.max(10, zy2 - zy1)}
-                          fill={intruded ? 'rgba(239, 68, 68, 0.24)' : 'rgba(245, 158, 11, 0.14)'}
-                          stroke={intruded ? '#EF4444' : '#F59E0B'}
-                          strokeWidth="2"
-                          strokeDasharray="6,4"
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted, #94A3B8)', marginBottom: '4px' }}>
+                    {t('cameras.scheduleLabel', 'Active Monitoring Schedule')}
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select
+                      value={newCam.schedule_mode}
+                      onChange={(e) => setNewCam({ ...newCam, schedule_mode: e.target.value })}
+                      style={{ padding: '6px 9px', backgroundColor: 'var(--bg-surface, #0F172A)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '6px', color: 'var(--text-main, #F8FAFC)', fontSize: '0.78rem' }}
+                    >
+                      <option value="always">{t('cameras.schedAlways', 'Always Active (24/7)')}</option>
+                      <option value="custom">{t('cameras.schedCustom', 'Custom Time Window')}</option>
+                    </select>
+                    {newCam.schedule_mode === 'custom' && (
+                      <>
+                        <input
+                          type="time"
+                          value={newCam.schedule_start}
+                          onChange={(e) => setNewCam({ ...newCam, schedule_start: e.target.value })}
+                          style={{ padding: '5px 8px', backgroundColor: 'var(--bg-surface, #0F172A)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '6px', color: 'var(--text-main, #F8FAFC)' }}
                         />
-                        <text x={zx1 + 8} y={Math.max(18, zy1 + 18)} fill={intruded ? '#EF4444' : '#F59E0B'} fontSize="13" fontWeight="800">
-                          {z.name}
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              )}
-
-              {(!selectedCam || !isCameraLive) && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: 'rgba(9, 14, 26, 0.94)',
-                    color: '#94A3B8',
-                    gap: 12,
-                    padding: 20,
-                    textAlign: 'center',
-                  }}
-                >
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  </svg>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
-                    {t('cameras.zoneInactiveTitle', 'Restricted Zone Monitoring Inactive')}
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 400 }}>
-                    {t('cameras.zoneInactiveDesc', 'Camera is currently offline. Zone intrusion tripwires remain armed in backend configuration.')}
-                  </div>
-                  {selectedCam && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleReconnectCamera(selectedCam)}
-                        disabled={isReconnecting}
-                        style={{ backgroundColor: '#2563EB', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
-                      >
-                        {isReconnecting ? 'Reconnecting...' : '↻ Reconnect'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleStartBrowserBridge(selectedCam)}
-                        style={{ backgroundColor: '#10B981', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
-                      >
-                        📷 Use Browser Camera
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Bottom Transport Controls Bar matching Figure 7.1.6 */}
-              {renderTransportBar()}
-            </div>
-
-            {/* Right Alert Card matching Figure 7.1.6 */}
-            <div
-              style={{
-                backgroundColor: '#0F172A',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '12px',
-                padding: '1.5rem',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    backgroundColor: (intrusionAlert || activeIntrusions.length > 0) ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                    border: `1px solid ${(intrusionAlert || activeIntrusions.length > 0) ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)'}`,
-                    borderRadius: '8px',
-                    padding: '8px 12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    color: (intrusionAlert || activeIntrusions.length > 0) ? '#EF4444' : '#10B981',
-                    fontWeight: 800,
-                    fontSize: '0.88rem',
-                    marginBottom: '1rem',
-                  }}
-                >
-                  <span>{(intrusionAlert || activeIntrusions.length > 0) ? '⚠️' : '🛡️'}</span>
-                  <span>{(intrusionAlert || activeIntrusions.length > 0) ? t('cameras.intrusionDetected', 'Intrusion Detected') : t('cameras.zoneArmedSecure', 'Zone Armed & Secure')}</span>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.84rem', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94A3B8' }}>{t('cameras.cameraLabel', 'Camera')}</span>
-                    <span style={{ fontWeight: 700, color: '#FFFFFF' }}>{selectedCam?.name || 'N/A'}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94A3B8' }}>{t('cameras.zoneHeader', 'Zone')}</span>
-                    <span style={{ fontWeight: 700, color: '#FFFFFF' }}>
-                      {intrusionAlert?.zone_name || zones[0]?.name || 'None Configured'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94A3B8' }}>{t('cameras.objectLabel', 'Object')}</span>
-                    <span style={{ fontWeight: 700, color: '#FFFFFF' }}>
-                      {intrusionAlert?.detected_object || (activeIntrusions.length > 0 ? t('cameras.personObject', 'Person') : t('cameras.noneObject', 'None'))}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94A3B8' }}>{t('cameras.confidenceLabel', 'Confidence')}</span>
-                    <span style={{ fontWeight: 700, color: '#10B981' }}>
-                      {intrusionAlert?.confidence ? Number(intrusionAlert.confidence).toFixed(2) : (activeIntrusions.length > 0 ? '0.89' : '0.00')}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94A3B8' }}>{t('cameras.timeLabel', 'Time')}</span>
-                    <span style={{ fontWeight: 600, color: '#CBD5E1' }}>
-                      {intrusionAlert ? formatAlertTime(intrusionAlert.detected_at || intrusionAlert.created_at) : t('cameras.activeSurveillance', 'Active Surveillance')}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Real DB Zone Configuration Controls */}
-                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '12px', marginBottom: '12px' }}>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#CBD5E1', marginBottom: '8px' }}>
-                    Configured Zones ({zones.length})
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '130px', overflowY: 'auto', marginBottom: '8px' }}>
-                    {zones.length === 0 ? (
-                      <div style={{ fontSize: '0.75rem', color: '#64748B' }}>{t('cameras.noZonesConfigured', 'No restricted zones yet. Add one below to monitor perimeter entry.')}</div>
-                    ) : (
-                      zones.map((z) => (
-                        <div
-                          key={z.id}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            backgroundColor: '#090E1A',
-                            border: '1px solid rgba(255, 255, 255, 0.08)',
-                            borderRadius: '6px',
-                            padding: '5px 8px',
-                            fontSize: '0.76rem',
-                          }}
-                        >
-                          <span style={{ color: z.enabled === false ? '#64748B' : '#F8FAFC', fontWeight: 600 }}>{z.name}</span>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button
-                              type="button"
-                              onClick={() => handleRenameRestrictedZone(z)}
-                              disabled={isZoneBusy}
-                              style={{
-                                background: 'transparent',
-                                border: '1px solid rgba(255,255,255,0.12)',
-                                color: '#CBD5E1',
-                                borderRadius: '4px',
-                                padding: '2px 6px',
-                                fontSize: '0.7rem',
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleToggleRestrictedZone(z.id)}
-                              disabled={isZoneBusy}
-                              style={{
-                                background: 'transparent',
-                                border: '1px solid rgba(255,255,255,0.12)',
-                                color: z.enabled === false ? '#64748B' : '#10B981',
-                                borderRadius: '4px',
-                                padding: '2px 6px',
-                                fontSize: '0.7rem',
-                                cursor: 'pointer',
-                              }}
-                            >
-                              {z.enabled === false ? 'Off' : 'On'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteRestrictedZone(z.id)}
-                              disabled={isZoneBusy}
-                              style={{
-                                background: 'transparent',
-                                border: '1px solid rgba(239,68,68,0.35)',
-                                color: '#FCA5A5',
-                                borderRadius: '4px',
-                                padding: '2px 6px',
-                                fontSize: '0.7rem',
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Del
-                            </button>
-                          </div>
-                        </div>
-                      ))
+                        <span style={{ color: 'var(--text-muted, #94A3B8)' }}>{t('common.to', 'to')}</span>
+                        <input
+                          type="time"
+                          value={newCam.schedule_end}
+                          onChange={(e) => setNewCam({ ...newCam, schedule_end: e.target.value })}
+                          style={{ padding: '5px 8px', backgroundColor: 'var(--bg-surface, #0F172A)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '6px', color: 'var(--text-main, #F8FAFC)' }}
+                        />
+                      </>
                     )}
                   </div>
-                  <form onSubmit={handleCreateRestrictedZone} style={{ display: 'flex', gap: '6px' }}>
-                    <input
-                      type="text"
-                      value={newZoneName}
-                      onChange={(e) => setNewZoneName(e.target.value)}
-                      placeholder="Zone name..."
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        backgroundColor: '#090E1A',
-                        border: '1px solid #1E293B',
-                        borderRadius: '6px',
-                        padding: '6px 8px',
-                        color: '#FFFFFF',
-                        fontSize: '0.76rem',
-                        outline: 'none',
-                      }}
-                    />
-                    <button
-                      type="submit"
-                      disabled={isZoneBusy}
-                      style={{
-                        backgroundColor: '#F59E0B',
-                        color: '#0F172A',
-                        border: 'none',
-                        borderRadius: '6px',
-                        padding: '6px 10px',
-                        fontSize: '0.76rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      + Add Zone
-                    </button>
-                  </form>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => onNavigate && onNavigate('notifications', { tab: 'notifications' })}
-                style={{
-                  backgroundColor: '#6366F1',
-                  color: '#FFFFFF',
-                  border: 'none',
-                  borderRadius: '8px',
-                  padding: '10px 16px',
-                  fontSize: '0.88rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  width: '100%',
-                }}
-              >
-                {t('cameras.viewEvent', 'View Event')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* =========================================================================
-          VIEW 5: Figure 7.1.10 — Anomaly Detection Result
-          ========================================================================= */}
-      {subTab === 'anomaly' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF' }}>{t('cameras.anomalyTitle', 'Anomaly Detection')}</div>
-                <div style={{ fontSize: '0.85rem', color: '#94A3B8' }}>{t('cameras.anomalySubtitle', 'Detects unusual activities using AI models')}</div>
-              </div>
-              <select
-                value={selectedCameraId}
-                onChange={(e) => setSelectedCameraId(Number(e.target.value))}
-                style={{
-                  backgroundColor: '#0F172A',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  color: '#CBD5E1',
-                  borderRadius: '6px',
-                  padding: '4px 10px',
-                  fontSize: '0.85rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                {cameras.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.location})</option>
-                ))}
-              </select>
-            </div>
-
-            <span
-              style={{
-                backgroundColor: isCameraLive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
-                color: isCameraLive ? '#10B981' : '#94A3B8',
-                border: `1px solid ${isCameraLive ? 'rgba(16, 185, 129, 0.3)' : 'rgba(148, 163, 184, 0.3)'}`,
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                padding: '4px 12px',
-                borderRadius: '12px',
-              }}
-            >
-              {isCameraLive ? t('cameras.runningStatus', '● Running') : t('cameras.offlineIdleStatus', '● Offline / Idle')}
-            </span>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '20px' }}>
-            <div
-              ref={viewportContainerRef}
-              style={{
-                position: 'relative',
-                width: '100%',
-                height: '480px',
-                backgroundColor: '#090E1A',
-                borderRadius: '12px',
-                overflow: 'hidden',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-              }}
-            >
-              {renderLiveFeedElement('Anomaly Stream', 'tracking')}
-              {renderBrowserBridgeVideo()}
-
-              {(!selectedCam || !isCameraLive) && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: 'rgba(9, 14, 26, 0.94)',
-                    color: '#94A3B8',
-                    gap: 12,
-                    padding: 20,
-                    textAlign: 'center',
-                  }}
-                >
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="1.5">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" y1="8" x2="12" y2="12" />
-                    <line x1="12" y1="16" x2="12.01" y2="16" />
-                  </svg>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F1F5F9' }}>
-                    {t('cameras.anomalyDisconnectedTitle', 'Anomaly Monitoring Disconnected')}
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: 400 }}>
-                    {t('cameras.anomalyDisconnectedDesc', 'Camera is currently offline. AI movement analysis model is initialized and standing by.')}
-                  </div>
-                  {selectedCam && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleReconnectCamera(selectedCam)}
-                        disabled={isReconnecting}
-                        style={{ backgroundColor: '#2563EB', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
-                      >
-                        {isReconnecting ? 'Reconnecting...' : '↻ Reconnect'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleStartBrowserBridge(selectedCam)}
-                        style={{ backgroundColor: '#10B981', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
-                      >
-                        📷 Use Browser Camera
-                      </button>
+                  {newCam.schedule_mode === 'custom' && (
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '6px', flexWrap: 'wrap' }}>
+                      {DAY_LABELS.map((lbl, idx) => {
+                        const checked = newCam.schedule_days.includes(idx);
+                        return (
+                          <button
+                            key={lbl}
+                            type="button"
+                            onClick={() => {
+                              const next = checked
+                                ? newCam.schedule_days.filter((d) => d !== idx)
+                                : [...newCam.schedule_days, idx].sort();
+                              setNewCam({ ...newCam, schedule_days: next.length ? next : [idx] });
+                            }}
+                            style={{
+                              padding: '3px 8px',
+                              fontSize: '0.7rem',
+                              borderRadius: '4px',
+                              border: '1px solid var(--border-color, #1E293B)',
+                              cursor: 'pointer',
+                              backgroundColor: checked ? '#0891B2' : 'var(--bg-surface, #0F172A)',
+                              color: checked ? '#FFFFFF' : 'var(--text-muted, #94A3B8)',
+                            }}
+                          >
+                            {lbl}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
-              )}
 
-              {/* Bottom Transport Controls Bar matching Figure 7.1.10 */}
-              {renderTransportBar()}
-            </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted, #94A3B8)', marginBottom: '4px' }}>
+                    {t('cameras.recipientsLabel', 'Notification Email Recipients (comma-separated)')}
+                  </label>
+                  <input
+                    type="text"
+                    value={newCam.notification_recipients}
+                    onChange={(e) => setNewCam({ ...newCam, notification_recipients: e.target.value })}
+                    placeholder="security@company.com, ops@company.com"
+                    style={{ width: '100%', padding: '7px 9px', backgroundColor: 'var(--bg-surface, #0F172A)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '6px', color: 'var(--text-main, #F8FAFC)', fontSize: '0.8rem' }}
+                  />
+                </div>
 
-            {/* Right Anomaly Result Card matching Figure 7.1.10 */}
+                <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', fontSize: '0.76rem', color: 'var(--text-secondary, #CBD5E1)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={newCam.require_alert}
+                      onChange={(e) => setNewCam({ ...newCam, require_alert: e.target.checked })}
+                    />
+                    <span>{t('cameras.persistAlertEvidence', 'Persist Alert & Evidence')}</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={newCam.suppress_duplicates}
+                      onChange={(e) => setNewCam({ ...newCam, suppress_duplicates: e.target.checked })}
+                    />
+                    <span>Suppress Duplicates ({newCam.cooldown_seconds}s)</span>
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {connectionTestResult && (
             <div
               style={{
-                backgroundColor: '#0F172A',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '12px',
-                padding: '1.5rem',
+                padding: '8px 10px',
+                borderRadius: '6px',
+                fontSize: '0.78rem',
+                backgroundColor: connectionTestResult.success ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+                color: connectionTestResult.success ? '#34D399' : '#F87171',
               }}
             >
-              <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#FFFFFF', margin: '0 0 1rem 0' }}>
-                {t('cameras.anomalyResult', 'Anomaly Result')}
-              </h3>
+              {connectionTestResult.message}
+            </div>
+          )}
 
-              <div
-                style={{
-                  backgroundColor: anomalyAlert ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                  border: `1px solid ${anomalyAlert ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)'}`,
-                  borderRadius: '8px',
-                  padding: '8px 12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  color: anomalyAlert ? '#EF4444' : '#10B981',
-                  fontWeight: 800,
-                  fontSize: '0.88rem',
-                  marginBottom: '1.5rem',
-                }}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={handleTestModalConnection}
+                disabled={isTestingConnection}
+                className="btn btn-secondary btn-sm"
               >
-                <span>{anomalyAlert ? '⚠️' : '✓'}</span>
-                <span>{anomalyAlert ? t('cameras.anomalyDetected', 'Anomaly Detected') : t('cameras.noAnomaliesDetected', 'No Anomalies Detected')}</span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.85rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94A3B8' }}>{t('cameras.typeLabel', 'Type')}</span>
-                  <span style={{ fontWeight: 700, color: '#FFFFFF' }}>
-                    {anomalyAlert?.anomaly_type || anomalyAlert?.title || (anomalyAlert ? t('cameras.fallAnomaly', 'Fall') : t('cameras.normalAnomaly', 'Normal'))}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94A3B8' }}>{t('cameras.confidenceLabel', 'Confidence')}</span>
-                  <span style={{ fontWeight: 700, color: '#10B981' }}>
-                    {anomalyAlert?.confidence ? Number(anomalyAlert.confidence).toFixed(2) : (anomalyAlert ? '0.93' : '0.00')}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94A3B8' }}>{t('cameras.cameraLabel', 'Camera')}</span>
-                  <span style={{ fontWeight: 700, color: '#FFFFFF' }}>{selectedCam?.name || 'N/A'}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94A3B8' }}>{t('cameras.timeLabel', 'Time')}</span>
-                  <span style={{ fontWeight: 600, color: '#CBD5E1' }}>
-                    {anomalyAlert ? formatAlertTime(anomalyAlert.detected_at || anomalyAlert.created_at) : t('cameras.liveMonitoringLabel', 'Live Monitoring')}
-                  </span>
-                </div>
-              </div>
+                {isTestingConnection ? 'Testing...' : 'Test Connection'}
+              </button>
+              {newCam.source_type === 'browser' && (
+                <button type="button" onClick={requestBrowserCameraPermission} className="btn btn-secondary btn-sm">
+                  Request Webcam Access
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" onClick={() => setIsAddModalOpen(false)} className="btn btn-secondary btn-sm">
+                {t('common.cancel', 'Cancel')}
+              </button>
+              <button type="submit" disabled={isSavingCamera} className="btn btn-primary btn-sm">
+                {isSavingCamera ? 'Saving...' : editingCamId ? 'Save Changes' : 'Register Camera'}
+              </button>
             </div>
           </div>
-        </div>
-      )}
+        </form>
+      </div>
+    </div>
+  );
 
-      {/* Add / Edit Camera Modal */}
-      {isAddModalOpen && (
+  return (
+    <div style={{ width: '100%' }}>
+      {workspaceView === 'management' ? renderCameraManagement() : renderLiveMonitor()}
+      {isAddModalOpen && renderCameraModal()}
+      {deleteTargetCam && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backgroundColor: 'rgba(2, 6, 23, 0.8)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 100,
-            padding: '1rem',
+            zIndex: 70,
+            padding: '16px',
           }}
-          onClick={() => setIsAddModalOpen(false)}
         >
           <div
             style={{
-              backgroundColor: '#0F172A',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
+              maxWidth: '400px',
+              width: '100%',
+              backgroundColor: 'var(--bg-surface, #0F172A)',
+              border: '1px solid var(--border-color, #1E293B)',
               borderRadius: '12px',
-              padding: '1.75rem',
-              width: '480px',
-              maxWidth: '100%',
-              maxHeight: '90vh',
-              overflowY: 'auto',
+              padding: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
             }}
-            onClick={(e) => e.stopPropagation()}
           >
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFFFFF', margin: '0 0 1.15rem 0' }}>
-              {editingCamId ? 'Edit Camera Configuration' : t('cameras.modalAddTitle', 'Add New Camera')}
-            </h2>
-            <form onSubmit={handleAddCameraSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>{t('cameras.modalCameraName', 'Camera Name')}</label>
-                <input
-                  type="text"
-                  value={newCam.name}
-                  onChange={(e) => setNewCam({ ...newCam, name: e.target.value })}
-                  placeholder={t('cameras.modalCameraNamePlaceholder', 'e.g. Cam-05 North Gate')}
-                  required
-                  style={{
-                    width: '100%',
-                    backgroundColor: '#090E1A',
-                    border: '1px solid #1E293B',
-                    borderRadius: '6px',
-                    padding: '8px 12px',
-                    color: '#FFFFFF',
-                    outline: 'none',
-                  }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>{t('cameras.modalSourceType', 'Source Type')}</label>
-                  <select
-                    value={newCam.source_type}
-                    onChange={(e) => {
-                      const nextType = e.target.value;
-                      let nextSource = newCam.source;
-                      if (nextType === 'browser') {
-                        nextSource = selectedDeviceId || browserDevices[0]?.deviceId || '0';
-                        refreshBrowserDevices();
-                      } else if (nextType === 'webcam' && !/^\d+$/.test(nextSource)) nextSource = '0';
-                      else if (nextType === 'rtsp' && !nextSource.startsWith('rtsp://')) nextSource = 'rtsp://192.168.1.50:554/stream1';
-                      else if ((nextType === 'http' || nextType === 'ipcamera' || nextType === 'phone') && !nextSource.startsWith('http')) nextSource = 'http://192.168.1.60:8080/video';
-                      setConnectionTestResult(null);
-                      setNewCam({ ...newCam, source_type: nextType, source: nextSource });
-                    }}
-                    style={{
-                      width: '100%',
-                      backgroundColor: '#090E1A',
-                      border: '1px solid #1E293B',
-                      borderRadius: '6px',
-                      padding: '8px 12px',
-                      color: '#FFFFFF',
-                      outline: 'none',
-                    }}
-                  >
-                    <option value="browser">{t('cameras.modalSourceBrowser', 'Browser Webcam (Laptop / Phone Camera)')}</option>
-                    <option value="webcam">{t('cameras.modalSourceWebcam', 'USB / DirectShow Webcam')}</option>
-                    <option value="rtsp">{t('cameras.modalSourceRtsp', 'IP Camera / RTSP Stream')}</option>
-                    <option value="http">{t('cameras.modalSourceHttp', 'HTTP / MJPEG Stream')}</option>
-                    <option value="ipcamera">{t('cameras.modalSourceNetworkIp', 'Network IP Camera')}</option>
-                    <option value="phone">{t('cameras.modalSourceMobileIp', 'Mobile IP Webcam (URL Stream)')}</option>
-                    <option value="video">{t('cameras.modalSourceLoopback', 'Video Loopback File')}</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>{t('cameras.modalLocation', 'Location / Zone')}</label>
-                  <input
-                    type="text"
-                    value={newCam.location}
-                    onChange={(e) => setNewCam({ ...newCam, location: e.target.value })}
-                    placeholder={t('cameras.modalLocationPlaceholder', 'e.g. Building B Entrance')}
-                    style={{
-                      width: '100%',
-                      backgroundColor: '#090E1A',
-                      border: '1px solid #1E293B',
-                      borderRadius: '6px',
-                      padding: '8px 12px',
-                      color: '#FFFFFF',
-                      outline: 'none',
-                    }}
-                  />
-                </div>
-              </div>
-
-              {newCam.source_type === 'browser' ? (
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: '8px' }}>
-                    <label style={{ fontSize: '0.8rem', color: '#94A3B8' }}>
-                      Browser Camera Device (navigator.mediaDevices)
-                    </label>
-                    <button
-                      type="button"
-                      onClick={requestBrowserCameraPermission}
-                      style={{
-                        background: 'rgba(16, 185, 129, 0.15)',
-                        border: '1px solid rgba(16, 185, 129, 0.4)',
-                        color: '#10B981',
-                        borderRadius: '6px',
-                        padding: '3px 8px',
-                        fontSize: '0.72rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Allow Camera / Refresh Devices
-                    </button>
-                  </div>
-                  <select
-                    value={newCam.source}
-                    onChange={(e) => {
-                      setSelectedDeviceId(e.target.value);
-                      setNewCam({ ...newCam, source: e.target.value });
-                    }}
-                    style={{
-                      width: '100%',
-                      backgroundColor: '#090E1A',
-                      border: '1px solid #1E293B',
-                      borderRadius: '6px',
-                      padding: '8px 12px',
-                      color: '#FFFFFF',
-                      outline: 'none',
-                    }}
-                  >
-                    {browserDevices.length > 0 ? (
-                      browserDevices.map((d, idx) => (
-                        <option key={d.deviceId || idx} value={d.deviceId || String(idx)}>
-                          {d.label || `Browser Camera #${idx + 1} (Grant permission to show model name)`}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="0">Default Browser Webcam (Click "Allow Camera" to detect devices)</option>
-                    )}
-                  </select>
-                  <div style={{ marginTop: '6px', fontSize: '0.74rem', color: '#94A3B8' }}>
-                    Streams directly from your browser into DeepVision YOLO + ByteTrack + Supabase storage (no server DirectShow required).
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>
-                    {newCam.source_type === 'webcam'
-                      ? t('surveillance.sourceUrl', 'Device Index (0 = Default Webcam, 1 = External USB Camera)')
-                      : t('surveillance.sourceUrl', 'Stream URL or Source Path')}
-                  </label>
-                  <input
-                    type="text"
-                    value={newCam.source}
-                    onChange={(e) => setNewCam({ ...newCam, source: e.target.value })}
-                    placeholder={
-                      newCam.source_type === 'webcam'
-                        ? '0'
-                        : newCam.source_type === 'rtsp'
-                        ? 'rtsp://192.168.1.50:554/stream1'
-                        : 'http://192.168.1.60:8080/video'
-                    }
-                    required
-                    style={{
-                      width: '100%',
-                      backgroundColor: '#090E1A',
-                      border: '1px solid #1E293B',
-                      borderRadius: '6px',
-                      padding: '8px 12px',
-                      color: '#FFFFFF',
-                      outline: 'none',
-                    }}
-                  />
-                  {browserDevices.length > 0 && (newCam.source_type === 'webcam' || newCam.source_type === 'phone') && (
-                    <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#94A3B8' }}>
-                      {t('surveillance.hardwareBridge', 'Detected Browser Video Devices')}:{' '}
-                      {browserDevices.map((d, idx) => d.label || `Camera #${idx}`).join(', ')}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {(newCam.source_type === 'rtsp' || newCam.source_type === 'http' || newCam.source_type === 'ipcamera' || newCam.source_type === 'phone') && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>{t('auth.email', 'Stream Username (Optional)')}</label>
-                    <input
-                      type="text"
-                      value={newCam.username}
-                      onChange={(e) => setNewCam({ ...newCam, username: e.target.value })}
-                      placeholder="admin"
-                      autoComplete="off"
-                      style={{
-                        width: '100%',
-                        backgroundColor: '#090E1A',
-                        border: '1px solid #1E293B',
-                        borderRadius: '6px',
-                        padding: '8px 12px',
-                        color: '#FFFFFF',
-                        outline: 'none',
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#94A3B8', marginBottom: '4px' }}>{t('auth.password', 'Stream Password (Optional)')}</label>
-                    <input
-                      type="password"
-                      value={newCam.password}
-                      onChange={(e) => setNewCam({ ...newCam, password: e.target.value })}
-                      placeholder="••••••••"
-                      autoComplete="new-password"
-                      style={{
-                        width: '100%',
-                        backgroundColor: '#090E1A',
-                        border: '1px solid #1E293B',
-                        borderRadius: '6px',
-                        padding: '8px 12px',
-                        color: '#FFFFFF',
-                        outline: 'none',
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {connectionTestResult && (
-                <div
-                  style={{
-                    padding: '8px 12px',
-                    borderRadius: '6px',
-                    fontSize: '0.8rem',
-                    backgroundColor: connectionTestResult.success ? 'rgba(16, 185, 129, 0.14)' : 'rgba(239, 68, 68, 0.14)',
-                    border: `1px solid ${connectionTestResult.success ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
-                    color: connectionTestResult.success ? '#10B981' : '#FCA5A5',
-                  }}
-                >
-                  {connectionTestResult.message || (connectionTestResult.success ? 'Connection verified.' : 'Connection test failed.')}
-                </div>
-              )}
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginTop: '0.75rem' }}>
-                <button
-                  type="button"
-                  onClick={handleTestModalConnection}
-                  disabled={isTestingConnection}
-                  style={{
-                    backgroundColor: 'rgba(56, 189, 248, 0.14)',
-                    border: '1px solid rgba(56, 189, 248, 0.35)',
-                    color: '#38BDF8',
-                    padding: '8px 14px',
-                    borderRadius: '6px',
-                    fontWeight: 700,
-                    fontSize: '0.82rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {isTestingConnection ? 'Testing...' : '⚡ Test Connection'}
-                </button>
-
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setIsAddModalOpen(false)}
-                    style={{ backgroundColor: 'transparent', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#94A3B8', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}
-                  >
-                    {t('cameras.modalCancel', 'Cancel')}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingCamera}
-                    style={{
-                      backgroundColor: '#2563EB',
-                      border: 'none',
-                      color: '#FFFFFF',
-                      padding: '8px 18px',
-                      borderRadius: '6px',
-                      fontWeight: 700,
-                      cursor: isSavingCamera ? 'wait' : 'pointer',
-                      opacity: isSavingCamera ? 0.7 : 1,
-                    }}
-                  >
-                    {isSavingCamera ? 'Saving...' : t('cameras.modalSave', 'Save Camera')}
-                  </button>
-                </div>
-              </div>
-            </form>
+            <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-main, #F8FAFC)' }}>
+              {t('cameras.confirmRemoveTitle', 'Remove Camera?')}
+            </h3>
+            <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-muted, #94A3B8)' }}>
+              Remove "{deleteTargetCam.name}" from active monitoring? Historical recordings and forensic evidence will remain preserved.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button type="button" onClick={() => setDeleteTargetCam(null)} className="btn btn-secondary btn-sm">
+                {t('common.cancel', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={confirmRemoveCamera}
+                className="btn btn-sm"
+                style={{ backgroundColor: '#EF4444', color: '#FFFFFF', border: 'none' }}
+              >
+                {t('common.remove', 'Remove')}
+              </button>
+            </div>
           </div>
         </div>
       )}

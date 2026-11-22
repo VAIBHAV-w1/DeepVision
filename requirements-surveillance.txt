@@ -1,5 +1,21 @@
-# DeepVision Native AI Surveillance Engine Dependencies
-# Required on persistent hosts and edge servers for physical/RTSP camera ingest, YOLOv11, and ByteTrack
--r requirements.txt
-opencv-python>=4.8.0
-ultralytics>=8.3.0
+kw# DeepVision 4.0 Native AI Surveillance Engine Dependencies (Windows & Edge Hosts)
+# Uses signed Intel OpenVINO (Iris Xe GPU / CPU) + Microsoft ONNX Runtime (CPU)
+# and pure-NumPy BoT-SORT+ReID without PyTorch/lap Smart App Control blocks.
+Django>=5.2.0,<5.3
+python-dotenv>=1.0.0
+psutil>=5.9.0
+requests>=2.31.0
+PyYAML>=6.0.0
+werkzeug>=3.1.9
+certifi>=2026.10.18
+urllib3>=2.8.0
+pillow>=13.0.0
+filelock>=4.2.1
+pymysql>=1.1.0
+psycopg2-binary>=2.9.9
+cryptography>=42.0.0
+gunicorn>=21.2.0
+numpy>=2.0.0,<2.6.0
+onnxruntime==1.32.0
+openvino==2026.4.1
+opencv-python>=5.0.0

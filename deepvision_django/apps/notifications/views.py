@@ -5,18 +5,21 @@ Exposes security notification center and unread state management through Django.
 Any status updates modify ONLY the existing is_read/read_at columns without schema changes.
 """
 
+import json
 import logging
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_http_methods
 from django.views.decorators.cache import never_cache
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.core.paginator import Paginator
 from django.db import DatabaseError, InterfaceError, OperationalError, close_old_connections
 
 from apps.accounts.decorators import login_required
 from apps.core.api import handle_db_errors
-from apps.notifications.models import Notification
+from apps.core.rate_limiter import ratelimit
+from apps.notifications.models import Notification, NotificationPreference
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +94,8 @@ def mark_notification_read_view(request, notification_id):
     if request.headers.get('Accept') == 'application/json' or request.content_type == 'application/json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({"status": "ok", "success": True, "message": "Notification marked as read"})
 
-    redirect_url = request.META.get('HTTP_REFERER') or '/notifications/'
+    ref = request.META.get('HTTP_REFERER')
+    redirect_url = ref if (ref and url_has_allowed_host_and_scheme(ref, allowed_hosts={request.get_host()})) else '/notifications/'
     return redirect(redirect_url)
 
 
@@ -113,7 +117,8 @@ def mark_all_notifications_read_view(request):
     if request.headers.get('Accept') == 'application/json' or request.content_type == 'application/json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({"status": "ok", "success": True, "marked_count": count, "message": f"{count} notifications marked as read"})
 
-    redirect_url = request.META.get('HTTP_REFERER') or '/notifications/'
+    ref = request.META.get('HTTP_REFERER')
+    redirect_url = ref if (ref and url_has_allowed_host_and_scheme(ref, allowed_hosts={request.get_host()})) else '/notifications/'
     return redirect(redirect_url)
 
 
@@ -226,4 +231,150 @@ def api_notifications_list_view(request):
         'has_next': page_obj.has_next(),
         'has_previous': page_obj.has_previous(),
     })
+
+
+_PREF_BOOL_FIELDS = (
+    'enabled',
+    'notify_critical',
+    'notify_high',
+    'notify_medium',
+    'notify_low',
+    'notify_loitering',
+    'notify_restricted_entry',
+    'notify_unusual_movement',
+    'notify_abandoned_object',
+    'notify_recording_events',
+    'notify_system_events',
+)
+
+
+def _serialize_pref(pref_obj, user_email=""):
+    return {
+        'enabled': bool(pref_obj.enabled) if pref_obj else True,
+        'notify_critical': bool(pref_obj.notify_critical) if pref_obj else True,
+        'notify_high': bool(pref_obj.notify_high) if pref_obj else True,
+        'notify_medium': bool(pref_obj.notify_medium) if pref_obj else False,
+        'notify_low': bool(pref_obj.notify_low) if pref_obj else False,
+        'notify_loitering': bool(pref_obj.notify_loitering) if pref_obj else True,
+        'notify_restricted_entry': bool(pref_obj.notify_restricted_entry) if pref_obj else True,
+        'notify_unusual_movement': bool(pref_obj.notify_unusual_movement) if pref_obj else True,
+        'notify_abandoned_object': bool(pref_obj.notify_abandoned_object) if pref_obj else True,
+        'notify_recording_events': bool(pref_obj.notify_recording_events) if pref_obj else False,
+        'notify_system_events': bool(pref_obj.notify_system_events) if pref_obj else True,
+        'email': user_email or "",
+    }
+
+
+@require_http_methods(['GET', 'POST', 'PUT'])
+@never_cache
+@login_required
+@handle_db_errors
+def api_notification_preferences_view(request):
+    """GET/POST per-user alert and email notification preferences stored in `notification_preferences`."""
+    user = request.user
+    pref = NotificationPreference.objects.filter(user_id=user.id).first()
+
+    if request.method == 'GET':
+        return JsonResponse({
+            'success': True,
+            'preferences': _serialize_pref(pref, getattr(user, 'email', '')),
+        })
+
+    if getattr(user, 'role', '') == 'viewer' and not getattr(user, 'is_superuser', False):
+        return JsonResponse({'success': False, 'error': 'Viewer accounts have read-only access.'}, status=403)
+
+    try:
+        payload = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON payload.'}, status=400)
+
+    now = timezone.now()
+    if pref is None:
+        defaults = {field: bool(payload.get(field, field not in ('notify_medium', 'notify_low', 'notify_recording_events'))) for field in _PREF_BOOL_FIELDS}
+        pref = NotificationPreference.objects.create(
+            user_id=user.id,
+            created_at=now,
+            updated_at=now,
+            **defaults,
+        )
+    else:
+        for field in _PREF_BOOL_FIELDS:
+            if field in payload:
+                setattr(pref, field, bool(payload[field]))
+        pref.updated_at = now
+        pref.save()
+
+    return JsonResponse({
+        'success': True,
+        'message': 'Notification preferences saved.',
+        'preferences': _serialize_pref(pref, getattr(user, 'email', '')),
+    })
+
+
+@never_cache
+@login_required
+@handle_db_errors
+def api_notification_delivery_status_view(request):
+    """Returns sanitized email delivery summary & recent audit records plus SMTP configuration status."""
+    from django.conf import settings
+    from apps.accounts.email_service import get_email_runtime_status
+    from apps.notifications.delivery_service import get_delivery_records
+
+    try:
+        limit = int(request.GET.get('limit', 30))
+    except (TypeError, ValueError):
+        limit = 30
+    data = get_delivery_records(user_id=request.user.id, limit=limit)
+    smtp_configured = bool(
+        getattr(settings, 'EMAIL_HOST', '')
+        and getattr(settings, 'EMAIL_HOST_USER', '')
+        and getattr(settings, 'EMAIL_HOST_PASSWORD', '')
+        and getattr(settings, 'DEFAULT_FROM_EMAIL', '')
+    )
+    return JsonResponse({
+        'success': True,
+        'smtp_configured': smtp_configured,
+        'runtime': get_email_runtime_status(),
+        **data,
+    })
+
+
+@require_POST
+@never_cache
+@login_required
+@ratelimit(scope="test_email", limit=5, window=300)
+@handle_db_errors
+def api_notification_test_email_view(request):
+    """Triggers a controlled test email to the user or provided email and returns explicit delivery status."""
+    from apps.accounts.email_service import get_email_runtime_status, send_test_email
+    from apps.cameras.surveillance_config import normalize_recipients
+
+    if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+        return JsonResponse({'success': False, 'error': 'Viewer accounts have read-only access.'}, status=403)
+
+    try:
+        payload = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except Exception:
+        payload = {}
+    is_staff = getattr(request.user, 'role', '') in ('admin', 'supervisor', 'operator') or getattr(request.user, 'is_superuser', False)
+    req_emails = normalize_recipients(payload.get('recipient') or payload.get('email')) if is_staff else []
+    target_email = req_emails[0] if req_emails else getattr(request.user, 'email', '')
+    if not target_email:
+        return JsonResponse({'success': False, 'error': 'No valid recipient email address available.'}, status=400)
+
+    ok = send_test_email(target_email, full_name=getattr(request.user, 'full_name', None), user_id=request.user.id)
+    rt = get_email_runtime_status()
+    return JsonResponse({
+        'success': bool(ok),
+        'status': 'sent' if ok else 'failed',
+        'provider': rt.get('last_provider'),
+        'error_code': rt.get('last_error_code'),
+        'message': (
+            f"Test email accepted by {rt.get('last_provider') or 'email'} provider."
+            if ok
+            else f"Email delivery failed ({rt.get('last_error_code') or 'provider error'})."
+        ),
+    }, status=200 if ok else 502)
 

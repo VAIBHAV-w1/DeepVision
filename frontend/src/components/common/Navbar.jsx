@@ -24,11 +24,21 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
         if (mounted) setSystemHealth('offline');
       }
     };
+    const onBackendStatus = (ev) => {
+      if (!mounted) return;
+      if (ev?.detail?.available === false) {
+        setSystemHealth('offline');
+      } else if (ev?.detail?.available === true) {
+        setSystemHealth((prev) => (prev === 'offline' ? 'online' : prev));
+      }
+    };
+    window.addEventListener('backend:status', onBackendStatus);
     checkHealth();
     const timer = setInterval(checkHealth, 15000);
     return () => {
       mounted = false;
       clearInterval(timer);
+      window.removeEventListener('backend:status', onBackendStatus);
     };
   }, []);
 
