@@ -12,6 +12,8 @@ DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'deepvision_runtime') THEN
         CREATE ROLE deepvision_runtime WITH LOGIN PASSWORD '[YOUR_SECURE_PASSWORD]' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+    ELSE
+        ALTER ROLE deepvision_runtime WITH LOGIN PASSWORD '[YOUR_SECURE_PASSWORD]' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
     END IF;
 END
 $$;
@@ -27,11 +29,24 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO d
 -- 3. Security Hardening: Revoke direct public API access from anon and authenticated roles
 -- Because DeepVision uses Django as its trusted application tier, direct client access
 -- to tables via the Supabase PostgREST Data API is revoked as defense-in-depth.
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;
+-- Guarded with role existence check so the script applies cleanly on both Supabase and vanilla PostgreSQL.
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
-ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+DO $$
+DECLARE
+    r text;
+    api_roles text[] := ARRAY['anon', 'authenticated'];
+BEGIN
+    FOREACH r IN ARRAY api_roles LOOP
+        IF EXISTS (SELECT FROM pg_roles WHERE rolname = r) THEN
+            EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM %I;', r);
+            EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM %I;', r);
+            EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM %I;', r);
+            EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM %I;', r);
+        END IF;
+    END LOOP;
+END
+$$;
 
 -- 4. Enable Row Level Security (RLS) on all 18 tables
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
@@ -74,3 +89,4 @@ END
 $$;
 
 COMMIT;
+

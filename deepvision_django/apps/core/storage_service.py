@@ -46,6 +46,13 @@ def _sanitize_key_component(val: str) -> str:
     return cleaned.strip("._-") or "item"
 
 
+def _safe_attachment_filename(name: Optional[str], fallback: str = "download.bin") -> str:
+    """Strips path separators, quotes, and CR/LF control chars from Content-Disposition filenames."""
+    base = os.path.basename(str(name or "").replace("\\", "/")).strip()
+    cleaned = re.sub(r'[\r\n"\x00-\x1f\x7f]+', "", base)
+    return cleaned or fallback
+
+
 def validate_object_key(key: str) -> str:
     """Strictly validates object keys to prevent path traversal or injection."""
     norm = str(key or "").strip().replace("\\", "/").lstrip("/")
@@ -444,7 +451,7 @@ class SupabaseStorageBackend(BaseStorageBackend):
             resp["Content-Range"] = upstream.headers["Content-Range"]
         resp["Accept-Ranges"] = upstream.headers.get("Accept-Ranges", "bytes")
         if as_attachment:
-            fname = download_name or os.path.basename(object_key)
+            fname = _safe_attachment_filename(download_name or os.path.basename(object_key))
             resp["Content-Disposition"] = f'attachment; filename="{fname}"'
         else:
             resp["Content-Disposition"] = "inline"
@@ -612,7 +619,7 @@ class S3CompatibleStorageBackend(BaseStorageBackend):
             resp["Content-Range"] = upstream.headers["Content-Range"]
         resp["Accept-Ranges"] = upstream.headers.get("Accept-Ranges", "bytes")
         if as_attachment:
-            fname = download_name or os.path.basename(object_key)
+            fname = _safe_attachment_filename(download_name or os.path.basename(object_key))
             resp["Content-Disposition"] = f'attachment; filename="{fname}"'
         else:
             resp["Content-Disposition"] = "inline"

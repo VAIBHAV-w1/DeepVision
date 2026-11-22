@@ -12,11 +12,13 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
   const [search, setSearch] = useState('');
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [selectedCase, setSelectedCase] = useState(null);
 
   const fetchCases = async () => {
     try {
       setLoading(true);
+      setLoadError('');
       const params = {};
       if (status) params.status = status;
       if (priority) params.priority = priority;
@@ -35,7 +37,7 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
         }
       }
     } catch (err) {
-      console.warn('Failed to load cases:', err);
+      setLoadError(err?.message || t('cases.loadError', 'Unable to load incident cases. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -189,9 +191,18 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
         </div>
       ) : (
         <div className="empty-state-card" style={{ textAlign: 'center', padding: '4rem 1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)' }}>
-          <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-            {loading ? t('cases.loadingCases', 'Retrieving active forensic cases...') : t('cases.noCases', 'No incident cases registered in system.')}
-          </p>
+          {loadError ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+              <p style={{ margin: 0, color: '#ef4444' }}>{loadError}</p>
+              <button type="button" onClick={fetchCases} className="btn btn-secondary btn-sm">
+                {t('common.retry', 'Retry')}
+              </button>
+            </div>
+          ) : (
+            <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+              {loading ? t('cases.loadingCases', 'Retrieving active forensic cases...') : t('cases.noCases', 'No incident cases registered in system.')}
+            </p>
+          )}
         </div>
       )}
 

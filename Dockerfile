@@ -1,7 +1,7 @@
 # =============================================================================
-# DeepVision Multi-Stage Production Dockerfile
+# DeepVision 4.0 Multi-Stage Production Dockerfile
 # Stage 1: Build production React 19 SPA frontend with Vite
-# Stage 2: Python 3.11 slim runtime hosting unified Django surveillance core
+# Stage 2: Python 3.11 slim runtime hosting unified Django + YOLO26s ONNX engine
 # =============================================================================
 
 # --- Stage 1: Frontend Build ---
@@ -9,30 +9,23 @@ FROM node:20-slim AS frontend-builder
 
 WORKDIR /app/frontend
 
-# Copy npm dependency manifests
 COPY frontend/package.json frontend/package-lock.json ./
-
-# Clean install frontend dependencies
 RUN npm ci
 
-# Copy frontend source code
 COPY frontend/ ./
-
-# Compile production React assets into deepvision_django/static/dist
 RUN npm run build
 
 
 # --- Stage 2: Application Runtime ---
 FROM python:3.11-slim AS runtime
 
-# Set core runtime environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    OPENVINO_TELEMETRY=0 \
     DEEPVISION_HOST=0.0.0.0 \
     DEEPVISION_PORT=8000 \
     DJANGO_SETTINGS_MODULE=config.settings
 
-# Install system dependencies required by OpenCV, PyTorch, and Healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
@@ -42,36 +35,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install PyTorch CPU-only build matching verified native baseline
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
-# Install remaining Python requirements and enforce single headless OpenCV
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip uninstall -y opencv-python && \
-    pip install --no-cache-dir opencv-python-headless>=4.8.0
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend application source and launch utilities
 COPY manage.py sitecustomize.py start_deepvision.py .env.example ./
 COPY deepvision_django/ ./deepvision_django/
 COPY scripts/ ./scripts/
 COPY docs/ ./docs/
-# Fetch the exact YOLO11n weights used by the project.
-# The pinned upstream revision and SHA-256 prevent silent model drift or corruption.
-RUN mkdir -p models && \
-    curl -fL --retry 3 --retry-all-errors \
-      "https://huggingface.co/Ultralytics/YOLO11/resolve/a01aaa06caeff788b052e193acb76b3f21571b3a/yolo11n.pt" \
-      -o models/yolo11n.pt && \
-    echo "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1  models/yolo11n.pt" | sha256sum -c -
 
-# Copy compiled production React frontend assets from Stage 1
+# Fetch official Ultralytics v8.4.0 YOLO26s & YOLO26n ONNX weights and verify exact SHA-256 digests
+RUN mkdir -p models instance/ov_cache && \
+    curl -fL --retry 3 --retry-all-errors \
+      "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.onnx" \
+      -o models/yolo26s.onnx && \
+    curl -fL --retry 3 --retry-all-errors \
+      "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.onnx" \
+      -o models/yolo26n.onnx && \
+    echo "d26b65c432111eb95798cd2320603d4d75627605dbec6c6b7f98c499a80e7321  models/yolo26s.onnx" | sha256sum -c - && \
+    echo "2e947b787d9e787b93a16772a5f55b1d4d8c4d86f53146149c5d6a642442d6f7  models/yolo26n.onnx" | sha256sum -c -
+
 COPY --from=frontend-builder /app/deepvision_django/static/dist/ ./deepvision_django/static/dist/
 
-# Create runtime directories for data persistence
-RUN mkdir -p instance models recordings evidence outputs dataset
-
-# Create a non-root system user for secure container execution
-RUN groupadd -g 1000 deepvision && \
+RUN mkdir -p instance recordings evidence outputs dataset && \
+    groupadd -g 1000 deepvision && \
     useradd -u 1000 -g deepvision -d /app -s /bin/bash deepvision && \
     chown -R deepvision:deepvision /app
 
@@ -79,9 +65,7 @@ USER deepvision
 
 EXPOSE 8000
 
-# Healthcheck targeting the canonical Django API health endpoint (respects Render PORT or DEEPVISION_PORT)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -f http://127.0.0.1:${PORT:-${DEEPVISION_PORT:-8000}}/api/health/ || exit 1
 
-# Launch application via the unified production runner
 ENTRYPOINT ["python", "start_deepvision.py"]

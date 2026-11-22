@@ -59,6 +59,8 @@ class Notification(models.Model):
         models.DO_NOTHING,
         db_column='alert_id',
         related_name='notifications',
+        null=True,
+        blank=True,
     )
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField()

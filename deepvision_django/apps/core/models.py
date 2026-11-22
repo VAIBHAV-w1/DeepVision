@@ -144,18 +144,25 @@ class RestrictedZone(models.Model):
     class Meta:
         managed = False
         db_table = 'restricted_zones'
-
-    def is_point_inside(self, x, y):
-        """Checks if point (x, y) is inside the rectangular boundary."""
-        if not getattr(self, 'enabled', True):
-            return False
-        min_x = min(self.x1, self.x2)
-        max_x = max(self.x1, self.x2)
-        min_y = min(self.y1, self.y2)
-        max_y = max(self.y1, self.y2)
-        return min_x <= x <= max_x and min_y <= y <= max_y
         verbose_name = 'Restricted Zone'
         verbose_name_plural = 'Restricted Zones'
+
+    def is_point_inside(self, x, y, frame_width=None, frame_height=None):
+        """Checks if point (x, y) is inside the rectangular boundary, mapped cleanly from 1280x720 canonical space."""
+        if not getattr(self, 'enabled', True):
+            return False
+        from apps.surveillance.ai.anomaly.zones import resolve_zone_pixel_bounds
+        min_x, min_y, max_x, max_y = resolve_zone_pixel_bounds(
+            self.x1,
+            self.y1,
+            self.x2,
+            self.y2,
+            frame_width=frame_width,
+            frame_height=frame_height,
+            ref_width=1280,
+            ref_height=720,
+        )
+        return min_x <= x <= max_x and min_y <= y <= max_y
 
     def __str__(self):
         return f"RestrictedZone '{self.name}' on Camera {self.camera_id} (Enabled: {self.enabled})"

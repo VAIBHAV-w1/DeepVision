@@ -1,9 +1,129 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LanguageProvider } from './i18n/i18nContext';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import ToastProvider from './components/common/Toast';
 import AppLayout from './layouts/AppLayout';
 import ErrorBoundary from './components/common/ErrorBoundary';
+import { api } from './services/api';
+
+function BackendStatusBanner({ onRecovered }) {
+  const [status, setStatus] = useState(null);
+  const [probing, setProbing] = useState(false);
+  const probingRef = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    let pollTimer = null;
+
+    const verifyHealth = async () => {
+      if (!active || probingRef.current) return;
+      try {
+        probingRef.current = true;
+        setProbing(true);
+        await api.system.health({ timeout: 8000, maxRetries: 0 });
+        if (active) {
+          setStatus(null);
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+          if (onRecovered) onRecovered();
+        }
+      } catch {
+        // Remain visible cleanly until next poll or manual retry succeeds
+      } finally {
+        probingRef.current = false;
+        if (active) setProbing(false);
+      }
+    };
+
+    const handleBackendStatus = (ev) => {
+      if (!active || !ev?.detail) return;
+      if (ev.detail.available === true) {
+        setStatus(null);
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      } else if (ev.detail.available === false) {
+        setStatus({
+          message: ev.detail.message || 'Backend server is waking up or temporarily unreachable. Retrying...',
+          retrying: Boolean(ev.detail.retrying),
+        });
+        if (!pollTimer) {
+          pollTimer = setInterval(verifyHealth, 5000);
+        }
+      }
+    };
+
+    window.addEventListener('backend:status', handleBackendStatus);
+    return () => {
+      active = false;
+      if (pollTimer) clearInterval(pollTimer);
+      window.removeEventListener('backend:status', handleBackendStatus);
+    };
+  }, [onRecovered]);
+
+  if (!status) return null;
+
+  return (
+    <div
+      id="backend-recovery-banner"
+      role="status"
+      aria-live="polite"
+      style={{
+        position: 'fixed',
+        top: '12px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        padding: '10px 16px',
+        borderRadius: '8px',
+        background: 'rgba(15, 23, 42, 0.96)',
+        border: '1px solid #f59e0b',
+        color: '#fef3c7',
+        fontSize: '0.84rem',
+        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.45)',
+        maxWidth: '92vw',
+      }}
+    >
+      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b', flexShrink: 0 }} />
+      <span>{status.message}</span>
+      <button
+        type="button"
+        disabled={probing}
+        onClick={async () => {
+          try {
+            setProbing(true);
+            await api.system.health({ timeout: 8000, maxRetries: 0 });
+            setStatus(null);
+            if (onRecovered) onRecovered();
+          } catch {
+            // keep visible until backend responds
+          } finally {
+            setProbing(false);
+          }
+        }}
+        style={{
+          padding: '4px 10px',
+          borderRadius: '6px',
+          border: '1px solid #fbbf24',
+          background: 'rgba(245, 158, 11, 0.16)',
+          color: '#fde68a',
+          cursor: probing ? 'wait' : 'pointer',
+          fontSize: '0.78rem',
+          fontWeight: 600,
+          flexShrink: 0,
+        }}
+      >
+        {probing ? 'Checking...' : 'Retry Now'}
+      </button>
+    </div>
+  );
+}
 
 // Five primary workspaces
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
@@ -312,6 +432,7 @@ export default function App() {
     <LanguageProvider>
       <AuthProvider>
         <ToastProvider>
+          <BackendStatusBanner />
           <MainApp />
         </ToastProvider>
       </AuthProvider>

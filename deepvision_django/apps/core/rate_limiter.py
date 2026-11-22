@@ -4,6 +4,7 @@ Shared, backend-enforced rate limiter supporting serverless Vercel (Supabase Pos
 and containerized edge deployments (SQLite) without extra paid third-party infrastructure.
 """
 
+import ipaddress
 import random
 import logging
 import datetime
@@ -17,17 +18,70 @@ from apps.core.models import AuditLog
 logger = logging.getLogger(__name__)
 
 
+_INTERNAL_PROXY_NETWORKS = (
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+)
+
+
+def _is_internal_proxy_ip(ip_obj) -> bool:
+    if ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_unspecified:
+        return True
+    return any(ip_obj in net for net in _INTERNAL_PROXY_NETWORKS)
+
+
+def _normalize_valid_ip(candidate: Optional[str]) -> Optional[str]:
+    if not candidate:
+        return None
+    val = str(candidate).strip()
+    if not val or len(val) > 45:
+        return None
+    try:
+        return str(ipaddress.ip_address(val))
+    except ValueError:
+        return None
+
+
 def get_client_ip(request) -> str:
-    """Extracts client IP address respecting reverse proxies and CDNs."""
+    """
+    Extracts validated client IP from verified proxy infrastructure while
+    rejecting spoofable non-authoritative client headers (`True-Client-IP`,
+    unverified `X-Real-IP`, and left-most `X-Forwarded-For` entries).
+    """
+    import os
+
+    running_on_render = bool(os.getenv("RENDER"))
+    if running_on_render:
+        # Verified live on Render Cloudflare edge: forged CF-Connecting-IP is
+        # rejected (HTTP 403) and overwritten by Cloudflare edge.
+        cf_ip = _normalize_valid_ip(request.META.get("HTTP_CF_CONNECTING_IP"))
+        if cf_ip:
+            return cf_ip
+
     x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
     if x_forwarded_for:
-        ip = x_forwarded_for.split(",")[0].strip()
-        if ip:
-            return ip
-    x_real_ip = request.META.get("HTTP_X_REAL_IP")
-    if x_real_ip:
-        return x_real_ip.strip()
-    return request.META.get("REMOTE_ADDR", "127.0.0.1")
+        valid_hops = []
+        for part in x_forwarded_for.split(","):
+            norm = _normalize_valid_ip(part)
+            if norm:
+                valid_hops.append(norm)
+        # Walk right-to-left skipping internal proxy hops so client-prepended headers cannot spoof rate limits.
+        for norm in reversed(valid_hops):
+            ip_obj = ipaddress.ip_address(norm)
+            if not _is_internal_proxy_ip(ip_obj):
+                return norm
+        if valid_hops:
+            return valid_hops[-1]
+
+    remote = _normalize_valid_ip(request.META.get("REMOTE_ADDR"))
+    return remote or "127.0.0.1"
 
 
 def check_rate_limit(request, scope: str, limit: int, window_seconds: int) -> Tuple[bool, int]:

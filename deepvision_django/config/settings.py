@@ -29,31 +29,40 @@ if not DEBUG:
         raise ImproperlyConfigured(
             "DJANGO_SECRET_KEY must be set to a secure, unique key in environment variables when DEBUG=False."
         )
-    if len(raw_secret) < 32:
+    if len(raw_secret) < 50:
         raise ImproperlyConfigured(
-            "DJANGO_SECRET_KEY must be at least 32 characters in production."
+            "DJANGO_SECRET_KEY must be at least 50 characters in production."
         )
     SECRET_KEY = raw_secret
 else:
     # Local development mode: allow dev-only fallback if not explicitly provided
     SECRET_KEY = raw_secret if (raw_secret and raw_secret != _COMPROMISED_KEY) else _DEV_FALLBACK_KEY
 
-DEFAULT_ALLOWED_HOSTS = [
+_DEV_ALLOWED_HOSTS = [
     '127.0.0.1',
     'localhost',
     'testserver',
-    '.vercel.app',
+]
+_PROD_EXACT_ALLOWED_HOSTS = [
     'deepvision-soc.vercel.app',
     'vsw-deepvision.vercel.app',
-    '.onrender.com',
     'deepvision-6ie7.onrender.com',
     'deepvision-backend.onrender.com',
     'vsw-deepvision.com',
-    '.vsw-deepvision.com',
+    'www.vsw-deepvision.com',
 ]
+_render_external_host = os.getenv('RENDER_EXTERNAL_HOSTNAME', '').strip()
+if _render_external_host and _render_external_host not in _PROD_EXACT_ALLOWED_HOSTS:
+    _PROD_EXACT_ALLOWED_HOSTS.append(_render_external_host)
+
+DEFAULT_ALLOWED_HOSTS = _DEV_ALLOWED_HOSTS + _PROD_EXACT_ALLOWED_HOSTS
 allowed_hosts_env = os.getenv('DJANGO_ALLOWED_HOSTS')
 if allowed_hosts_env:
-    ALLOWED_HOSTS = list(dict.fromkeys([h.strip() for h in allowed_hosts_env.split(',') if h.strip()] + DEFAULT_ALLOWED_HOSTS))
+    _configured_hosts = [h.strip() for h in allowed_hosts_env.split(',') if h.strip()]
+    if DEBUG:
+        ALLOWED_HOSTS = list(dict.fromkeys(_configured_hosts + _DEV_ALLOWED_HOSTS))
+    else:
+        ALLOWED_HOSTS = list(dict.fromkeys(_configured_hosts))
 else:
     ALLOWED_HOSTS = list(DEFAULT_ALLOWED_HOSTS)
 
@@ -115,31 +124,52 @@ CSRF_COOKIE_HTTPONLY = False  # Allows standard client-side JS fetch headers
 CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SECURE = (not DEBUG) or (os.getenv('DJANGO_SECURE_COOKIES', 'False').lower() in ('true', '1'))
 
-DEFAULT_CSRF_TRUSTED_ORIGINS = [
+_DEV_CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:8000',
     'http://localhost:8000',
+    'http://127.0.0.1:3000',
     'http://localhost:3000',
+    'http://127.0.0.1:5173',
     'http://localhost:5173',
-    'https://*.vercel.app',
+]
+_PROD_EXACT_CSRF_TRUSTED_ORIGINS = [
     'https://deepvision-soc.vercel.app',
     'https://vsw-deepvision.vercel.app',
-    'https://*.onrender.com',
     'https://deepvision-6ie7.onrender.com',
     'https://deepvision-backend.onrender.com',
     'https://vsw-deepvision.com',
-    'https://*.vsw-deepvision.com',
+    'https://www.vsw-deepvision.com',
 ]
+if _render_external_host:
+    _render_origin = f'https://{_render_external_host}'
+    if _render_origin not in _PROD_EXACT_CSRF_TRUSTED_ORIGINS:
+        _PROD_EXACT_CSRF_TRUSTED_ORIGINS.append(_render_origin)
+
+DEFAULT_CSRF_TRUSTED_ORIGINS = _DEV_CSRF_TRUSTED_ORIGINS + _PROD_EXACT_CSRF_TRUSTED_ORIGINS
 csrf_trusted_origins_env = os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS')
 if csrf_trusted_origins_env:
-    CSRF_TRUSTED_ORIGINS = list(dict.fromkeys([o.strip() for o in csrf_trusted_origins_env.split(',') if o.strip()] + DEFAULT_CSRF_TRUSTED_ORIGINS))
+    _configured_origins = [o.strip() for o in csrf_trusted_origins_env.split(',') if o.strip()]
+    if DEBUG:
+        CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(_configured_origins + _DEV_CSRF_TRUSTED_ORIGINS))
+    else:
+        CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(_configured_origins))
 else:
-    CSRF_TRUSTED_ORIGINS = list(DEFAULT_CSRF_TRUSTED_ORIGINS)
+    CSRF_TRUSTED_ORIGINS = list(DEFAULT_CSRF_TRUSTED_ORIGINS if DEBUG else _PROD_EXACT_CSRF_TRUSTED_ORIGINS)
 
 # Security Headers & Protections
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
 SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+if not DEBUG:
+    SECURE_HSTS_SECONDS = _safe_int(os.getenv('DJANGO_HSTS_SECONDS'), 31536000)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    # Enforce HTTPS redirect automatically on hosted TLS reverse proxies (Render/Vercel)
+    # or when explicitly enabled, while keeping local DEBUG=False HTTP/test clients functional.
+    _default_ssl_redirect = 'True' if (os.getenv('RENDER') or os.getenv('VERCEL')) else 'False'
+    SECURE_SSL_REDIRECT = os.getenv('DJANGO_SECURE_SSL_REDIRECT', _default_ssl_redirect).lower() in ('true', '1')
+    SECURE_REDIRECT_EXEMPT = [r'^health/?$', r'^health/live/?$', r'^api/health/?$', r'^api/health/live/?$']
 
 # Messages Configuration: Cookie-based (ZERO database writes)
 MESSAGE_STORAGE = 'django.contrib.messages.storage.cookie.CookieStorage'
@@ -181,6 +211,11 @@ if USE_POSTGRES:
         parsed_db = urlparse(DATABASE_URL)
         query_params = parse_qs(parsed_db.query)
         sslmode = query_params.get('sslmode', [os.getenv('DB_SSLMODE', 'require')])[0]
+        is_pgbouncer = (
+            parsed_db.port == 6543
+            or query_params.get('pgbouncer', [''])[0].lower() in ('true', '1')
+        )
+        default_conn_max_age = '0' if is_pgbouncer else '60'
         DATABASES = {
             'default': {
                 'ENGINE': 'django.db.backends.postgresql',
@@ -197,8 +232,9 @@ if USE_POSTGRES:
                     'keepalives_interval': 10,
                     'keepalives_count': 3,
                 },
-                'CONN_MAX_AGE': _safe_int(os.getenv('DB_CONN_MAX_AGE'), 60),
+                'CONN_MAX_AGE': _safe_int(os.getenv('DB_CONN_MAX_AGE'), int(default_conn_max_age)),
                 'CONN_HEALTH_CHECKS': True,
+                'DISABLE_SERVER_SIDE_CURSORS': is_pgbouncer,
             }
         }
     else:
@@ -282,9 +318,9 @@ MEDIA_URL = '/media/'
 
 # Native Django Surveillance Subsystem Configuration
 SURVEILLANCE_ARCHITECTURE = 'native_django'
-YOLO_CONFIDENCE_THRESHOLD = 0.35
-YOLO_INFERENCE_INTERVAL_MS = 60
-YOLO_IMAGE_SIZE = 640
+YOLO_CONFIDENCE_THRESHOLD = float(os.environ.get('YOLO_CONFIDENCE_THRESHOLD', '0.35'))
+YOLO_INFERENCE_INTERVAL_MS = int(os.environ.get('YOLO_INFERENCE_INTERVAL_MS', '60'))
+YOLO_IMAGE_SIZE = int(os.environ.get('YOLO_IMAGE_SIZE', '640'))
 
 # Logging Configuration
 LOGGING = {

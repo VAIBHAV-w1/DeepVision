@@ -286,6 +286,56 @@ class GlobalIdentityRegistry:
                     
                     # Clean up carried items local mapping references if person leaves
 
+    def _prune_stale_locked(self, now: float, max_age: float = 300.0, max_entries: int = 500) -> None:
+        """Bounded LRU/TTL eviction for global_persons and global_items while holding self.lock."""
+        active_gids = set(self.local_to_global.values())
+        if len(self.global_persons) > max_entries or any(
+            (now - p.get("last_seen_time", 0.0)) > max_age for p in self.global_persons.values()
+        ):
+            for gid in list(self.global_persons.keys()):
+                if gid in active_gids:
+                    continue
+                if (now - self.global_persons[gid].get("last_seen_time", 0.0)) > max_age:
+                    self.global_persons.pop(gid, None)
+            if len(self.global_persons) > max_entries:
+                evictable = sorted(
+                    (
+                        (p.get("last_seen_time", 0.0), gid)
+                        for gid, p in self.global_persons.items()
+                        if gid not in active_gids
+                    )
+                )
+                for _, gid in evictable[: max(0, len(self.global_persons) - max_entries)]:
+                    self.global_persons.pop(gid, None)
+
+        if len(self.global_items) > max_entries or any(
+            (now - it.get("last_seen", 0.0)) > max_age for it in self.global_items.values()
+        ):
+            for gid in list(self.global_items.keys()):
+                if gid in active_gids:
+                    continue
+                if (now - self.global_items[gid].get("last_seen", 0.0)) > max_age:
+                    self.global_items.pop(gid, None)
+            if len(self.global_items) > max_entries:
+                evictable = sorted(
+                    (
+                        (it.get("last_seen", 0.0), gid)
+                        for gid, it in self.global_items.items()
+                        if gid not in active_gids
+                    )
+                )
+                for _, gid in evictable[: max(0, len(self.global_items) - max_entries)]:
+                    self.global_items.pop(gid, None)
+
+        self.lost_persons = [p for p in self.lost_persons if (now - p.get("lost_time", 0.0)) <= 30.0][-64:]
+
+    def clear_camera(self, camera_id: int) -> None:
+        """Clears camera-local track mappings cleanly on disconnect/reconnect."""
+        cid = int(camera_id)
+        with self.lock:
+            for key in [k for k in self.local_to_global.keys() if k[0] == cid]:
+                self.local_to_global.pop(key, None)
+
     def reconcile_camera_tracks(self, camera_id, active_track_ids, last_seen_by_track, timestamp=None, grace_seconds=2.0):
         """Expire camera-local identity mappings after a sustained track disappearance."""
         now = time.time() if timestamp is None else timestamp
@@ -296,6 +346,8 @@ class GlobalIdentityRegistry:
             if track_id not in active_ids and now - last_seen >= grace_seconds:
                 self.handle_lost_track(camera_id, track_id, now)
                 last_seen_by_track.pop(track_id, None)
+        with self.lock:
+            self._prune_stale_locked(now)
 
     # Alias for API compatibility
     mark_person_lost = handle_lost_track

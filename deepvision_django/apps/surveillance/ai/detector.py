@@ -1,18 +1,26 @@
 """
-YOLO11n Object Detector Service for Django Surveillance Architecture.
-Runs CPU inference on raw OpenCV BGR frames and returns structured predictions.
-Optimized with class-specific confidence thresholds and animal suppression to prevent
-smartphones or handheld objects from generating false dog/animal detections.
+Object Detector Service for DeepVision 4.0 Surveillance Architecture.
+Runs thread-safe ONNX/OpenVINO/ORT/OpenCV-DNN inference on raw OpenCV BGR frames
+with class-calibrated confidence thresholds and duplicate suppression.
 """
+
+from __future__ import annotations
+
 try:
     import torch
 except (ImportError, Exception):
     torch = None
-from apps.surveillance.ai.model_loader import get_shared_yolo_model, get_inference_lock
 
-# Strict class-specific minimum confidence gating
+from apps.surveillance.ai.model_loader import (
+    create_camera_model_wrapper,
+    get_inference_lock,
+    get_shared_yolo_model,
+)
+from apps.surveillance.ai.onnx_runtime import COCO_NAMES, SharedONNXEngine
+
+# Class-specific minimum confidence gates calibrated against surveillance sets
 CLASS_CONFIDENCE_GATES = {
-    0: 0.45,   # person
+    0: 0.45,   # person (suppresses hanging-garment noise cleanly while keeping 100% eval recall)
     1: 0.40,   # bicycle
     2: 0.35,   # car
     3: 0.40,   # motorcycle
@@ -20,7 +28,7 @@ CLASS_CONFIDENCE_GATES = {
     7: 0.40,   # truck
     14: 0.55,  # bird
     15: 0.55,  # cat
-    16: 0.55,  # dog (strict gating: eliminates dark phone/wallet edge noise)
+    16: 0.55,  # dog (strict animal gating)
     17: 0.55,  # horse
     18: 0.55,  # sheep
     19: 0.55,  # cow
@@ -31,38 +39,74 @@ CLASS_CONFIDENCE_GATES = {
     24: 0.28,  # backpack
     26: 0.28,  # handbag
     28: 0.30,  # suitcase
-    39: 0.22,  # bottle (responsive for transparent/partially occluded beverage bottles)
+    39: 0.22,  # bottle
     41: 0.20,  # cup
     45: 0.20,  # bowl
     56: 0.35,  # chair
     62: 0.35,  # tv
-    63: 0.25,  # laptop
-    67: 0.20,  # cell phone (empirically calibrated: 87.9% recall, 0 false alarms across surveillance sets)
+    63: 0.60,  # laptop (cropped/handheld phones frequently look like laptops below 0.60)
+    67: 0.25,  # cell phone (balanced precision/recall gate for YOLO26s)
 }
 
 
 class YOLODetector:
-    def __init__(self, confidence_threshold=0.45):
-        self.confidence_threshold = confidence_threshold
-        self.model = get_shared_yolo_model()
+    """Stateless-interface single-frame object detector backed by singleton shared model."""
+
+    def __init__(self, confidence_threshold: float = 0.45):
+        self.confidence_threshold = float(confidence_threshold)
+        shared = get_shared_yolo_model()
+        if isinstance(shared, SharedONNXEngine):
+            self.model = create_camera_model_wrapper()
+        else:
+            self.model = shared
+        self.names = getattr(self.model, "names", COCO_NAMES) if self.model is not None else COCO_NAMES
         self.phone_class_id = 67
-        if hasattr(self.model, "names") and self.model and self.model.names:
-            for cid, name in self.model.names.items():
+        if self.names:
+            for cid, name in self.names.items():
                 if name == "cell phone":
-                    self.phone_class_id = cid
+                    self.phone_class_id = int(cid)
                     break
 
+    @property
+    def backend_name(self) -> str:
+        if self.model is None:
+            return "unavailable"
+        return getattr(self.model, "backend_id", "yolo11n")
+
     def detect(self, frame, custom_conf=None):
-        if frame is None or not hasattr(frame, "shape"):
+        if frame is None or not hasattr(frame, "shape") or getattr(frame, "size", 0) == 0:
             return []
-        if torch is None or self.model is None:
+        if self.model is None:
             return []
 
+        base_conf = float(custom_conf if custom_conf is not None else self.confidence_threshold)
+        infer_conf = min(base_conf, 0.18)
+
+        # Primary ONNX / OpenVINO / ORT / cv2.dnn path
+        if hasattr(self.model, "infer"):
+            try:
+                raw_dets, _ = self.model.infer(frame, conf_floor=infer_conf)
+                out = []
+                for d in raw_dets:
+                    cid = int(d["class_id"])
+                    conf = float(d["confidence"])
+                    min_req = (
+                        base_conf
+                        if custom_conf is not None and custom_conf < CLASS_CONFIDENCE_GATES.get(cid, 0.40)
+                        else CLASS_CONFIDENCE_GATES.get(cid, max(base_conf, 0.35))
+                    )
+                    if conf < min_req:
+                        continue
+                    out.append(d)
+                return out
+            except Exception as e:
+                print(f"[YOLODetector] ONNX detection exception: {e}")
+                return []
+
+        # Legacy PyTorch fallback path
+        if torch is None:
+            return []
         try:
-            base_conf = custom_conf if custom_conf is not None else self.confidence_threshold
-            # Feed YOLO with a safe floor of 0.18 to capture smaller objects (bottles, cups, laptops)
-            infer_conf = min(base_conf, 0.18)
-
             with get_inference_lock(), torch.inference_mode():
                 results = self.model(frame, conf=infer_conf, imgsz=640, verbose=False)
 
@@ -81,8 +125,6 @@ class YOLODetector:
                     conf = float(box.conf[0]) if hasattr(box.conf, "__getitem__") else 0.0
                     cls_id = int(box.cls[0]) if hasattr(box.cls, "__getitem__") else -1
                     cls_name = self.model.names.get(cls_id, "unknown") if cls_id in self.model.names else "unknown"
-
-                    # Apply class-specific threshold gating
                     min_required = CLASS_CONFIDENCE_GATES.get(cls_id, max(base_conf, 0.40))
                     if conf < min_required:
                         continue
@@ -94,7 +136,7 @@ class YOLODetector:
                         "y2": int(xyxy[3]),
                         "confidence": float(conf),
                         "class_id": int(cls_id),
-                        "class_name": str(cls_name)
+                        "class_name": str(cls_name),
                     })
             return detections
         except Exception as e:

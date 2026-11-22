@@ -156,6 +156,9 @@ urlpatterns = [
     path('api/notifications/', notification_views.api_notifications_list_view, name='api_notifications'),
     path('api/notifications', notification_views.api_notifications_list_view, name='api_notifications_no_slash'),
     path('api/notifications/unread-count/', notification_views.unread_count_api_view, name='api_unread_count'),
+    path('api/notifications/preferences/', notification_views.api_notification_preferences_view, name='api_notification_preferences'),
+    path('api/notifications/delivery-status/', notification_views.api_notification_delivery_status_view, name='api_notification_delivery_status'),
+    path('api/notifications/test-email/', notification_views.api_notification_test_email_view, name='api_notification_test_email'),
     path('notifications/<int:notification_id>/read/', notification_views.mark_notification_read_view, name='notification_read'),
     path('notifications/read-all/', notification_views.mark_all_notifications_read_view, name='notifications_read_all'),
 
@@ -164,5 +167,7 @@ urlpatterns = [
     path('api/assistant/chat/', core_views.assistant_chat_view, name='assistant_chat'),
     path('api/assistant/chat', core_views.assistant_chat_view, name='assistant_chat_no_slash'),
     path('health/', core_views.health_check_view, name='health'),
+    path('health/live/', core_views.liveness_check_view, name='health_live'),
     path('api/health/', core_views.health_check_view, name='api_health'),
+    path('api/health/live/', core_views.liveness_check_view, name='api_health_live'),
 ]

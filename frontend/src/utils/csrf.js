@@ -43,25 +43,39 @@ export async function fetchCsrfToken() {
     return inflightCsrfPromise;
   }
   inflightCsrfPromise = (async () => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const delays = [0, 800, 1600, 3200];
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/csrf/`, {
-        credentials: 'include',
-        signal: controller.signal,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.csrfToken) {
-          setCsrfToken(data.csrfToken);
-          return data.csrfToken;
+      for (let attempt = 0; attempt < delays.length; attempt++) {
+        if (delays[attempt] > 0) {
+          await new Promise((r) => setTimeout(r, delays[attempt]));
         }
-        return getCsrfToken();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/auth/csrf/`, {
+            credentials: 'include',
+            signal: controller.signal,
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.csrfToken) {
+              setCsrfToken(data.csrfToken);
+              return data.csrfToken;
+            }
+            return getCsrfToken();
+          }
+          if (![502, 503, 504].includes(res.status)) {
+            break;
+          }
+        } catch (e) {
+          if (attempt === delays.length - 1) {
+            console.warn('Failed to fetch CSRF token:', e);
+          }
+        } finally {
+          clearTimeout(timeoutId);
+        }
       }
-    } catch (e) {
-      console.warn('Failed to fetch CSRF token:', e);
     } finally {
-      clearTimeout(timeoutId);
       inflightCsrfPromise = null;
     }
     return getCsrfToken();

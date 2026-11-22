@@ -8,6 +8,7 @@ import os
 import time
 import threading
 import logging
+from collections import deque
 from datetime import datetime, timezone, timedelta
 try:
     import cv2
@@ -22,6 +23,7 @@ from django.utils import timezone as django_timezone
 from apps.surveillance.ai.behavior.track_history import TrackHistoryManager
 from apps.surveillance.ai.behavior.behavior_analyzer import BehaviorAnalyzer
 from apps.surveillance.ai.anomaly.anomaly_detector import AnomalyDetector
+from apps.surveillance.ai.motion_analyzer import IndependentMotionAnalyzer
 from apps.surveillance.ai.reid import registry
 from apps.surveillance.ai.item_lifecycle import ItemLifecycleManager
 from apps.accounts.email_service import send_security_alert_email
@@ -251,6 +253,17 @@ class InferenceWorker:
 
         self.track_history = TrackHistoryManager()
         self.behavior_analyzer = BehaviorAnalyzer()
+        self.motion_analyzer = IndependentMotionAnalyzer(method=os.getenv("DEEPVISION_MOTION_METHOD", "mog2"))
+        self.last_motion_state = {
+            "motion_active": False,
+            "motion_ratio": 0.0,
+            "mean_flow_px": 0.0,
+            "lighting_shift": False,
+            "motion_regions": [],
+            "backend": self.motion_analyzer.method,
+            "process_ms": 0.0,
+        }
+        self.inference_dropped_frames = 0
         self.anomaly_detector = AnomalyDetector({
             "ANOMALY_EVENT_COOLDOWN_SECONDS": 30,
             "CROWDING_THRESHOLD": 4,
@@ -269,6 +282,15 @@ class InferenceWorker:
         self.cached_zones_by_camera = {}
         self.bound_camera_ids = {camera_id}
         self.force_zone_refresh = True
+
+        # Separated session-level counters & structured feeds (never conflate with per-frame counts)
+        self.session_started_at = datetime.now(timezone.utc).isoformat()
+        self.session_unique_person_ids = set()
+        self.observed_track_keys = set()
+        self.total_detection_events = 0
+        self.recent_detection_events = deque(maxlen=40)
+        self.recent_zone_events = deque(maxlen=40)
+        self.camera_surveillance_cfg = {}
 
     def bind_camera(self, camera_id):
         with self.lock:
@@ -301,6 +323,11 @@ class InferenceWorker:
         last_zone_refresh = 0.0
 
         print(f"[INFERENCE_LOOP_ENTER] camera_id={self.camera_id}")
+        if hasattr(self.tracker, "ensure_model_loaded"):
+            try:
+                self.tracker.ensure_model_loaded()
+            except Exception as e:
+                logger.warning(f"[InferenceWorker] Lazy model initialization fallback camera {self.camera_id}: {e}")
         cond = getattr(camera_worker, "frame_condition", None)
         while True:
             with self.lock:
@@ -333,11 +360,18 @@ class InferenceWorker:
                 time.sleep(0.002)
                 continue
 
+            if last_processed_frame_id >= 0 and frame_id > last_processed_frame_id + 1:
+                self.inference_dropped_frames += int(frame_id - last_processed_frame_id - 1)
             last_processed_frame_id = frame_id
             self.last_inference_time = now
             handoff_ms = max(0.0, (time.monotonic() - source_cap_mono) * 1000.0) if source_cap_mono > 0 else 0.0
 
             t0 = time.time()
+            motion_state = self.last_motion_state
+            try:
+                motion_state = self.motion_analyzer.analyze(frame)
+            except Exception:
+                pass
             try:
                 results = self.tracker.track(frame)
                 raw_detections = getattr(self.tracker, "last_detections", None)
@@ -348,11 +382,12 @@ class InferenceWorker:
                 raw_detections = []
                 stage_timings = {}
             t1 = time.time()
+            stage_timings["motion_ms"] = motion_state.get("process_ms", 0.0)
 
             latency = (t1 - t0) * 1000
 
-            # Responsive cadence: minimal pause between inferences
-            self.inference_interval = 0.02
+            # Latest-frame scheduling respects configured interval to keep capture & recordings responsive
+            self.inference_interval = max(0.015, float(getattr(self, "inference_interval", 0.06)))
 
             if fps_frame_times and (t1 - fps_frame_times[-1] > 2.0):
                 fps_frame_times.clear()
@@ -367,7 +402,7 @@ class InferenceWorker:
             else:
                 ai_fps = 0.0
 
-            # Refresh restricted zones & detection profiles periodically or on demand across all bound logical cameras
+            # Refresh restricted zones, extended polygon config & detection profiles periodically or on demand
             if self.force_zone_refresh or (now - last_zone_refresh > 2.0):
                 self.force_zone_refresh = False
                 with self.lock:
@@ -377,16 +412,53 @@ class InferenceWorker:
                 except Exception:
                     raw_db_zones = []
 
+                from apps.cameras.surveillance_config import (
+                    get_camera_surveillance_config,
+                    get_zone_metadata,
+                    is_schedule_active,
+                )
+                from apps.surveillance.ai.anomaly.zones import RestrictedZone as RuntimeRestrictedZone
+
+                has_any_zones = any(int(z.camera_id) == int(self.camera_id) for z in raw_db_zones)
+                cam_cfg = get_camera_surveillance_config(self.camera_id, has_enabled_zones=has_any_zones)
+                self.camera_surveillance_cfg = cam_cfg
+
                 # Deduplicate identical coordinates per camera (keep newest row first)
                 seen_cam_coords = set()
                 stream_zones = []
                 zones_by_cam = {cid: [] for cid in target_cam_ids}
                 for z in raw_db_zones:
-                    ckey = (z.camera_id, int(z.x1), int(z.y1), int(z.x2), int(z.y2))
+                    zmeta = get_zone_metadata(z.id)
+                    pts = zmeta.get("points") if isinstance(zmeta.get("points"), list) and len(zmeta.get("points")) >= 3 else None
+                    pts_sig = tuple((round(float(p["x"]), 4), round(float(p["y"]), 4)) for p in pts) if pts else None
+                    ckey = (z.camera_id, pts_sig) if pts_sig else (z.camera_id, int(z.x1), int(z.y1), int(z.x2), int(z.y2))
                     if ckey in seen_cam_coords:
                         continue
                     seen_cam_coords.add(ckey)
-                    stream_zones.append(z)
+
+                    z_shape = zmeta.get("shape") or ("polygon" if pts else "rectangle")
+                    z_dir = zmeta.get("entry_direction") or cam_cfg.get("entry_direction", "enter")
+                    z_color = zmeta.get("color") or "#ef4444"
+                    z_cd = zmeta.get("cooldown_seconds")
+                    stream_zones.append(
+                        RuntimeRestrictedZone(
+                            zone_id=z.id,
+                            name=z.name,
+                            x1=z.x1,
+                            y1=z.y1,
+                            x2=z.x2,
+                            y2=z.y2,
+                            enabled=bool(z.enabled),
+                            ref_width=1280,
+                            ref_height=720,
+                            points=pts,
+                            entry_direction=z_dir,
+                            shape=z_shape,
+                            cooldown_seconds=z_cd,
+                            camera_id=z.camera_id,
+                            user_id=z.user_id,
+                        )
+                    )
                     zones_by_cam.setdefault(z.camera_id, []).append({
                         "id": z.id,
                         "camera_id": z.camera_id,
@@ -395,7 +467,12 @@ class InferenceWorker:
                         "y1": float(z.y1),
                         "x2": float(z.x2),
                         "y2": float(z.y2),
-                        "color": getattr(z, "color", "#f59e0b") or "#f59e0b",
+                        "ref_width": 1280,
+                        "ref_height": 720,
+                        "shape": z_shape,
+                        "points": pts,
+                        "entry_direction": z_dir,
+                        "color": z_color,
                         "enabled": bool(z.enabled),
                     })
 
@@ -423,6 +500,22 @@ class InferenceWorker:
                         self.anomaly_detector.config.update(runtime_cfg["rules"])
                 except Exception:
                     pass
+
+                # Overlay per-camera restricted-entry policy
+                rule_restricted = bool(self.anomaly_detector.config.get("RESTRICTED_ENTRY_ENABLED", True))
+                cam_restricted = bool(cam_cfg.get("restricted_entry_enabled", False) or has_any_zones)
+                self.anomaly_detector.config.update({
+                    "RESTRICTED_ENTRY_ENABLED": rule_restricted and cam_restricted,
+                    "RESTRICTED_ENTRY_SCHEDULE_ACTIVE": is_schedule_active(cam_cfg.get("schedule")),
+                    "RESTRICTED_ENTRY_SEVERITY": cam_cfg.get("alert_severity", "high"),
+                    "RESTRICTED_ENTRY_DIRECTION": cam_cfg.get("entry_direction", "enter"),
+                    "CAMERA_PURPOSE": cam_cfg.get("purpose", "general"),
+                    "SUPPRESS_DUPLICATE_ALERTS": bool(cam_cfg.get("suppress_duplicates", True)),
+                    "RESTRICTED_ENTRY_DEBOUNCE_FRAMES": int(cam_cfg.get("debounce_frames", 2) or 2),
+                    "ANOMALY_EVENT_COOLDOWN_SECONDS": float(
+                        cam_cfg.get("cooldown_seconds") or self.anomaly_detector.config.get("ANOMALY_EVENT_COOLDOWN_SECONDS", 30.0)
+                    ),
+                })
 
                 last_zone_refresh = now
                 with self.lock:
@@ -463,6 +556,7 @@ class InferenceWorker:
                             "reid_status": reid_status, "certainty": certainty,
                             "bbox": (x1, y1, x2, y2),
                             "center": (cx, cy),
+                            "foot_point": (cx, float(y2)),
                             "confidence": conf
                         })
                     elif cls_name in ["backpack", "handbag", "suitcase", "bottle", "cup", "cell phone", "laptop"]:
@@ -473,6 +567,25 @@ class InferenceWorker:
                             "certainty": certainty, "bbox": (x1, y1, x2, y2),
                             "center": (cx, cy)
                         })
+
+                    track_obs_key = (int(tid), str(cls_name))
+                    if track_obs_key not in self.observed_track_keys:
+                        self.observed_track_keys.add(track_obs_key)
+                        if len(self.observed_track_keys) > 2000:
+                            self.observed_track_keys.clear()
+                            self.observed_track_keys.add(track_obs_key)
+                        self.total_detection_events += 1
+                        self.recent_detection_events.appendleft({
+                            "event_type": "object_detected",
+                            "event_class": "detection",
+                            "track_id": int(tid),
+                            "class_name": cls_name,
+                            "confidence": round(float(conf), 3),
+                            "timestamp": now,
+                            "explanation": f"New confirmed {cls_name} track #{tid} detected (conf {conf:.2f}).",
+                        })
+                    if cls_name == "person":
+                        self.session_unique_person_ids.add(int(tid))
 
                 reid_track_ids = {
                     int(trk["track_id"]) for trk in results
@@ -515,8 +628,11 @@ class InferenceWorker:
                         "track_id": t_id,
                         "class_name": c_name,
                         "confidence": c_conf,
+                        "bbox": (x1, y1, x2, y2),
                         "center_x": cx,
                         "center_y": cy,
+                        "foot_x": cx,
+                        "foot_y": float(y2),
                         "behavior": beh.get("behavior", "normal"),
                         "direction": beh.get("direction", "stationary"),
                         "speed": beh.get("speed", 0.0),
@@ -527,12 +643,18 @@ class InferenceWorker:
                     })
                 self.track_history.clean_stale_tracks(now, cfg_anom)
 
-                events = self.anomaly_detector.detect(tracked_objects_for_anom, now, zones=stream_zones)
+                fh_cur, fw_cur = frame.shape[:2]
+                events = self.anomaly_detector.detect(
+                    tracked_objects_for_anom, now, zones=stream_zones, frame_size=(fw_cur, fh_cur)
+                )
                 if events:
                     self.cached_anomalies = events
                     pre_buf = camera_worker.get_recent_buffer(60)
                     m_frame = frame.copy() if frame is not None else None
                     for ev in events:
+                        ev_type = str(ev.get("event_type", "")).lower()
+                        if ev_type in ("restricted_area_entry", "restricted_area_exit", "intrusion"):
+                            self.recent_zone_events.appendleft(dict(ev))
                         self._trigger_alert_async(ev, camera_worker, pre_buf, m_frame)
             except Exception as e:
                 logger.warning(f"[InferenceWorker] Tracking / Anomaly warning camera {self.camera_id}: {e}")
@@ -545,6 +667,7 @@ class InferenceWorker:
                 self.last_inference_completion_time = comp_mono
                 self.last_handoff_ms = round(handoff_ms, 2)
                 self.last_stage_timings = stage_timings
+                self.last_motion_state = motion_state
                 self.cached_detections = detection_list
                 self.cached_tracks = results
                 self.latency_ms = round(latency, 1)
@@ -555,16 +678,24 @@ class InferenceWorker:
         print(f"[INFERENCE_LOOP_EXIT] camera_id={self.camera_id}")
 
     def _trigger_alert_async(self, event, camera_worker, pre_event_frames, moment_frame):
-        """Dispatches alert persistence and evidence recording natively using Django ORM."""
+        """Dispatches alert persistence, deduplicated notifications, email delivery & evidence recording."""
+        if event.get("suppress_alert_persistence"):
+            return
+
         def _runner():
             if not InferenceWorker._alert_semaphore.acquire(timeout=2.0):
                 logger.warning(f"[ALERT_THROTTLED] cam={self.camera_id} event={event.get('event_type','?')} - concurrent limit reached")
                 return
             try:
                 from apps.alerts.models import Alert, IncidentCase
-                from apps.notifications.models import Notification
+                from apps.cameras.surveillance_config import get_camera_surveillance_config
+                from apps.notifications.models import Notification, NotificationPreference
 
                 target_cam_id = int(event.get("camera_id") or self.camera_id)
+                cam_cfg = get_camera_surveillance_config(target_cam_id, has_enabled_zones=True)
+                if not cam_cfg.get("require_alert", True) and event.get("event_type") == "restricted_area_entry":
+                    return
+
                 user_id = int(event.get("user_id") or getattr(camera_worker, "user_id", 1) or 1)
                 event_type = event.get("event_type", "unknown")
                 track_id = event.get("track_id")
@@ -575,21 +706,23 @@ class InferenceWorker:
                 raw_ts = event.get("timestamp")
                 detected_at = datetime.fromtimestamp(raw_ts, tz=timezone.utc) if raw_ts else django_timezone.now()
 
-                # Deduplication check
-                cooldown_seconds = 30
+                # Deduplication check against recent alerts on this camera/event/track
+                cooldown_seconds = float(cam_cfg.get("cooldown_seconds") or 30.0)
                 cutoff = detected_at - timedelta(seconds=cooldown_seconds)
-                dup = Alert.objects.filter(
-                    camera_id=target_cam_id,
-                    event_type=event_type,
-                    track_id=track_id,
-                    detected_at__gte=cutoff
-                ).exclude(status="resolved").first()
-
-                if dup:
-                    return
+                if cam_cfg.get("suppress_duplicates", True):
+                    dup = Alert.objects.filter(
+                        camera_id=target_cam_id,
+                        event_type=event_type,
+                        track_id=track_id,
+                        detected_at__gte=cutoff
+                    ).exclude(status="resolved").first()
+                    if dup:
+                        return
 
                 title = _EVENT_TITLES.get(event_type, _DEFAULT_TITLE)
-                if class_name:
+                if event.get("zone_name") and event_type in ("restricted_area_entry", "intrusion"):
+                    title = f"{title} — {event.get('zone_name')}"
+                elif class_name:
                     title = f"{title} ({class_name.capitalize()})"
 
                 now = django_timezone.now()
@@ -598,11 +731,12 @@ class InferenceWorker:
                     camera_id=target_cam_id,
                     track_id=track_id,
                     event_type=event_type,
-                    title=title,
+                    title=title[:100],
                     message=message,
                     severity=severity,
                     status="new",
                     confidence=confidence,
+                    location=str(event.get("zone_name") or "")[:100] or None,
                     detected_at=detected_at,
                     created_at=now,
                     updated_at=now,
@@ -610,23 +744,44 @@ class InferenceWorker:
                 )
                 print(f"[ALERT_CREATED] id={alert.id} event={alert.event_type} cam={target_cam_id}")
 
-                # Notification
-                try:
-                    Notification.objects.create(
-                        user_id=user_id,
-                        alert=alert,
-                        is_read=False,
-                        created_at=now,
-                    )
-                except Exception as notif_err:
-                    logger.warning(f"[NOTIFICATION_CREATE_WARN] alert={alert.id}: {notif_err}")
+                # Notification (filter out routine/low item-lifecycle noise unless user opted in)
+                prefs = NotificationPreference.objects.filter(user_id=user_id).first()
+                should_notify = True
+                if event_type in ("item_placed_back", "concealed_item_suspected") and severity == "low":
+                    should_notify = False
+                if prefs is not None:
+                    if not prefs.enabled or not getattr(prefs, f"notify_{severity}", True):
+                        should_notify = False
+                    ev_pref = {
+                        "loitering": "notify_loitering",
+                        "restricted_area_entry": "notify_restricted_entry",
+                        "intrusion": "notify_restricted_entry",
+                        "unusual_movement": "notify_unusual_movement",
+                        "rapid_movement": "notify_unusual_movement",
+                        "abandoned_object": "notify_abandoned_object",
+                    }.get(event_type)
+                    if ev_pref and not getattr(prefs, ev_pref, True):
+                        should_notify = False
 
-                # Email is limited to configured high/critical alerts and is
-                # delivered inside this alert worker, never the capture or
-                # inference loop. The persisted in-app notification remains
-                # available if SMTP is unavailable.
+                if should_notify:
+                    try:
+                        Notification.objects.create(
+                            user_id=user_id,
+                            alert=alert,
+                            is_read=False,
+                            created_at=now,
+                        )
+                    except Exception as notif_err:
+                        logger.warning(f"[NOTIFICATION_CREATE_WARN] alert={alert.id}: {notif_err}")
+
+                # Durable non-blocking email delivery with retries & camera recipient support
                 try:
-                    send_security_alert_email(user_id, alert)
+                    send_security_alert_email(
+                        user_id,
+                        alert,
+                        camera_recipients=cam_cfg.get("notification_recipients"),
+                        force_restricted_recipients=(event_type in ("restricted_area_entry", "intrusion")),
+                    )
                 except Exception:
                     logger.warning("[ALERT_EMAIL_DELIVERY_FAILED] alert_id=%s", alert.id)
 
@@ -668,6 +823,38 @@ class InferenceWorker:
 
         threading.Thread(target=_runner, daemon=True).start()
 
+    def get_telemetry_summary(self):
+        with self.lock:
+            visible_persons = len(self.active_persons)
+            active_tracks_count = len(self.cached_tracks)
+            unique_observed = len(self.session_unique_person_ids)
+            total_events = int(self.total_detection_events)
+            recent_detections = list(self.recent_detection_events)[:12]
+            recent_zone_events = list(self.recent_zone_events)[:12]
+            cam_cfg = dict(self.camera_surveillance_cfg or {})
+            det_backend = getattr(self.tracker, "detector_backend", "unknown") if self.tracker else "unknown"
+            trk_backend = getattr(self.tracker, "tracker_backend", "unknown") if self.tracker else "unknown"
+            motion_snapshot = dict(self.last_motion_state or {})
+            dropped_inf = int(self.inference_dropped_frames)
+        return {
+            "currently_visible_persons": visible_persons,
+            "active_tracks": active_tracks_count,
+            "unique_persons_observed": unique_observed,
+            "total_detection_events": total_events,
+            "recent_detections": recent_detections,
+            "recent_zone_events": recent_zone_events,
+            "camera_purpose": cam_cfg.get("purpose", "general"),
+            "restricted_entry_enabled": bool(cam_cfg.get("restricted_entry_enabled", bool(self.cached_zones))),
+            "detector_backend": det_backend,
+            "tracker_backend": trk_backend,
+            "motion_active": bool(motion_snapshot.get("motion_active", False)),
+            "motion_ratio": float(motion_snapshot.get("motion_ratio", 0.0)),
+            "motion_lighting_shift": bool(motion_snapshot.get("lighting_shift", False)),
+            "motion_backend": str(motion_snapshot.get("backend", "mog2")),
+            "inference_dropped_frames": dropped_inf,
+            "session_started_at": self.session_started_at,
+        }
+
     def get_cached_result(self):
         with self.lock:
             return (
@@ -701,4 +888,8 @@ class InferenceWorker:
             except Exception as e:
                 logger.warning(f"[INFERENCE_WORKER_WARN] camera_id={self.camera_id} thread join error: {e}")
             self.thread = None
+        try:
+            registry.clear_camera(self.camera_id)
+        except Exception:
+            pass
         print(f"[INFERENCE_WORKER_STOPPED] camera_id={self.camera_id}")

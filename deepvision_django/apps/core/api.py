@@ -11,6 +11,7 @@ Provides centralized, strongly typed JSON endpoints for the React frontend:
 - Assistant (grounded SOC domain assistant)
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -27,7 +28,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.core.paginator import Paginator
 from django.db.models import Q, Count
-from django.db import DatabaseError, OperationalError, InterfaceError, connection
+from django.db import DatabaseError, OperationalError, InterfaceError, connection, close_old_connections
 from django.utils import timezone
 
 from apps.accounts.decorators import login_required
@@ -90,6 +91,14 @@ def _parse_body(request):
         return {}
 
 
+def _parse_bounded_int(raw_val, default: int, min_val: int = 1, max_val: int = 100) -> int:
+    try:
+        val = int(raw_val)
+    except (TypeError, ValueError):
+        return default
+    return max(min_val, min(max_val, val))
+
+
 def _apply_date_filter(qs, request, date_field='created_at'):
     """
     Applies explicit date filtering to a QuerySet:
@@ -134,13 +143,26 @@ def _apply_date_filter(qs, request, date_field='created_at'):
 def handle_db_errors(view_func):
     """
     Decorator ensuring database connection drops, timeouts,
-    or schema errors return a structured HTTP 503 response instead of unhandled 500s.
+    or schema errors self-heal once via close_old_connections() and otherwise
+    return a structured HTTP 503 response instead of unhandled 500s.
     """
     @wraps(view_func)
     def _wrapped(request, *args, **kwargs):
         try:
             return view_func(request, *args, **kwargs)
-        except (OperationalError, InterfaceError, DatabaseError) as db_err:
+        except (OperationalError, InterfaceError) as first_err:
+            try:
+                close_old_connections()
+                return view_func(request, *args, **kwargs)
+            except (OperationalError, InterfaceError, DatabaseError) as db_err:
+                logger.error(f"[DB_ERROR] {view_func.__name__}: {type(db_err).__name__}: {db_err} (initial={type(first_err).__name__})")
+                return JsonResponse({
+                    "success": False,
+                    "error": "Database service is temporarily unavailable. Please try again later.",
+                    "code": "DATABASE_UNAVAILABLE",
+                    "detail": "Connection to the database cluster timed out or failed. Please retry in a few moments."
+                }, status=503)
+        except DatabaseError as db_err:
             logger.error(f"[DB_ERROR] {view_func.__name__}: {type(db_err).__name__}: {db_err}")
             return JsonResponse({
                 "success": False,
@@ -248,6 +270,11 @@ def api_login(request):
             }, status=503)
     except Exception:
         logger.warning("[AUTH] Sign-in verification email delivery failed for user_id=%s", user.id)
+        user.email_otp_hash = None
+        user.email_otp_expires_at = None
+        user.email_otp_sent_at = None
+        user.email_otp_attempts = 0
+        user.save(update_fields=["email_otp_hash", "email_otp_expires_at", "email_otp_sent_at", "email_otp_attempts"])
         return JsonResponse({
             "success": False,
             "code": "EMAIL_DELIVERY_UNAVAILABLE",
@@ -286,7 +313,7 @@ def api_verify_login_otp(request):
     user = User.objects.filter(email=email).first()
     pending_uid = request.session.get("pending_login_user_id")
 
-    if not user or (pending_uid and pending_uid != user.id):
+    if not user or not pending_uid or int(pending_uid) != int(user.id):
         return JsonResponse({"success": False, "error": "Invalid or expired login session. Please sign in again."}, status=401)
 
     success, err_msg = user.verify_otp(otp, purpose="login")
@@ -301,6 +328,7 @@ def api_verify_login_otp(request):
     request.session.flush()
     request.session["user_id"] = user.id
     request.session["role"] = user.role
+    request.session["pw_fp"] = hashlib.sha256((user.password_hash or "").encode("utf-8")).hexdigest()[:16]
     log_audit(request, "AUTH_LOGIN_SUCCESS", "auth", resource_id=user.id, description=f"Authenticated session established for {user.email}.", user=user)
 
     return JsonResponse({
@@ -328,7 +356,7 @@ def api_resend_login_otp(request):
 
     user = User.objects.filter(email=email).first()
     pending_uid = request.session.get("pending_login_user_id")
-    if not user or (pending_uid and pending_uid != user.id):
+    if not user or not pending_uid or int(pending_uid) != int(user.id):
         return JsonResponse({"success": False, "error": "Invalid or expired login session. Please sign in again."}, status=401)
 
     # Enforce 60-second cooldown
@@ -784,15 +812,6 @@ def api_dashboard_stats(request):
 # CAMERAS APIS
 # =========================================================================
 
-def _validate_and_normalize_camera_payload(data):
-    """
-    Validates camera creation/update payload and blocks SSRF or path traversal.
-    Returns (cleaned_dict, error_message).
-    """
-    import ipaddress
-    import urllib.parse
-    from apps.surveillance.camera.sources import resolve_camera_capture_source, normalize_camera_source
-
 def _inject_url_credentials(raw_source: str, username: str = "", password: str = "") -> str:
     """Safely injects URL-encoded username/password into RTSP or HTTP(S) stream URLs if provided."""
     user = str(username or "").strip()
@@ -891,10 +910,40 @@ def api_cameras_list(request):
     POST: Registers a new camera in SQLite inventory.
     """
     if request.method == "POST":
+        if getattr(request.user, "role", "") == "viewer" and not getattr(request.user, "is_superuser", False):
+            return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
         data = _parse_body(request)
         cleaned, err = _validate_and_normalize_camera_payload(data)
         if err:
             return JsonResponse({"success": False, "error": err}, status=400)
+
+        existing_by_name = Camera.objects.filter(
+            user_id=request.user.id,
+            name__iexact=cleaned["name"],
+        ).first()
+        if existing_by_name:
+            return JsonResponse({
+                "success": False,
+                "error": f"A camera named '{existing_by_name.name}' already exists.",
+                "duplicate_camera_id": existing_by_name.id,
+            }, status=409)
+
+        is_explicit_source = (
+            cleaned["source"].startswith(("rtsp://", "http://", "https://"))
+            or (cleaned["source_type"] == "browser" and cleaned["source"] not in ("browser", "webcam", "0", ""))
+        )
+        if is_explicit_source:
+            existing_by_source = Camera.objects.filter(
+                user_id=request.user.id,
+                source_type=cleaned["source_type"],
+                source=cleaned["source"],
+            ).first()
+            if existing_by_source:
+                return JsonResponse({
+                    "success": False,
+                    "error": f"This camera source is already registered as '{existing_by_source.name}'.",
+                    "duplicate_camera_id": existing_by_source.id,
+                }, status=409)
 
         now = timezone.now()
         initial_status = "offline"
@@ -916,13 +965,36 @@ def api_cameras_list(request):
             created_at=now,
             updated_at=now,
         )
+
+        from apps.cameras.surveillance_config import (
+            get_camera_surveillance_config,
+            save_camera_surveillance_config,
+        )
+        cfg_updates = {}
+        for k in (
+            "restricted_entry_enabled",
+            "purpose",
+            "entry_direction",
+            "schedule",
+            "alert_severity",
+            "notification_recipients",
+            "require_alert",
+            "suppress_duplicates",
+            "cooldown_seconds",
+            "debounce_frames",
+        ):
+            if k in data:
+                cfg_updates[k] = data[k]
+        cam_cfg = save_camera_surveillance_config(camera.id, cfg_updates) if cfg_updates else get_camera_surveillance_config(camera.id)
+        _invalidate_camera_zones(camera.id)
+
         _DASHBOARD_STATS_CACHE.clear()
         log_audit(
             request,
             action="CAMERA_CREATED",
             resource_type="camera",
             resource_id=camera.id,
-            description=f"Registered camera '{camera.name}' ({camera.source_type}).",
+            description=f"Registered camera '{camera.name}' ({camera.source_type}, purpose={cam_cfg.get('purpose', 'general')}).",
         )
         return JsonResponse({
             "success": True,
@@ -937,6 +1009,16 @@ def api_cameras_list(request):
                 "status": camera.status,
                 "is_active": camera.is_active,
                 "is_recording": False,
+                "purpose": cam_cfg.get("purpose", "general"),
+                "restricted_entry_enabled": bool(cam_cfg.get("restricted_entry_enabled", False)),
+                "entry_direction": cam_cfg.get("entry_direction", "enter"),
+                "schedule": cam_cfg.get("schedule"),
+                "alert_severity": cam_cfg.get("alert_severity", "high"),
+                "notification_recipients": cam_cfg.get("notification_recipients", []),
+                "require_alert": bool(cam_cfg.get("require_alert", True)),
+                "suppress_duplicates": bool(cam_cfg.get("suppress_duplicates", True)),
+                "cooldown_seconds": cam_cfg.get("cooldown_seconds", 30.0),
+                "zone_count": 0,
                 "created_at": camera.created_at.isoformat() if camera.created_at else "",
             },
         }, status=201)
@@ -950,8 +1032,17 @@ def api_cameras_list(request):
     cam_ids = [c.id for c in cams_list]
     active_recording_cam_ids = set(Recording.objects.filter(camera_id__in=cam_ids, status='recording').values_list('camera_id', flat=True))
 
+    from apps.core.models import RestrictedZone
+    from apps.cameras.surveillance_config import get_camera_surveillance_config
+    zone_counts = {}
+    for zid_cid, enabled_flag in RestrictedZone.objects.filter(camera_id__in=cam_ids, enabled=True).values_list('camera_id', 'enabled'):
+        if enabled_flag:
+            zone_counts[zid_cid] = zone_counts.get(zid_cid, 0) + 1
+
     cameras = []
     for c in cams_list:
+        z_cnt = zone_counts.get(c.id, 0)
+        cam_cfg = get_camera_surveillance_config(c.id, has_enabled_zones=(z_cnt > 0))
         cameras.append({
             "id": c.id,
             "name": c.name,
@@ -962,6 +1053,16 @@ def api_cameras_list(request):
             "status": c.status,
             "is_active": c.is_active,
             "is_recording": c.id in active_recording_cam_ids,
+            "purpose": cam_cfg.get("purpose", "general"),
+            "restricted_entry_enabled": bool(cam_cfg.get("restricted_entry_enabled", z_cnt > 0)),
+            "entry_direction": cam_cfg.get("entry_direction", "enter"),
+            "schedule": cam_cfg.get("schedule"),
+            "alert_severity": cam_cfg.get("alert_severity", "high"),
+            "notification_recipients": cam_cfg.get("notification_recipients", []),
+            "require_alert": bool(cam_cfg.get("require_alert", True)),
+            "suppress_duplicates": bool(cam_cfg.get("suppress_duplicates", True)),
+            "cooldown_seconds": cam_cfg.get("cooldown_seconds", 30.0),
+            "zone_count": z_cnt,
             "created_at": c.created_at.isoformat() if c.created_at else "",
         })
 
@@ -1015,11 +1116,50 @@ def api_camera_detail(request, camera_id):
         camera.save(update_fields=["name", "source_type", "source", "location", "updated_at"])
 
         if source_changed:
+            if is_camera_recording(camera.id, camera.user_id):
+                try:
+                    stop_camera_recording(camera.id, camera.user_id)
+                except Exception:
+                    pass
             try:
                 from apps.surveillance.camera.registry import get_camera_registry
+                from apps.surveillance.ai.registry import get_inference_registry
+                from apps.surveillance.ai.reid import registry as reid_registry
+                from apps.surveillance.streaming.stream_service import clear_camera_telemetry
                 get_camera_registry().remove_camera(camera.id)
+                get_inference_registry().remove_worker(camera.id)
+                reid_registry.clear_camera(camera.id)
+                clear_camera_telemetry(camera.id)
             except Exception:
                 pass
+
+        from apps.core.models import RestrictedZone
+        from apps.cameras.surveillance_config import (
+            get_camera_surveillance_config,
+            save_camera_surveillance_config,
+        )
+        cfg_updates = {}
+        for k in (
+            "restricted_entry_enabled",
+            "purpose",
+            "entry_direction",
+            "schedule",
+            "alert_severity",
+            "notification_recipients",
+            "require_alert",
+            "suppress_duplicates",
+            "cooldown_seconds",
+            "debounce_frames",
+        ):
+            if k in data:
+                cfg_updates[k] = data[k]
+        z_cnt = RestrictedZone.objects.filter(camera_id=camera.id, enabled=True).count()
+        cam_cfg = (
+            save_camera_surveillance_config(camera.id, cfg_updates)
+            if cfg_updates
+            else get_camera_surveillance_config(camera.id, has_enabled_zones=(z_cnt > 0))
+        )
+        _invalidate_camera_zones(camera.id)
 
         _DASHBOARD_STATS_CACHE.clear()
         log_audit(
@@ -1027,7 +1167,7 @@ def api_camera_detail(request, camera_id):
             action="CAMERA_UPDATED",
             resource_type="camera",
             resource_id=camera.id,
-            description=f"Updated camera '{camera.name}' ({camera.source_type}).",
+            description=f"Updated camera '{camera.name}' ({camera.source_type}, purpose={cam_cfg.get('purpose', 'general')}).",
         )
         return JsonResponse({
             "success": True,
@@ -1041,6 +1181,16 @@ def api_camera_detail(request, camera_id):
                 "location": camera.location or "Default Zone",
                 "status": camera.status,
                 "is_active": camera.is_active,
+                "purpose": cam_cfg.get("purpose", "general"),
+                "restricted_entry_enabled": bool(cam_cfg.get("restricted_entry_enabled", z_cnt > 0)),
+                "entry_direction": cam_cfg.get("entry_direction", "enter"),
+                "schedule": cam_cfg.get("schedule"),
+                "alert_severity": cam_cfg.get("alert_severity", "high"),
+                "notification_recipients": cam_cfg.get("notification_recipients", []),
+                "require_alert": bool(cam_cfg.get("require_alert", True)),
+                "suppress_duplicates": bool(cam_cfg.get("suppress_duplicates", True)),
+                "cooldown_seconds": cam_cfg.get("cooldown_seconds", 30.0),
+                "zone_count": z_cnt,
                 "created_at": camera.created_at.isoformat() if camera.created_at else "",
             },
         })
@@ -1056,7 +1206,18 @@ def api_camera_detail(request, camera_id):
             stop_camera_recording(camera.id, camera.user_id)
         try:
             from apps.surveillance.camera.registry import get_camera_registry
+            from apps.surveillance.ai.registry import get_inference_registry
+            from apps.surveillance.ai.reid import registry as reid_registry
+            from apps.surveillance.streaming.stream_service import clear_camera_telemetry
             get_camera_registry().remove_camera(camera.id)
+            get_inference_registry().remove_worker(camera.id)
+            reid_registry.clear_camera(camera.id)
+            clear_camera_telemetry(camera.id)
+        except Exception:
+            pass
+        try:
+            from apps.cameras.surveillance_config import delete_camera_surveillance_config
+            delete_camera_surveillance_config(camera.id)
         except Exception:
             pass
 
@@ -1146,10 +1307,9 @@ def _invalidate_camera_zones(camera_id):
         from apps.surveillance.ai.registry import get_inference_registry
         reg = get_inference_registry()
         if reg:
-            for iw in set(getattr(reg, 'physical_workers', {}).values()) | set(getattr(reg, 'workers', {}).values()):
-                if iw:
-                    iw.bind_camera(camera_id)
-                    iw.invalidate_zones()
+            iw = reg.get_active_worker(camera_id)
+            if iw:
+                iw.invalidate_zones()
     except Exception:
         pass
 
@@ -1160,35 +1320,90 @@ def _invalidate_camera_zones(camera_id):
 def api_camera_zones(request, camera_id):
     """
     List or create/update restricted anomaly zones for a camera.
-    GET: returns array of configured zones for camera (deduplicated by identical coordinates).
-    POST: creates or updates a zone {name, x1, y1, x2, y2, enabled}. Protected by CSRF & RBAC.
+    GET: returns array of configured zones for camera (including normalized polygon points).
+    POST/PUT: creates or updates a rectangle or polygon zone with full geometry validation.
     """
     from apps.core.models import RestrictedZone
+    from apps.cameras.surveillance_config import (
+        get_zone_metadata,
+        rect_pixel_to_normalized_points,
+        save_zone_metadata,
+        validate_normalized_polygon,
+    )
 
-    if request.method == "POST":
+    if request.method in ("POST", "PUT"):
         try:
             camera = get_user_camera_or_404(request.user, camera_id, require_write=True)
         except PermissionDenied:
             return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
         data = _parse_body(request)
         name = str(data.get("name") or "Restricted Zone").strip()[:100]
-        try:
-            x1 = int(data.get("x1", 300))
-            y1 = int(data.get("y1", 100))
-            x2 = int(data.get("x2", 800))
-            y2 = int(data.get("y2", 600))
-        except (ValueError, TypeError):
-            return JsonResponse({"success": False, "error": "Invalid zone coordinates"}, status=400)
+        raw_zone_id = data.get("zone_id") or data.get("id")
+        shape = str(data.get("shape") or ("polygon" if data.get("points") else "rectangle")).strip().lower()
+        if shape not in ("polygon", "rectangle"):
+            shape = "rectangle"
 
-        nx1, ny1, nx2, ny2 = min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
+        raw_points = data.get("points")
+        norm_points = None
+        if isinstance(raw_points, (list, tuple)) and len(raw_points) > 0:
+            # If caller sent integer pixel polygon coordinates along with ref_width/ref_height, normalize to 0..1 first
+            ref_w = float(data.get("ref_width") or 1280.0)
+            ref_h = float(data.get("ref_height") or 720.0)
+            pre_norm = []
+            needs_scale = False
+            for item in raw_points:
+                try:
+                    rx = float(item.get("x") if isinstance(item, dict) else item[0])
+                    ry = float(item.get("y") if isinstance(item, dict) else item[1])
+                except Exception:
+                    return JsonResponse({"success": False, "error": "Invalid polygon point format."}, status=400)
+                if rx > 1.0 or ry > 1.0:
+                    needs_scale = True
+                pre_norm.append({"x": rx, "y": ry})
+            if needs_scale and ref_w > 0 and ref_h > 0:
+                pre_norm = [{"x": p["x"] / ref_w, "y": p["y"] / ref_h} for p in pre_norm]
+
+            valid_poly, poly_err, norm_points = validate_normalized_polygon(pre_norm)
+            if not valid_poly:
+                return JsonResponse({"success": False, "error": poly_err}, status=400)
+            xs = [p["x"] for p in norm_points]
+            ys = [p["y"] for p in norm_points]
+            nx1 = int(round(min(xs) * 1280))
+            ny1 = int(round(min(ys) * 720))
+            nx2 = int(round(max(xs) * 1280))
+            ny2 = int(round(max(ys) * 720))
+        else:
+            try:
+                fx1 = float(data.get("x1", 300))
+                fy1 = float(data.get("y1", 100))
+                fx2 = float(data.get("x2", 800))
+                fy2 = float(data.get("y2", 600))
+            except (ValueError, TypeError):
+                return JsonResponse({"success": False, "error": "Invalid zone coordinates"}, status=400)
+
+            if min(fx1, fy1, fx2, fy2) >= 0.0 and max(fx1, fy1, fx2, fy2) <= 1.0 and (max(fx2, fy2) > 0.0):
+                x1, y1, x2, y2 = int(round(fx1 * 1280)), int(round(fy1 * 720)), int(round(fx2 * 1280)), int(round(fy2 * 720))
+            else:
+                x1, y1, x2, y2 = int(round(fx1)), int(round(fy1)), int(round(fx2)), int(round(fy2))
+
+            nx1, ny1, nx2, ny2 = min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
+            if (nx2 - nx1) < 12 or (ny2 - ny1) < 12:
+                return JsonResponse({"success": False, "error": "Restricted zone area is too small."}, status=400)
+            norm_points = rect_pixel_to_normalized_points(nx1, ny1, nx2, ny2)
+
         enabled = bool(data.get("enabled", True))
         now = timezone.now()
 
-        # Upsert if an identical rectangle or identical zone name already exists on this camera
-        existing = (
-            RestrictedZone.objects.filter(camera_id=camera.id, x1=nx1, y1=ny1, x2=nx2, y2=ny2).order_by("-id").first()
-            or RestrictedZone.objects.filter(camera_id=camera.id, name__iexact=name).order_by("-id").first()
-        )
+        existing = None
+        if raw_zone_id:
+            existing = RestrictedZone.objects.filter(id=int(raw_zone_id), camera_id=camera.id).first()
+            if existing is None:
+                return JsonResponse({"success": False, "error": "Zone not found."}, status=404)
+        else:
+            existing = (
+                RestrictedZone.objects.filter(camera_id=camera.id, x1=nx1, y1=ny1, x2=nx2, y2=ny2).order_by("-id").first()
+                or RestrictedZone.objects.filter(camera_id=camera.id, name__iexact=name).order_by("-id").first()
+            )
         if existing is not None:
             existing.name = name
             existing.x1 = nx1
@@ -1212,13 +1427,21 @@ def api_camera_zones(request, camera_id):
                 created_at=now,
                 updated_at=now,
             )
+
+        zmeta = save_zone_metadata(zone.id, camera.id, {
+            "shape": shape,
+            "points": norm_points,
+            "entry_direction": data.get("entry_direction"),
+            "color": data.get("color", "#ef4444"),
+            "cooldown_seconds": data.get("cooldown_seconds"),
+        })
         _invalidate_camera_zones(camera.id)
         log_audit(
             request,
             action="ZONE_SAVED",
             resource_type="restricted_zone",
             resource_id=zone.id,
-            description=f"Saved security zone '{zone.name}' ({nx1},{ny1},{nx2},{ny2}) on camera #{camera.id}.",
+            description=f"Saved security zone '{zone.name}' ({shape}, {len(norm_points or [])} pts) on camera #{camera.id}.",
         )
         return JsonResponse({
             "success": True,
@@ -1230,6 +1453,10 @@ def api_camera_zones(request, camera_id):
                 "y1": zone.y1,
                 "x2": zone.x2,
                 "y2": zone.y2,
+                "shape": zmeta.get("shape", shape),
+                "points": zmeta.get("points", norm_points),
+                "entry_direction": zmeta.get("entry_direction", "enter"),
+                "color": zmeta.get("color", "#ef4444"),
                 "enabled": zone.enabled,
             }
         })
@@ -1239,11 +1466,14 @@ def api_camera_zones(request, camera_id):
     seen_coords = set()
     unique_zones = []
     for z in raw_zones:
-        ckey = (int(z.x1), int(z.y1), int(z.x2), int(z.y2))
+        zmeta = get_zone_metadata(z.id)
+        pts = zmeta.get("points")
+        pts_sig = tuple((round(float(p["x"]), 4), round(float(p["y"]), 4)) for p in pts) if isinstance(pts, list) else None
+        ckey = (pts_sig,) if pts_sig else (int(z.x1), int(z.y1), int(z.x2), int(z.y2))
         if ckey in seen_coords:
             continue
         seen_coords.add(ckey)
-        unique_zones.append(z)
+        unique_zones.append((z, zmeta))
     unique_zones.reverse()
 
     return JsonResponse({
@@ -1257,10 +1487,15 @@ def api_camera_zones(request, camera_id):
                 "y1": z.y1,
                 "x2": z.x2,
                 "y2": z.y2,
+                "shape": zmeta.get("shape", "rectangle"),
+                "points": zmeta.get("points") or rect_pixel_to_normalized_points(z.x1, z.y1, z.x2, z.y2),
+                "entry_direction": zmeta.get("entry_direction", "enter"),
+                "color": zmeta.get("color", "#ef4444"),
+                "cooldown_seconds": zmeta.get("cooldown_seconds"),
                 "enabled": z.enabled,
                 "created_at": z.created_at.isoformat() if z.created_at else "",
             }
-            for z in unique_zones
+            for z, zmeta in unique_zones
         ]
     })
 
@@ -1272,6 +1507,7 @@ def api_camera_zones(request, camera_id):
 def api_camera_zone_delete(request, camera_id, zone_id):
     """Deletes a restricted anomaly zone."""
     from apps.core.models import RestrictedZone
+    from apps.cameras.surveillance_config import delete_zone_metadata
     try:
         camera = get_user_camera_or_404(request.user, camera_id, require_write=True)
     except PermissionDenied:
@@ -1279,6 +1515,7 @@ def api_camera_zone_delete(request, camera_id, zone_id):
     zone = get_object_or_404(RestrictedZone, id=zone_id, camera_id=camera.id)
     zname = zone.name
     zone.delete()
+    delete_zone_metadata(zone_id)
     _invalidate_camera_zones(camera.id)
     log_audit(
         request,
@@ -1337,6 +1574,8 @@ def api_detection_settings(request):
     primary_cam = next((c for c in accessible_cams if c.id == 4), None) or (accessible_cams[0] if accessible_cams else None)
 
     if request.method == "POST":
+        if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+            return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
         is_staff = getattr(request.user, 'role', '') in ('admin', 'supervisor', 'operator') or getattr(request.user, 'is_superuser', False)
         has_own_cameras = any(c.user_id == request.user.id for c in accessible_cams)
         if not is_staff and not has_own_cameras:
@@ -1400,17 +1639,25 @@ def api_detection_settings(request):
                 )
 
         if inf_reg is not None:
-            inf_reg.apply_runtime_settings(
-                confidence_threshold=conf_val,
-                rules={
-                    "LOITERING_ENABLED": loitering,
-                    "RESTRICTED_ENTRY_ENABLED": restricted_entry,
-                    "CROWDING_ENABLED": crowding,
-                    "UNUSUAL_MOVEMENT_ENABLED": unusual_movement,
-                    "RAPID_MOVEMENT_ENABLED": rapid_movement,
-                    "ABANDONED_OBJECT_ENABLED": abandoned_object,
-                },
-            )
+            if is_staff:
+                inf_reg.apply_runtime_settings(
+                    confidence_threshold=conf_val,
+                    rules={
+                        "LOITERING_ENABLED": loitering,
+                        "RESTRICTED_ENTRY_ENABLED": restricted_entry,
+                        "CROWDING_ENABLED": crowding,
+                        "UNUSUAL_MOVEMENT_ENABLED": unusual_movement,
+                        "RAPID_MOVEMENT_ENABLED": rapid_movement,
+                        "ABANDONED_OBJECT_ENABLED": abandoned_object,
+                    },
+                )
+            else:
+                # Non-staff owners may only adjust their own camera workers without altering global runtime config.
+                owner_cam_ids = {c.id for c in target_cams}
+                for cid in owner_cam_ids:
+                    iw = inf_reg.get_active_worker(cid)
+                    if iw is not None and conf_val is not None and hasattr(iw, "tracker") and hasattr(iw.tracker, "confidence_threshold"):
+                        iw.tracker.confidence_threshold = float(conf_val)
 
         rt = inf_reg.get_runtime_settings() if inf_reg else {"confidence_threshold": conf_val or 0.35, "rules": {}}
         log_audit(
@@ -1499,8 +1746,8 @@ def api_recordings_list(request):
 
     recordings_qs = _apply_date_filter(recordings_qs, request, date_field='started_at')
     recordings_qs = recordings_qs.order_by('-started_at', '-id')
-    page_number = int(request.GET.get('page', 1) or 1)
-    per_page = int(request.GET.get('per_page', 24) or 24)
+    page_number = _parse_bounded_int(request.GET.get('page'), 1, 1, 10000)
+    per_page = _parse_bounded_int(request.GET.get('per_page'), 24, 1, 100)
     paginator = Paginator(recordings_qs, per_page)
     page_obj = paginator.get_page(page_number)
 
@@ -1681,8 +1928,8 @@ def api_evidence_list(request):
 
     evidence_qs = _apply_date_filter(evidence_qs, request, date_field='captured_at')
     evidence_qs = evidence_qs.order_by('-captured_at', '-id')
-    page_number = int(request.GET.get('page', 1) or 1)
-    per_page = int(request.GET.get('per_page', 18) or 18)
+    page_number = _parse_bounded_int(request.GET.get('page'), 1, 1, 10000)
+    per_page = _parse_bounded_int(request.GET.get('per_page'), 18, 1, 100)
     paginator = Paginator(evidence_qs, per_page)
     page_obj = paginator.get_page(page_number)
 
@@ -1843,8 +2090,8 @@ def api_alerts_list(request):
 
     alerts_qs = _apply_date_filter(alerts_qs, request, date_field='detected_at')
     alerts_qs = alerts_qs.order_by('-detected_at', '-id').prefetch_related('evidence_items', 'incident_cases')
-    page_number = int(request.GET.get('page', 1) or 1)
-    per_page = int(request.GET.get('per_page', 20) or 20)
+    page_number = _parse_bounded_int(request.GET.get('page'), 1, 1, 10000)
+    per_page = _parse_bounded_int(request.GET.get('per_page'), 20, 1, 100)
     paginator = Paginator(alerts_qs, per_page)
     page_obj = paginator.get_page(page_number)
 
@@ -1999,6 +2246,8 @@ def api_alert_scoped_timeline(request, alert_id):
 def api_alert_create_case(request, alert_id):
     """Creates a forensic case directly linked to an alert."""
     import uuid
+    if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+        return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
     alert = get_object_or_404(Alert, id=alert_id, user_id=request.user.id)
     existing_case = alert.incident_cases.first()
     if existing_case:
@@ -2061,6 +2310,8 @@ def api_alert_create_case(request, alert_id):
 @login_required
 def api_alert_add_note(request, alert_id):
     """Appends an investigator note directly to an alert."""
+    if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+        return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
     alert = get_object_or_404(Alert, id=alert_id, user_id=request.user.id)
     data = _parse_body(request)
     note_text = data.get("note", "").strip() or request.POST.get("note", "").strip()
@@ -2116,7 +2367,7 @@ def api_cases_list(request):
 
     cases_qs = _apply_date_filter(cases_qs, request, date_field='created_at')
     total_count = cases_qs.count()
-    limit = int(request.GET.get('limit', '50'))
+    limit = _parse_bounded_int(request.GET.get('limit'), 50, 1, 100)
     cases_page = cases_qs[:limit]
 
     items = []
@@ -2176,6 +2427,8 @@ def api_case_detail(request, case_id):
 @login_required
 def api_case_add_note(request, case_id):
     """Appends note to case's alert."""
+    if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+        return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
     case = get_object_or_404(IncidentCase, id=case_id, user_id=request.user.id)
     data = _parse_body(request)
     note_text = data.get("note", "").strip() or request.POST.get("note", "").strip()
@@ -2219,7 +2472,7 @@ def api_audit_logs(request):
             "error": "Insufficient privileges to access security audit logs.",
         }, status=403)
 
-    limit = max(1, min(100, int(request.GET.get("limit", 50) or 50)))
+    limit = _parse_bounded_int(request.GET.get("limit"), 50, 1, 100)
     qs = AuditLog.objects.select_related("user").order_by("-created_at", "-id")[:limit]
     items = []
     for entry in qs:

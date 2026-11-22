@@ -348,29 +348,49 @@ export function Notifications({ onNavigate, pageParams = {} }) {
           ))}
         </div>
 
-        {activeTab === 'notifications' && unreadCount > 0 && (
-          <button
-            onClick={handleMarkAllRead}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.12)',
-              background: 'rgba(255,255,255,0.04)',
-              color: '#F8FAFC',
-              fontSize: '0.82rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            {t('notifications.markAllRead', 'Mark All Read')}
-          </button>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {activeTab === 'notifications' && (
+            <button
+              type="button"
+              onClick={() => onNavigate('settings')}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 8,
+                border: '1px solid rgba(56, 189, 248, 0.35)',
+                background: 'rgba(56, 189, 248, 0.08)',
+                color: '#38BDF8',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {t('notifications.emailSettingsBtn', 'Email Alert Settings')}
+            </button>
+          )}
+          {activeTab === 'notifications' && unreadCount > 0 && (
+            <button
+              onClick={handleMarkAllRead}
+              style={{
+                padding: '8px 16px',
+                borderRadius: 8,
+                border: '1px solid rgba(255,255,255,0.12)',
+                background: 'rgba(255,255,255,0.04)',
+                color: '#F8FAFC',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              {t('notifications.markAllRead', 'Mark All Read')} ({unreadCount})
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -1058,10 +1078,10 @@ export function Notifications({ onNavigate, pageParams = {} }) {
           {/* Filter Tabs matching Figure 7.1.9: All, Intrusion, Unusual, Others */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22, flexWrap: 'wrap' }}>
             {[
-              { id: 'all', label: `${t('evidence.tabAll', 'All')} (${evidenceList.length})` },
-              { id: 'intrusion', label: `${t('evidence.tabIntrusion', 'Intrusion')} (${evidenceIntrusion.length})` },
-              { id: 'unusual', label: `${t('evidence.tabUnusual', 'Unusual')} (${evidenceUnusual.length})` },
-              { id: 'others', label: `${t('evidence.tabOthers', 'Others')} (${evidenceOthers.length})` },
+              { id: 'all', label: t('evidence.tabAll', 'All ({count})', { count: evidenceList.length }) },
+              { id: 'intrusion', label: t('evidence.tabIntrusion', 'Intrusion ({count})', { count: evidenceIntrusion.length }) },
+              { id: 'unusual', label: t('evidence.tabUnusual', 'Unusual ({count})', { count: evidenceUnusual.length }) },
+              { id: 'others', label: t('evidence.tabOthers', 'Others ({count})', { count: evidenceOthers.length }) },
             ].map((tab) => (
               <button
                 key={tab.id}

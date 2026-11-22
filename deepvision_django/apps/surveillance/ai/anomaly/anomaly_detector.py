@@ -1,5 +1,6 @@
 import math
-from .zones import RestrictedZone
+from .zones import RestrictedZone, get_object_reference_point
+from apps.cameras.surveillance_config import matches_entry_direction
 
 _SECURITY_INTRUDER_CLASSES = frozenset({
     "person", "car", "truck", "bus", "motorcycle", "bicycle"
@@ -8,47 +9,56 @@ _SECURITY_INTRUDER_CLASSES = frozenset({
 
 class AnomalyDetector:
     """
-    Modular, rule-based anomaly detection engine that Consumes tracking and
-    behavioral classification properties, identifies suspicious behaviors,
-    and returns structured anomaly event dictionaries.
+    Modular, rule-based anomaly detection engine that consumes tracking and
+    behavioral classification properties, evaluates spatial & temporal rules
+    (using bottom-center foot-point geometry for restricted zones), and returns
+    structured event dictionaries.
     """
     def __init__(self, config=None):
         self.config = config or {}
 
         # State stores - stream-scoped and transient
-        self.cooldowns = {}                 # maps (track_id, event_type) -> last_triggered_time (float)
-        self.restricted_zone_states = {}    # maps track_id -> set of zone IDs they were inside in the previous frame
+        self.cooldowns = {}                 # maps (track_id, event_type[, zone_id]) -> last_triggered_time (float)
+        self.restricted_zone_states = {}    # maps track_id -> {"zones": set, "last_seen": float, "last_ref": (fx, fy)}
+        self.zone_entry_streaks = {}        # maps (track_id, zone_id) -> consecutive inside frames
         self.fast_movement_timers = {}      # maps track_id -> {"start": float, "last_fast": float}
         self.rapid_movement_timers = {}     # maps track_id -> {"start": float, "last_rapid": float}
 
-        # Maps object_track_id -> dict state for abandoned objects:
-        # {
-        #   "associated_person_track_id": int,
-        #   "last_nearby_person_time": float,
-        #   "last_object_position": (float, float),
-        #   "stationary_start_time": float,
-        #   "last_seen_time": float
-        # }
+        # Maps object_track_id -> dict state for abandoned objects
         self.abandoned_objects = {}
 
-    def detect(self, tracked_objects, timestamp, zones=None):
+    def detect(self, tracked_objects, timestamp, zones=None, frame_size=None):
         """
         Processes a list of tracked objects with behavioral attributes and
-        evaluates anomaly rules. Returns a list of generated anomaly events.
+        evaluates anomaly rules. Returns a list of generated anomaly/zone events.
         """
-        # If no zones provided, use a default test zone for evaluation/unit tests
+        frame_w, frame_h = (frame_size[0], frame_size[1]) if (frame_size and len(frame_size) >= 2) else (None, None)
+        # If no zones provided, use a default test zone for standalone unit tests
         if zones is None:
             zones = [
                 RestrictedZone("restricted_1", "Restricted Zone 1", 400, 50, 600, 250, enabled=True)
             ]
         else:
-            # Instantiate RestrictedZone objects if dicts or models are passed
             instantiated_zones = []
             for z in zones:
                 if isinstance(z, dict):
                     instantiated_zones.append(
                         RestrictedZone(
-                            z["id"], z["name"], z["x1"], z["y1"], z["x2"], z["y2"], z.get("enabled", True)
+                            z["id"],
+                            z["name"],
+                            z["x1"],
+                            z["y1"],
+                            z["x2"],
+                            z["y2"],
+                            z.get("enabled", True),
+                            ref_width=z.get("ref_width"),
+                            ref_height=z.get("ref_height"),
+                            points=z.get("points"),
+                            entry_direction=z.get("entry_direction", "any"),
+                            shape=z.get("shape", "rectangle"),
+                            cooldown_seconds=z.get("cooldown_seconds"),
+                            camera_id=z.get("camera_id"),
+                            user_id=z.get("user_id"),
                         )
                     )
                 elif hasattr(z, 'is_point_inside'):
@@ -62,7 +72,12 @@ class AnomalyDetector:
                             getattr(z, 'y1', 0),
                             getattr(z, 'x2', 100),
                             getattr(z, 'y2', 100),
-                            getattr(z, 'enabled', True)
+                            getattr(z, 'enabled', True),
+                            points=getattr(z, 'points', None),
+                            entry_direction=getattr(z, 'entry_direction', 'any'),
+                            shape=getattr(z, 'shape', 'rectangle'),
+                            camera_id=getattr(z, 'camera_id', None),
+                            user_id=getattr(z, 'user_id', None),
                         )
                     )
             zones = instantiated_zones
@@ -73,6 +88,13 @@ class AnomalyDetector:
         # 1. Map persons by track ID for proximity lookups
         persons = {obj["track_id"]: obj for obj in tracked_objects if obj["class_name"] == "person"}
 
+        debounce_frames = max(1, int(self.config.get("RESTRICTED_ENTRY_DEBOUNCE_FRAMES", 1) or 1))
+        restricted_enabled = bool(self.config.get("RESTRICTED_ENTRY_ENABLED", True))
+        restricted_schedule_active = bool(self.config.get("RESTRICTED_ENTRY_SCHEDULE_ACTIVE", True))
+        restricted_severity = str(self.config.get("RESTRICTED_ENTRY_SEVERITY", "high") or "high").lower()
+        camera_direction_rule = str(self.config.get("RESTRICTED_ENTRY_DIRECTION", "enter") or "enter").lower()
+        camera_purpose = str(self.config.get("CAMERA_PURPOSE", "general") or "general").lower()
+
         # 2. Iterate and check rules for every active object
         for obj in tracked_objects:
             track_id = obj["track_id"]
@@ -80,6 +102,7 @@ class AnomalyDetector:
             conf = obj["confidence"]
             center_x = obj["center_x"]
             center_y = obj["center_y"]
+            ref_x, ref_y = get_object_reference_point(obj)
             behavior = obj["behavior"]
             speed = float(obj.get("speed", 0.0) or 0.0)
             window_speed = float(obj.get("window_speed", speed) or speed)
@@ -97,49 +120,128 @@ class AnomalyDetector:
                     track_id=track_id,
                     class_name=cls_name,
                     confidence=conf,
-                    message="Prolonged presence detected.",
-                    timestamp=timestamp
+                    message="Prolonged stationary presence detected.",
+                    timestamp=timestamp,
+                    extra={
+                        "event_class": "security_alert",
+                        "explanation": f"Person track #{track_id} remained in the same area for an extended period.",
+                    },
                 )
                 if event:
                     events.append(event)
 
             # ----------------------------------------------------
-            # RULE B: RESTRICTED AREA ENTRY (VALID SECURITY INTRUDERS ONLY)
+            # RULE B: RESTRICTED AREA ENTRY & EXIT (FOOT-POINT GEOMETRY)
             # ----------------------------------------------------
             current_inside_zones = set()
-            active_zones = zones if (self.config.get("RESTRICTED_ENTRY_ENABLED", True) and cls_name in _SECURITY_INTRUDER_CLASSES) else []
+            prev_state = self.restricted_zone_states.get(track_id) or {}
+            prev_inside_zones = set(prev_state.get("zones") or ())
+            prev_ref = prev_state.get("last_ref")
+            vx = (ref_x - prev_ref[0]) if prev_ref is not None else 0.0
+            vy = (ref_y - prev_ref[1]) if prev_ref is not None else 0.0
+
+            active_zones = (
+                zones
+                if (restricted_enabled and restricted_schedule_active and cls_name in _SECURITY_INTRUDER_CLASSES)
+                else []
+            )
+            zone_lookup = {getattr(z, 'id', None): z for z in active_zones}
+
             for zone in active_zones:
                 zone_id = getattr(zone, 'id', None)
                 zone_name = getattr(zone, 'name', 'Restricted Area')
                 zone_camera_id = getattr(zone, 'camera_id', None)
                 zone_user_id = getattr(zone, 'user_id', None)
-                if zone.is_point_inside(center_x, center_y):
-                    current_inside_zones.add(zone_id)
+                zone_dir_rule = getattr(zone, 'entry_direction', None) or camera_direction_rule
+                zone_cooldown = getattr(zone, 'cooldown_seconds', None)
 
-                    # Transition: OUTSIDE -> INSIDE
-                    prev_inside_zones = self.restricted_zone_states.get(track_id, set())
-                    if zone_id not in prev_inside_zones:
-                        event = self._create_event(
-                            event_type="restricted_area_entry",
-                            severity="high",
-                            track_id=track_id,
-                            class_name=cls_name,
-                            confidence=conf,
-                            message=f"Restricted area entry detected in {zone_name}.",
-                            timestamp=timestamp,
-                            bypass_cooldown=False
-                        )
-                        if event:
-                            if zone_camera_id is not None:
-                                event["camera_id"] = zone_camera_id
-                            if zone_user_id is not None:
-                                event["user_id"] = zone_user_id
-                            event["zone_id"] = zone_id
-                            event["zone_name"] = zone_name
-                            events.append(event)
+                try:
+                    is_inside = zone.is_point_inside(ref_x, ref_y, frame_width=frame_w, frame_height=frame_h)
+                except TypeError:
+                    is_inside = zone.is_point_inside(ref_x, ref_y)
+
+                if is_inside:
+                    streak = self.zone_entry_streaks.get((track_id, zone_id), 0) + 1
+                    self.zone_entry_streaks[(track_id, zone_id)] = streak
+
+                    if streak >= debounce_frames:
+                        current_inside_zones.add(zone_id)
+                        # Transition: OUTSIDE -> CONFIRMED INSIDE
+                        if zone_id not in prev_inside_zones:
+                            if matches_entry_direction(zone_dir_rule, vx=vx, vy=vy, transition="enter"):
+                                event = self._create_event(
+                                    event_type="restricted_area_entry",
+                                    severity=restricted_severity,
+                                    track_id=track_id,
+                                    class_name=cls_name,
+                                    confidence=conf,
+                                    message=f"Restricted area entry detected in {zone_name}.",
+                                    timestamp=timestamp,
+                                    bypass_cooldown=False,
+                                    zone_id=zone_id,
+                                    cooldown_override=zone_cooldown,
+                                    extra={
+                                        "event_class": "security_alert",
+                                        "reference_point": [round(ref_x, 1), round(ref_y, 1)],
+                                        "camera_purpose": camera_purpose,
+                                        "entry_direction": zone_dir_rule,
+                                        "transition": "enter",
+                                        "explanation": (
+                                            f"{cls_name.capitalize()} track #{track_id} foot point crossed into restricted zone '{zone_name}'."
+                                        ),
+                                    },
+                                )
+                                if event:
+                                    if zone_camera_id is not None:
+                                        event["camera_id"] = zone_camera_id
+                                    if zone_user_id is not None:
+                                        event["user_id"] = zone_user_id
+                                    event["zone_id"] = zone_id
+                                    event["zone_name"] = zone_name
+                                    events.append(event)
+                else:
+                    self.zone_entry_streaks.pop((track_id, zone_id), None)
+                    # Track transition: INSIDE -> OUTSIDE (zone exit event)
+                    if zone_id in prev_inside_zones:
+                        should_emit_exit = matches_entry_direction(zone_dir_rule, vx=vx, vy=vy, transition="exit") or True
+                        if should_emit_exit:
+                            exit_event = self._create_event(
+                                event_type="restricted_area_exit",
+                                severity="low",
+                                track_id=track_id,
+                                class_name=cls_name,
+                                confidence=conf,
+                                message=f"Tracked {cls_name} exited restricted zone {zone_name}.",
+                                timestamp=timestamp,
+                                bypass_cooldown=False,
+                                zone_id=zone_id,
+                                cooldown_override=10.0,
+                                extra={
+                                    "event_class": "zone_activity",
+                                    "reference_point": [round(ref_x, 1), round(ref_y, 1)],
+                                    "camera_purpose": camera_purpose,
+                                    "transition": "exit",
+                                    "suppress_alert_persistence": (zone_dir_rule not in ("exit", "outward")),
+                                    "explanation": (
+                                        f"{cls_name.capitalize()} track #{track_id} moved out of restricted zone '{zone_name}'."
+                                    ),
+                                },
+                            )
+                            if exit_event:
+                                if zone_camera_id is not None:
+                                    exit_event["camera_id"] = zone_camera_id
+                                if zone_user_id is not None:
+                                    exit_event["user_id"] = zone_user_id
+                                exit_event["zone_id"] = zone_id
+                                exit_event["zone_name"] = zone_name
+                                events.append(exit_event)
 
             # Save zone status for the next frame
-            self.restricted_zone_states[track_id] = current_inside_zones
+            self.restricted_zone_states[track_id] = {
+                "zones": current_inside_zones,
+                "last_seen": timestamp,
+                "last_ref": (ref_x, ref_y),
+            }
 
             # ----------------------------------------------------
             # RULE C: UNUSUAL MOVEMENT (ERRATIC REVERSALS OR SUSTAINED FAST MOTION)
@@ -340,43 +442,73 @@ class AnomalyDetector:
                 events.append(event)
 
         # 3. Clean up stale stream-scoped states to prevent memory leaks
-        self._cleanup_stale_states(active_track_ids)
+        self._cleanup_stale_states(active_track_ids, timestamp=timestamp)
 
         return events
 
-    def _create_event(self, event_type, severity, track_id, class_name, confidence, message, timestamp, bypass_cooldown=False):
+    def _create_event(
+        self,
+        event_type,
+        severity,
+        track_id,
+        class_name,
+        confidence,
+        message,
+        timestamp,
+        bypass_cooldown=False,
+        zone_id=None,
+        cooldown_override=None,
+        extra=None,
+    ):
         """
-        Helper that verifies if the event type for this track ID is currently
-        under cooldown. Returns an event dictionary if allowed, otherwise None.
+        Helper that verifies if the event type (and optional zone_id) for this track ID
+        is currently under cooldown. Returns a structured event dictionary if allowed.
         """
-        cooldown_key = (track_id, event_type)
-        cooldown_period = self.config.get("ANOMALY_EVENT_COOLDOWN_SECONDS", 30)
+        cooldown_key = (track_id, event_type, zone_id) if zone_id is not None else (track_id, event_type)
+        default_cd = float(self.config.get("ANOMALY_EVENT_COOLDOWN_SECONDS", 30) or 30)
+        cooldown_period = float(cooldown_override) if cooldown_override is not None else default_cd
+        suppress_duplicates = bool(self.config.get("SUPPRESS_DUPLICATE_ALERTS", True))
 
-        last_triggered = self.cooldowns.get(cooldown_key)
-        if not bypass_cooldown and last_triggered is not None and (timestamp - last_triggered < cooldown_period):
-            return None
+        if suppress_duplicates and not bypass_cooldown:
+            last_triggered = self.cooldowns.get(cooldown_key)
+            if last_triggered is not None and (timestamp - last_triggered < cooldown_period):
+                return None
 
-        # Record trigger timestamp to enforce cooldown
+        # Record trigger timestamp to enforce cooldown and keep map bounded
         self.cooldowns[cooldown_key] = timestamp
+        if len(self.cooldowns) > 1000:
+            cutoff = timestamp - max(60.0, cooldown_period * 2.0)
+            for k in [ck for ck, ts in self.cooldowns.items() if ts < cutoff]:
+                self.cooldowns.pop(k, None)
 
-        return {
+        payload = {
             "event_type": event_type,
             "severity": severity,
             "track_id": track_id,
             "class_name": class_name,
             "confidence": confidence,
             "message": message,
-            "timestamp": timestamp
+            "timestamp": timestamp,
         }
+        if extra and isinstance(extra, dict):
+            payload.update(extra)
+        return payload
 
-    def _cleanup_stale_states(self, active_track_ids):
+    def _cleanup_stale_states(self, active_track_ids, timestamp=None):
         """
-        Cleans up stream states for tracks no longer active in the current frame.
+        Cleans up stream states for tracks no longer active in the current frame,
+        preserving a brief grace window on restricted_zone_states so 1-frame detector
+        flicker inside a zone never retriggers a duplicate entry alert.
         """
-        # Clean stale restricted zone transition states
+        grace_sec = float(self.config.get("ZONE_STATE_GRACE_SECONDS", 2.5) or 2.5)
         for tid in list(self.restricted_zone_states.keys()):
             if tid not in active_track_ids:
-                self.restricted_zone_states.pop(tid, None)
+                st = self.restricted_zone_states.get(tid)
+                last_seen = st.get("last_seen", 0.0) if isinstance(st, dict) else 0.0
+                if timestamp is None or (timestamp - last_seen) >= grace_sec:
+                    self.restricted_zone_states.pop(tid, None)
+                    for zkey in [k for k in self.zone_entry_streaks if k[0] == tid]:
+                        self.zone_entry_streaks.pop(zkey, None)
 
         # Clean stale fast and rapid movement timers
         for tid in list(self.fast_movement_timers.keys()):

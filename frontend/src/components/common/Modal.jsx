@@ -1,20 +1,69 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { IconX } from './Icons';
 
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
 export function Modal({ isOpen, onClose, title, children, maxWidth = '600px' }) {
+  const dialogRef = useRef(null);
+  const previousFocusRef = useRef(null);
+
   useEffect(() => {
+    if (!isOpen) return undefined;
+
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    document.body.style.overflow = 'hidden';
+
+    const focusInitial = window.requestAnimationFrame(() => {
+      const panel = dialogRef.current;
+      if (!panel) return;
+      const focusable = panel.querySelectorAll(FOCUSABLE_SELECTOR);
+      if (focusable.length > 0) {
+        focusable[0].focus();
+      } else {
+        panel.focus();
+      }
+    });
+
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape') {
         onClose();
+        return;
+      }
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusable = Array.from(dialogRef.current.querySelectorAll(FOCUSABLE_SELECTOR))
+          .filter((el) => el.offsetParent !== null || el === document.activeElement);
+        if (focusable.length === 0) {
+          e.preventDefault();
+          dialogRef.current.focus();
+          return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-      window.addEventListener('keydown', handleKeyDown);
-    }
+
+    window.addEventListener('keydown', handleKeyDown);
     return () => {
+      window.cancelAnimationFrame(focusInitial);
       document.body.style.overflow = '';
       window.removeEventListener('keydown', handleKeyDown);
+      if (previousFocusRef.current && typeof previousFocusRef.current.focus === 'function') {
+        previousFocusRef.current.focus();
+      }
     };
   }, [isOpen, onClose]);
 
@@ -37,7 +86,12 @@ export function Modal({ isOpen, onClose, title, children, maxWidth = '600px' }) 
       }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal-dialog-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title || 'Dialog'}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: '100%',
@@ -65,6 +119,8 @@ export function Modal({ isOpen, onClose, title, children, maxWidth = '600px' }) 
         >
           <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 600 }}>{title}</h3>
           <button
+            type="button"
+            aria-label="Close modal"
             onClick={onClose}
             className="btn-close-modal"
             style={{

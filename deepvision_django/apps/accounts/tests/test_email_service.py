@@ -187,3 +187,136 @@ class LegacyOtpResendViewTests(SimpleTestCase):
         send_email.assert_called_once_with(user.email, "543210")
         user.save.assert_any_call(update_fields=["password_reset_otp_sent_at"])
         self._assert_failure_message(request)
+
+
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    EMAIL_HOST="smtp.example.test",
+    EMAIL_PORT=587,
+    EMAIL_HOST_USER="operator",
+    EMAIL_HOST_PASSWORD="test-only",
+    EMAIL_USE_TLS=True,
+    EMAIL_USE_SSL=False,
+    DEFAULT_FROM_EMAIL="alerts@example.test",
+    EMAIL_TIMEOUT=2,
+)
+class EmailRetryAndDeliveryLogTests(SimpleTestCase):
+    def setUp(self):
+        mail.outbox = []
+        from apps.notifications.delivery_service import clear_delivery_log
+        clear_delivery_log()
+
+    def test_transient_failure_recovers_on_otp_sync_retry(self):
+        from apps.accounts.email_service import send_password_reset_email
+        from apps.notifications.delivery_service import get_delivery_records
+
+        calls = {"n": 0}
+
+        def flaky_send(recipient_email, subject, html_content):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                from apps.accounts.email_service import _record_delivery_outcome
+                _record_delivery_outcome("failed", "smtp", "SMTP_ERROR")
+                return False
+            from apps.accounts.email_service import _record_delivery_outcome
+            _record_delivery_outcome("provider_accepted", "smtp")
+            return True
+
+        with patch("apps.accounts.email_service._send_email", side_effect=flaky_send):
+            ok = send_password_reset_email("ops@example.test", "123456", "Ops")
+
+        self.assertTrue(ok)
+        self.assertEqual(calls["n"], 2)
+        recs = get_delivery_records()["records"]
+        self.assertEqual(recs[0]["status"], "sent")
+        self.assertEqual(recs[0]["attempts"], 2)
+
+    @patch("apps.accounts.models.User.objects.filter")
+    @patch("apps.notifications.models.NotificationPreference.objects.filter")
+    def test_security_alert_schedules_async_retry_on_transient_failure(self, pref_filter, user_filter):
+        from apps.notifications.delivery_service import get_delivery_records
+        import time
+
+        pref_filter.return_value.first.return_value = None
+        user_filter.return_value.only.return_value.first.return_value = SimpleNamespace(email="owner@example.test")
+        alert = SimpleNamespace(
+            id=8801,
+            severity="critical",
+            event_type="restricted_area_entry",
+            title="Restricted entry",
+            message="Foot crossed vault boundary.",
+            camera_id=1,
+            detected_at=None,
+            location="Vault",
+        )
+
+        attempts = {"count": 0}
+
+        def flaky_alert_send(recipient_email, subject, html_content):
+            attempts["count"] += 1
+            from apps.accounts.email_service import _record_delivery_outcome
+            if attempts["count"] == 1:
+                _record_delivery_outcome("failed", "smtp", "SMTP_ERROR")
+                return False
+            _record_delivery_outcome("provider_accepted", "smtp")
+            return True
+
+        with patch("apps.accounts.email_service._send_email", side_effect=flaky_alert_send):
+            initial_ok = send_security_alert_email(1, alert)
+            self.assertFalse(initial_ok)
+            time.sleep(0.8)
+
+        self.assertGreaterEqual(attempts["count"], 2)
+        recs = [r for r in get_delivery_records(user_id=1)["records"] if r.get("alert_id") == 8801]
+        self.assertTrue(recs and recs[0]["status"] == "sent")
+
+    @patch("apps.cameras.surveillance_config.get_camera_surveillance_config")
+    @patch("apps.accounts.models.User.objects.filter")
+    @patch("apps.notifications.models.NotificationPreference.objects.filter")
+    @patch("apps.cameras.models.Camera.objects.filter")
+    def test_camera_offline_email_sends_and_deduplicates_within_cooldown(
+        self, cam_filter, pref_filter, user_filter, get_cfg
+    ):
+        from apps.accounts.email_service import send_camera_offline_email
+        from apps.notifications.delivery_service import get_delivery_records
+
+        send_camera_offline_email._cooldown_cache = {}
+        cam = SimpleNamespace(id=77, name="Lobby Cam", location="Main Lobby", user_id=1, status="online")
+        cam_filter.return_value.first.return_value = cam
+        pref_filter.return_value.first.return_value = SimpleNamespace(enabled=True, notify_system_events=True)
+        user_filter.return_value.only.return_value.first.return_value = SimpleNamespace(email="owner@example.test")
+        get_cfg.return_value = {"notification_recipients": ["sec@example.test"]}
+
+        ok1 = send_camera_offline_email(77, reason="Capture dropped", cooldown_seconds=300)
+        ok2 = send_camera_offline_email(77, reason="Capture dropped again", cooldown_seconds=300)
+
+        self.assertTrue(ok1)
+        self.assertFalse(ok2)
+        self.assertEqual(len(mail.outbox), 2)
+        recipients = sorted(addr for msg in mail.outbox for addr in msg.to)
+        self.assertEqual(recipients, ["owner@example.test", "sec@example.test"])
+        self.assertIn("Lobby Cam", mail.outbox[0].subject)
+        recs = [r for r in get_delivery_records(user_id=1)["records"] if r.get("category") == "camera_offline"]
+        self.assertGreaterEqual(len(recs), 1)
+        self.assertEqual(recs[0]["status"], "sent")
+
+    @patch("apps.cameras.surveillance_config.get_camera_surveillance_config")
+    @patch("apps.accounts.models.User.objects.filter")
+    @patch("apps.notifications.models.NotificationPreference.objects.filter")
+    @patch("apps.cameras.models.Camera.objects.filter")
+    def test_camera_offline_email_respects_notify_system_events_disabled(
+        self, cam_filter, pref_filter, user_filter, get_cfg
+    ):
+        from apps.accounts.email_service import send_camera_offline_email
+
+        send_camera_offline_email._cooldown_cache = {}
+        cam = SimpleNamespace(id=78, name="Gate Cam", location="Gate", user_id=1, status="online")
+        cam_filter.return_value.first.return_value = cam
+        pref_filter.return_value.first.return_value = SimpleNamespace(enabled=True, notify_system_events=False)
+        user_filter.return_value.only.return_value.first.return_value = SimpleNamespace(email="owner@example.test")
+        get_cfg.return_value = {"notification_recipients": []}
+
+        ok = send_camera_offline_email(78, reason="Capture dropped", cooldown_seconds=300)
+        self.assertFalse(ok)
+        self.assertEqual(mail.outbox, [])
+

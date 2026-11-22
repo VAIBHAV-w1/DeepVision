@@ -52,13 +52,15 @@ TABLE_MIGRATION_ORDER = [
 ]
 
 
-def format_sql_value(val):
+def format_sql_value(val, is_boolean=False):
     if val is None:
         return "NULL"
-    elif isinstance(val, (int, float)):
-        return str(val)
+    elif is_boolean:
+        return "TRUE" if bool(val) else "FALSE"
     elif isinstance(val, bool):
         return "TRUE" if val else "FALSE"
+    elif isinstance(val, (int, float)):
+        return str(val)
     elif isinstance(val, (datetime.datetime, datetime.date)):
         return f"'{val.isoformat()}'"
     elif isinstance(val, bytes):
@@ -90,7 +92,9 @@ def export_sql_dump(db_path: Path, output_file: Path):
 
         for table in TABLE_MIGRATION_ORDER:
             c.execute(f"PRAGMA table_info(\"{table}\");")
-            columns = [col[1] for col in c.fetchall()]
+            col_info = c.fetchall()
+            columns = [col[1] for col in col_info]
+            bool_flags = ["BOOL" in str(col[2]).upper() for col in col_info]
             if not columns:
                 continue
 
@@ -113,7 +117,7 @@ def export_sql_dump(db_path: Path, output_file: Path):
                 batch = rows[i:i + 200]
                 values_list = []
                 for r in batch:
-                    val_strs = [format_sql_value(v) for v in r]
+                    val_strs = [format_sql_value(v, is_boolean=b) for v, b in zip(r, bool_flags)]
                     values_list.append(f"({', '.join(val_strs)})")
 
                 values_block = ",\n  ".join(values_list)
@@ -127,6 +131,12 @@ def export_sql_dump(db_path: Path, output_file: Path):
             if "id" in columns:
                 out.write(f"SELECT setval(pg_get_serial_sequence('\"{table}\"', 'id'), coalesce(max(id), 1)) FROM \"{table}\";\n\n")
 
+        # Attach legacy-orphan-aware notification foreign key AFTER historical data import
+        out.write("-- Post-import foreign key enforcement (preserves 15 legacy orphan notifications while enforcing all new inserts/deletes)\n")
+        out.write("DO $$\nBEGIN\n")
+        out.write("    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_notifications_alert') THEN\n")
+        out.write("        ALTER TABLE notifications ADD CONSTRAINT fk_notifications_alert FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE CASCADE NOT VALID;\n")
+        out.write("    END IF;\nEND\n$$;\n\n")
         out.write("COMMIT;\n")
 
     conn.close()
@@ -152,7 +162,7 @@ def main():
         print("Direct database migration via Python requires psycopg2 and explicit authorization.")
         print("To migrate, export to SQL and execute via psql or Supabase SQL editor.")
     else:
-        out_path = ROOT_DIR / "backups" / "deepvision_postgres_data.sql"
+        out_path = ROOT_DIR / "backups" / "deepvision_postgres_data_remediated.sql"
         export_sql_dump(db_path, out_path)
 
 

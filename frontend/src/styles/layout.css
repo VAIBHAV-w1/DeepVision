@@ -113,6 +113,25 @@ html, body, #root {
   }
 }
 
+@media (max-width: 768px) {
+  .enterprise-header {
+    padding: 0 0.75rem;
+    gap: 8px;
+  }
+  .enterprise-hud-clock {
+    display: none !important;
+  }
+  .enterprise-header-controls {
+    gap: 8px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .enterprise-breadcrumb-brand {
+    display: none !important;
+  }
+}
+
 /* React modal / dropdown utilities that match original themes */
 .react-modal-backdrop {
   position: fixed;

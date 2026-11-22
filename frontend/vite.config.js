@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 const isVercel = process.env.VERCEL === '1' || process.env.BUILD_TARGET?.trim() === 'vercel';
+const backendProxyTarget = process.env.VITE_BACKEND_PROXY_TARGET || 'http://127.0.0.1:8000';
 
 export default defineConfig(({ command }) => ({
   plugins: [react()],
@@ -26,12 +27,14 @@ export default defineConfig(({ command }) => ({
   server: {
     port: 3000,
     proxy: {
-      '/api': 'http://127.0.0.1:8000',
-      '/cameras': 'http://127.0.0.1:8000',
-      '/recordings': 'http://127.0.0.1:8000',
-      '/evidence': 'http://127.0.0.1:8000',
-      '/alerts': 'http://127.0.0.1:8000',
-      '/static': 'http://127.0.0.1:8000',
+      '/api': backendProxyTarget,
+      '/cameras': backendProxyTarget,
+      '/recordings': backendProxyTarget,
+      '/evidence': backendProxyTarget,
+      '/alerts': backendProxyTarget,
+      '/notifications': backendProxyTarget,
+      '/health': backendProxyTarget,
+      '/static': backendProxyTarget,
     },
   },
 }));

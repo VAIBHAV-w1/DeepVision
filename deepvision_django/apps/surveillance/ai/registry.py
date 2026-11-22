@@ -134,8 +134,10 @@ class InferenceRegistry:
                 imgsz = getattr(settings, "YOLO_IMAGE_SIZE", 640)
                 rules_snapshot = dict(self.runtime_anomaly_rules)
 
-            # Construct & start strictly ONE InferenceWorker while holding phys_lock
-            tracker = ByteTrackTracker(confidence_threshold=threshold, imgsz=imgsz)
+            # Construct & start strictly ONE InferenceWorker while holding phys_lock.
+            # Use lazy_init=True so HTTP stream/ingest endpoints return immediately while
+            # YOLO11n weights load inside the background InferenceWorker thread.
+            tracker = ByteTrackTracker(confidence_threshold=threshold, imgsz=imgsz, lazy_init=True)
             iworker = InferenceWorker(camera_id, tracker, inference_interval_ms=interval_ms)
             iworker.anomaly_detector.config.update(rules_snapshot)
             iworker.ref_count = 1
@@ -197,6 +199,30 @@ class InferenceRegistry:
             except Exception as e:
                 logger.warning(f"[REGISTRY_WARN] Error stopping inference worker for {phys_id}: {e}")
             print(f"[DEBUG] Stopped inference worker for {phys_id} after grace period.")
+
+    def remove_worker(self, camera_id):
+        """Immediately detaches a camera from its InferenceWorker and stops it if no longer referenced."""
+        worker_to_stop = None
+        with self.lock:
+            self.workers.pop(camera_id, None)
+            phys_id = self.camera_to_physical.pop(camera_id, None)
+            if not phys_id:
+                return
+            still_bound = [cid for cid, pid in self.camera_to_physical.items() if pid == phys_id]
+            p_iworker = self.physical_workers.get(phys_id)
+            if p_iworker is not None:
+                p_iworker.ref_count = max(0, p_iworker.ref_count - 1)
+                if not still_bound and p_iworker.ref_count <= 0:
+                    timer = self.cleanup_timers.pop(phys_id, None)
+                    if timer is not None:
+                        timer.cancel()
+                    self.physical_workers.pop(phys_id, None)
+                    worker_to_stop = p_iworker
+        if worker_to_stop is not None:
+            try:
+                worker_to_stop.stop()
+            except Exception as e:
+                logger.warning(f"[REGISTRY_WARN] Error stopping inference worker for camera {camera_id}: {e}")
 
     def get_active_worker(self, camera_id):
         with self.lock:

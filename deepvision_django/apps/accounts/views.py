@@ -1,20 +1,15 @@
 """
-Authentication Views for DeepVision Django Application.
-Provides:
-- Login (with existing Werkzeug scrypt hash compatibility)
-- Signup (validation, existing users table write, OTP dispatch)
-- Email Verification (6-digit OTP, attempts limit, 60s cooldown)
-- Forgot Password & Password Reset
-- Logout (styled banner notification)
+Authentication Compatibility Views & Validation Helpers for DeepVision Django Application.
+Primary authentication flows run through CSRF-protected JSON OTP endpoints in `apps.core.api`;
+this module retains shared input/password validators and routed compatibility handlers
+(`verify-email/`, `resend-otp/`, `verify-success/`, `resend-reset-otp/`, `logout/`).
 """
 import logging
 import re
 from datetime import datetime, timezone
 from django.shortcuts import render, redirect
-from django.urls import reverse
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
-from django.utils.http import url_has_allowed_host_and_scheme
 from apps.accounts.models import User
 from apps.accounts.email_service import send_verification_email, send_password_reset_email
 
@@ -63,109 +58,6 @@ def validate_password_strength(password):
     if not any(not c.isalnum() and not c.isspace() for c in password):
         return "Password must contain at least one special character."
     return None
-
-
-@require_http_methods(["GET", "POST"])
-def login_view(request):
-    if request.user.is_authenticated:
-        return redirect("dashboard")
-    if request.method == "POST":
-        email = request.POST.get("email", "").strip().lower()
-        password = request.POST.get("password", "")
-
-        if not email:
-            messages.error(request, "Email is required.")
-            return render(request, "pages/auth/login.html", {"email": email})
-        if not EMAIL_REGEX.match(email):
-            messages.error(request, "Please enter a valid email address.")
-            return render(request, "pages/auth/login.html", {"email": email})
-        if not password:
-            messages.error(request, "Password is required.")
-            return render(request, "pages/auth/login.html", {"email": email})
-
-        user = User.objects.filter(email=email).first()
-        if not user:
-            messages.error(request, "Invalid email or password.")
-            return render(request, "pages/auth/login.html", {"email": email})
-
-        if not user.check_password(password):
-            messages.error(request, "Invalid email or password.")
-            return render(request, "pages/auth/login.html", {"email": email})
-
-        if not user.is_email_verified:
-            request.session["signup_email"] = user.email
-            messages.warning(request, "Please verify your email before logging in.")
-            return redirect("verify_email")
-
-        if not user.is_active:
-            messages.error(request, "Your account is currently inactive. Please contact an administrator.")
-            return render(request, "pages/auth/login.html", {"email": email})
-
-        # Session fixation protection & establish session
-        request.session.flush()
-        request.session["user_id"] = user.id
-
-        next_url = request.GET.get("next") or request.POST.get("next")
-        if not next_url or not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
-            next_url = reverse("dashboard")
-        return redirect(next_url)
-
-    return render(request, "pages/auth/login.html")
-
-
-@require_http_methods(["GET", "POST"])
-def signup_view(request):
-    if request.user.is_authenticated:
-        return redirect("dashboard")
-    if request.method == "POST":
-        full_name = request.POST.get("full_name", "").strip()
-        email = request.POST.get("email", "").strip().lower()
-        password = request.POST.get("password", "")
-        confirm_password = request.POST.get("confirm_password", "")
-
-        error_msg = validate_signup_inputs(full_name, email, password, confirm_password)
-        if error_msg:
-            messages.error(request, error_msg)
-            return render(request, "pages/auth/signup.html", {"full_name": full_name, "email": email})
-
-        if User.objects.filter(email=email).exists():
-            messages.error(request, "An account with this email already exists.")
-            return render(request, "pages/auth/signup.html", {"full_name": full_name, "email": email})
-
-        try:
-            new_user = User(
-                full_name=full_name,
-                email=email,
-                role="user",
-                is_email_verified=False,
-                is_active=True,
-            )
-            new_user.set_password(password)
-            otp = new_user.generate_otp()
-            new_user.save()
-
-            email_sent = False
-            try:
-                email_sent = send_verification_email(email, otp)
-            except Exception:
-                logger.warning("[AUTH] Verification email delivery failed.")
-
-            request.session["signup_email"] = email
-            if email_sent:
-                messages.success(request, "Account created successfully. A verification code has been sent to your email.")
-            else:
-                user.email_otp_sent_at = None
-                user.save(update_fields=["email_otp_sent_at"])
-                logger.warning("[AUTH] Verification email was not accepted by the configured email backend.")
-                messages.warning(request, "Your account was created, but the verification email could not be delivered. Check email service configuration or try sending the code again later.")
-            return redirect("verify_email")
-
-        except Exception:
-            logger.error("[AUTH] Registration failed.")
-            messages.error(request, "An error occurred during account registration. Please try again.")
-            return render(request, "pages/auth/signup.html", {"full_name": full_name, "email": email})
-
-    return render(request, "pages/auth/signup.html")
 
 
 @require_http_methods(["GET", "POST"])
@@ -248,102 +140,6 @@ def resend_otp_view(request):
 
 def verify_success_view(request):
     return render(request, "pages/auth/verify_success.html")
-
-
-@require_http_methods(["GET", "POST"])
-def forgot_password_view(request):
-    if request.method == "POST":
-        email = request.POST.get("email", "").strip().lower()
-        if not email or not EMAIL_REGEX.match(email):
-            messages.error(request, "Please enter a valid email address.")
-            return render(request, "pages/auth/forgot_password.html", {"email": email})
-
-        user = User.objects.filter(email=email).first()
-        request.session["reset_email"] = email
-        request.session["reset_otp_verified"] = False
-
-        if user:
-            try:
-                otp = user.generate_reset_otp()
-                user.save()
-                if not send_password_reset_email(user.email, otp):
-                    logger.warning("[AUTH] Password reset email delivery failed for user_id=%s.", user.id)
-            except Exception:
-                logger.warning("[AUTH] Password reset setup failed for user_id=%s.", user.id)
-
-        messages.success(request, "If an account exists, the password reset request has been processed. Check the inbox if email delivery is available.")
-        return redirect("reset_password")
-
-    return render(request, "pages/auth/forgot_password.html")
-
-
-@require_http_methods(["GET", "POST"])
-def reset_password_view(request):
-    email = request.session.get("reset_email")
-    if not email:
-        messages.warning(request, "Session expired or invalid. Please start again.")
-        return redirect("forgot_password")
-
-    user = User.objects.filter(email=email).first()
-
-    if request.method == "POST":
-        is_verified = request.session.get("reset_otp_verified", False)
-
-        if not is_verified:
-            otp = request.POST.get("otp", "").strip()
-            if not otp or len(otp) != 6 or not otp.isdigit():
-                messages.error(request, "Please enter a valid 6-digit numeric verification code.")
-                return render(request, "pages/auth/reset_password.html", {"email": email, "step": 1})
-
-            if not user:
-                messages.error(request, "Invalid verification code.")
-                return render(request, "pages/auth/reset_password.html", {"email": email, "step": 1})
-
-            success, error_msg = user.verify_reset_otp(otp)
-            user.save()
-
-            if not success:
-                messages.error(request, error_msg)
-                return render(request, "pages/auth/reset_password.html", {"email": email, "step": 1})
-
-            request.session["reset_otp_verified"] = True
-            messages.success(request, "Code verified successfully. Please enter your new password.")
-            return render(request, "pages/auth/reset_password.html", {"email": email, "step": 2})
-        else:
-            password = request.POST.get("password", "")
-            confirm_password = request.POST.get("confirm_password", "")
-
-            policy_error = validate_password_strength(password)
-            if policy_error:
-                messages.error(request, policy_error)
-                return render(request, "pages/auth/reset_password.html", {"email": email, "step": 2})
-
-            if password != confirm_password:
-                messages.error(request, "Passwords do not match.")
-                return render(request, "pages/auth/reset_password.html", {"email": email, "step": 2})
-
-            if not user:
-                messages.error(request, "User session invalid.")
-                return redirect("forgot_password")
-
-            try:
-                user.set_password(password)
-                user.clear_reset_otp()
-                user.save()
-
-                request.session.pop("reset_email", None)
-                request.session.pop("reset_otp_verified", None)
-                request.session.pop("user_id", None)
-
-                messages.success(request, "Password reset successfully. Please log in with your new password.")
-                return redirect("login")
-            except Exception:
-                logger.error("[AUTH] Password update failed for user_id=%s.", user.id)
-                messages.error(request, "An error occurred during password update. Please try again.")
-                return render(request, "pages/auth/reset_password.html", {"email": email, "step": 2})
-
-    step = 2 if request.session.get("reset_otp_verified", False) else 1
-    return render(request, "pages/auth/reset_password.html", {"email": email, "step": step})
 
 
 @require_http_methods(["POST"])

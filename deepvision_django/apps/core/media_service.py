@@ -82,8 +82,10 @@ def serve_file_with_ranges(request, full_path: str, content_type: str, as_attach
     file_size = os.path.getsize(full_path)
 
     if as_attachment:
+        safe_name = os.path.basename(str(download_name or os.path.basename(full_path)))
+        safe_name = safe_name.replace('"', "").replace("\r", "").replace("\n", "") or "download.bin"
         resp = FileResponse(open(full_path, "rb"), content_type=content_type)
-        resp["Content-Disposition"] = f'attachment; filename="{download_name or os.path.basename(full_path)}"'
+        resp["Content-Disposition"] = f'attachment; filename="{safe_name}"'
         resp["Content-Length"] = str(file_size)
         return resp
 
