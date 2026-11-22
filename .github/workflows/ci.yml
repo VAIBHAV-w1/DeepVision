@@ -228,6 +228,7 @@ jobs:
       - name: Run Strict Native YOLO26s + BoT-SORT+ReID Deterministic Verification
         env:
           DEEPVISION_STRICT_NATIVE_AI: "1"
+          PYTHONPATH: deepvision_django
         run: |
           python verification/test_yolo_and_tracker.py
           python -c "
