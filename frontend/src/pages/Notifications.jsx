@@ -1078,10 +1078,10 @@ export function Notifications({ onNavigate, pageParams = {} }) {
           {/* Filter Tabs matching Figure 7.1.9: All, Intrusion, Unusual, Others */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22, flexWrap: 'wrap' }}>
             {[
-              { id: 'all', label: `${t('evidence.tabAll', 'All')} (${evidenceList.length})` },
-              { id: 'intrusion', label: `${t('evidence.tabIntrusion', 'Intrusion')} (${evidenceIntrusion.length})` },
-              { id: 'unusual', label: `${t('evidence.tabUnusual', 'Unusual')} (${evidenceUnusual.length})` },
-              { id: 'others', label: `${t('evidence.tabOthers', 'Others')} (${evidenceOthers.length})` },
+              { id: 'all', label: t('evidence.tabAll', 'All ({count})', { count: evidenceList.length }) },
+              { id: 'intrusion', label: t('evidence.tabIntrusion', 'Intrusion ({count})', { count: evidenceIntrusion.length }) },
+              { id: 'unusual', label: t('evidence.tabUnusual', 'Unusual ({count})', { count: evidenceUnusual.length }) },
+              { id: 'others', label: t('evidence.tabOthers', 'Others ({count})', { count: evidenceOthers.length }) },
             ].map((tab) => (
               <button
                 key={tab.id}

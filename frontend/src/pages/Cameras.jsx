@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../components/common/Toast';
+import { Modal } from '../components/common/Modal';
 import { useTranslation } from '../i18n/i18nContext';
 import {
   RestrictedZoneEditor,
@@ -67,6 +69,8 @@ function formatBackendLabel(detectorBackend, trackerBackend, t) {
 }
 
 export function Cameras({ onNavigate, pageParams, initialCameraId }) {
+  const { user } = useAuth();
+  const isViewer = user?.role === 'viewer';
   const { t } = useTranslation();
   const { addToast } = useToast();
 
@@ -1042,14 +1046,16 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
             <option value="offline">{t('cameras.offline', 'Offline')}</option>
             <option value="restricted">{t('cameras.filterRestricted', 'Restricted-Entry Only')}</option>
           </select>
-          <button
-            type="button"
-            onClick={handleOpenAddModal}
-            className="btn btn-primary btn-sm"
-            style={{ padding: '9px 16px', fontWeight: 700, borderRadius: '8px' }}
-          >
-            + {t('cameras.addCamera', 'Add Camera')}
-          </button>
+          {!isViewer && (
+            <button
+              type="button"
+              onClick={handleOpenAddModal}
+              className="btn btn-primary btn-sm"
+              style={{ padding: '9px 16px', fontWeight: 700, borderRadius: '8px' }}
+            >
+              + {t('cameras.addCamera', 'Add Camera')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1070,9 +1076,11 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
           <p style={{ margin: '0 0 12px', color: 'var(--text-muted, #94A3B8)' }}>
             {t('cameras.emptyState', 'No cameras match the current filter.')}
           </p>
-          <button type="button" onClick={handleOpenAddModal} className="btn btn-primary btn-sm">
-            + {t('cameras.addCamera', 'Add Camera')}
-          </button>
+          {!isViewer && (
+            <button type="button" onClick={handleOpenAddModal} className="btn btn-primary btn-sm">
+              + {t('cameras.addCamera', 'Add Camera')}
+            </button>
+          )}
         </div>
       ) : (
         <div
@@ -1183,40 +1191,44 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
                   >
                     {t('cameras.openLive', 'Live View')}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedCameraId(cam.id);
-                      setWorkspaceView('live');
-                      setViewMode('tracking');
-                      setZoneEditorOpen(true);
-                    }}
-                    className="btn btn-secondary btn-sm"
-                  >
-                    {t('cameras.zonesButton', 'Zones')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenEditModal(cam)}
-                    className="btn btn-secondary btn-sm"
-                  >
-                    {t('common.edit', 'Edit')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => (online ? handleDisconnectCamera(cam) : handleReconnectCamera(cam))}
-                    className="btn btn-secondary btn-sm"
-                  >
-                    {online ? t('cameras.disconnect', 'Disconnect') : t('cameras.reconnect', 'Reconnect')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteTargetCam(cam)}
-                    className="btn btn-secondary btn-sm"
-                    style={{ color: '#F87171', borderColor: 'rgba(248, 113, 113, 0.35)' }}
-                  >
-                    {t('common.remove', 'Remove')}
-                  </button>
+                  {!isViewer && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedCameraId(cam.id);
+                          setWorkspaceView('live');
+                          setViewMode('tracking');
+                          setZoneEditorOpen(true);
+                        }}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        {t('cameras.zonesButton', 'Zones')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditModal(cam)}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        {t('common.edit', 'Edit')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => (online ? handleDisconnectCamera(cam) : handleReconnectCamera(cam))}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        {online ? t('cameras.disconnect', 'Disconnect') : t('cameras.reconnect', 'Reconnect')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTargetCam(cam)}
+                        className="btn btn-secondary btn-sm"
+                        style={{ color: '#F87171', borderColor: 'rgba(248, 113, 113, 0.35)' }}
+                      >
+                        {t('common.remove', 'Remove')}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             );
@@ -1959,42 +1971,12 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   // MODALS: ADD/EDIT CAMERA (WITH RESTRICTED-ENTRY CONFIG) & DELETE CONFIRM
   // =========================================================================
   const renderCameraModal = () => (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(2, 6, 23, 0.82)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 60,
-        padding: '16px',
-      }}
+    <Modal
+      isOpen={isAddModalOpen}
+      onClose={() => setIsAddModalOpen(false)}
+      title={editingCamId ? t('cameras.editCameraTitle', 'Edit Camera & Monitoring Policy') : t('cameras.addCameraTitle', 'Register New Camera')}
+      maxWidth="580px"
     >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: '580px',
-          maxHeight: '92vh',
-          overflowY: 'auto',
-          backgroundColor: 'var(--bg-surface, #0F172A)',
-          border: '1px solid var(--border-color, #1E293B)',
-          borderRadius: '14px',
-          padding: '22px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '14px',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-main, #F8FAFC)' }}>
-            {editingCamId ? t('cameras.editCameraTitle', 'Edit Camera & Monitoring Policy') : t('cameras.addCameraTitle', 'Register New Camera')}
-          </h2>
-          <button type="button" onClick={() => setIsAddModalOpen(false)} className="btn btn-secondary btn-sm">
-            ✕
-          </button>
-        </div>
-
         <form onSubmit={handleAddCameraSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div>
@@ -2271,43 +2253,21 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
             </div>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 
   return (
     <div style={{ width: '100%' }}>
       {workspaceView === 'management' ? renderCameraManagement() : renderLiveMonitor()}
-      {isAddModalOpen && renderCameraModal()}
-      {deleteTargetCam && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(2, 6, 23, 0.8)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 70,
-            padding: '16px',
-          }}
-        >
-          <div
-            style={{
-              maxWidth: '400px',
-              width: '100%',
-              backgroundColor: 'var(--bg-surface, #0F172A)',
-              border: '1px solid var(--border-color, #1E293B)',
-              borderRadius: '12px',
-              padding: '20px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-            }}
-          >
-            <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-main, #F8FAFC)' }}>
-              {t('cameras.confirmRemoveTitle', 'Remove Camera?')}
-            </h3>
+      {renderCameraModal()}
+      <Modal
+        isOpen={Boolean(deleteTargetCam)}
+        onClose={() => setDeleteTargetCam(null)}
+        title={t('cameras.confirmRemoveTitle', 'Remove Camera?')}
+        maxWidth="420px"
+      >
+        {deleteTargetCam && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-muted, #94A3B8)' }}>
               Remove "{deleteTargetCam.name}" from active monitoring? Historical recordings and forensic evidence will remain preserved.
             </p>
@@ -2325,8 +2285,8 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
     </div>
   );
 }

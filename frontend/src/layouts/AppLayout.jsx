@@ -335,7 +335,11 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
                 {user?.full_name || t('common.operator', 'Operator')}
               </div>
               <div style={{ fontSize: '0.7rem', color: '#64748B', textTransform: 'capitalize' }}>
-                {user?.role === 'admin' ? t('common.admin', 'Administrator') : t('common.surveillance', 'Surveillance')}
+                {user?.role === 'admin'
+                  ? t('common.admin', 'Administrator')
+                  : user?.role === 'viewer'
+                  ? t('common.viewer', 'Viewer')
+                  : t('common.surveillance', 'Surveillance')}
               </div>
             </div>
           </div>
@@ -372,7 +376,7 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
         {/* Top Header Row matching Figure 7.1.2 */}
         <header className="enterprise-header">
           {/* Mobile hamburger menu trigger */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
             <button
               type="button"
               id="btn-mobile-menu-toggle"
@@ -387,6 +391,7 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 padding: '4px',
+                flexShrink: 0,
               }}
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -395,20 +400,21 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
                 <line x1="3" y1="18" x2="21" y2="18" />
               </svg>
             </button>
-            <div style={{ fontSize: '0.9rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ color: '#94A3B8' }}>{t('brand.name', 'DeepVision')}</span>
-              <span>/</span>
-              <span style={{ color: '#F8FAFC', fontWeight: 600 }}>
+            <div style={{ fontSize: '0.9rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+              <span className="enterprise-breadcrumb-brand" style={{ color: '#94A3B8' }}>{t('brand.name', 'DeepVision')}</span>
+              <span className="enterprise-breadcrumb-brand">/</span>
+              <span style={{ color: '#F8FAFC', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {t('nav.' + activePage, activePage)}
               </span>
             </div>
           </div>
 
           {/* Right Header Controls matching Figure 7.1.2 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div className="enterprise-header-controls" style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
             {/* Live HUD Date/Time Card */}
             <div
               id="dashboard-hud-clock"
+              className="enterprise-hud-clock"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -420,6 +426,7 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
                 fontSize: '0.82rem',
                 color: '#CBD5E1',
                 fontWeight: 600,
+                whiteSpace: 'nowrap',
               }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" strokeWidth="2">
@@ -680,7 +687,11 @@ export function AppLayout({ children, activePage, pageParams, setActivePage }) {
                     {user?.full_name || t('common.operator', 'Operator')}
                   </div>
                   <div style={{ fontSize: '0.7rem', color: '#64748B', textTransform: 'capitalize' }}>
-                    {user?.role === 'admin' ? t('common.admin', 'Administrator') : t('common.surveillance', 'Surveillance')}
+                    {user?.role === 'admin'
+                      ? t('common.admin', 'Administrator')
+                      : user?.role === 'viewer'
+                      ? t('common.viewer', 'Viewer')
+                      : t('common.surveillance', 'Surveillance')}
                   </div>
                 </div>
               </div>

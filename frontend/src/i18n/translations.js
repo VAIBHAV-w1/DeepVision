@@ -38,7 +38,7 @@ export const translations = {
     "dashboard.notices": "Notifications",
     "dashboard.inbox": "Inbox",
     "dashboard.unread": "Unread notifications",
-    "dashboard.offline": "offline",
+    "dashboard.offline": "Offline",
     "common.active": "Active",
     "common.standby": "Standby",
     "common.records": "Records",
