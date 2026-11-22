@@ -245,7 +245,9 @@ def get_camera_snapshot(camera_id: int, user_id: int, allow_start: bool = True, 
     # 1. Grab from active worker (including shared physical hardware worker) if available
     if worker and worker.running and worker.latest_frame is not None:
         with worker.lock:
-            frame = worker.latest_frame.copy()
+            frame = worker.latest_frame
+        if frame is None:
+            return None
         sample = frame[::16, ::16]
         if float(sample.mean()) < 1.0 and float(sample.std()) < 0.5:
             return None
@@ -386,6 +388,10 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
         "ai_fps": inf_fps,
         "inference_fps": round(float(inf_fps), 2),
         "latency_ms": lat_ms,
+        "p50_latency_ms": summary.get("p50_latency_ms", telemetry.get("p50_latency_ms", lat_ms)),
+        "p95_latency_ms": summary.get("p95_latency_ms", telemetry.get("p95_latency_ms", lat_ms)),
+        "frame_age_ms": telemetry.get("frame_age_ms", summary.get("frame_age_ms", 0.0)),
+        "ai_profile": summary.get("ai_profile", telemetry.get("ai_profile", "balanced")),
         "stage_timings": telemetry.get("stage_timings", {}) or (getattr(inf_worker, "last_stage_timings", {}) if inf_worker else {}),
         "inference_age_ms": telemetry.get("inference_age_ms", 0.0),
         "status": health.get("status", "active"),

@@ -36,6 +36,9 @@ class InferenceRegistry:
         self.cleanup_timers = {}             # physical_source_id -> Timer
         self.phys_locks = {}                 # physical_source_id -> Lock (serializes worker creation)
         self.runtime_confidence_threshold = float(getattr(settings, "YOLO_CONFIDENCE_THRESHOLD", 0.35))
+        self.runtime_ai_profile = (os.getenv("DEEPVISION_AI_PROFILE") or "balanced").strip().lower()
+        if self.runtime_ai_profile not in ("balanced", "lightweight"):
+            self.runtime_ai_profile = "balanced"
         self.runtime_anomaly_rules = {
             "LOITERING_ENABLED": True,
             "RESTRICTED_ENTRY_ENABLED": True,
@@ -55,6 +58,11 @@ class InferenceRegistry:
                     data = json.load(fh)
                 if "confidence_threshold" in data:
                     self.runtime_confidence_threshold = max(0.15, min(0.95, float(data["confidence_threshold"])))
+                if isinstance(data.get("ai_profile"), str):
+                    prof = data["ai_profile"].strip().lower()
+                    if prof in ("balanced", "lightweight"):
+                        self.runtime_ai_profile = prof
+                        os.environ["DEEPVISION_AI_PROFILE"] = prof
                 if isinstance(data.get("rules"), dict):
                     for k, v in data["rules"].items():
                         if k in self.runtime_anomaly_rules:
@@ -67,6 +75,7 @@ class InferenceRegistry:
             cfg_path = _get_runtime_config_path()
             payload = {
                 "confidence_threshold": self.runtime_confidence_threshold,
+                "ai_profile": self.runtime_ai_profile,
                 "rules": dict(self.runtime_anomaly_rules),
             }
             with open(cfg_path, "w", encoding="utf-8") as fh:
@@ -74,18 +83,43 @@ class InferenceRegistry:
         except Exception as e:
             logger.warning(f"[INFERENCE_REGISTRY_SAVE_WARN] {e}")
 
-    def apply_runtime_settings(self, confidence_threshold=None, rules=None):
-        """Updates live confidence threshold and anomaly rule flags across all active InferenceWorkers and persists to disk."""
+    def apply_runtime_settings(self, confidence_threshold=None, rules=None, ai_profile=None):
+        """Updates live confidence threshold, explicit AI profile, and anomaly rule flags cleanly."""
+        profile_changed = False
         with self.lock:
             if confidence_threshold is not None:
                 self.runtime_confidence_threshold = max(0.15, min(0.95, float(confidence_threshold)))
+            if isinstance(ai_profile, str):
+                norm_prof = ai_profile.strip().lower()
+                if norm_prof in ("lightweight", "nano", "low_resource", "cpu_lite", "fast", "fast_cpu"):
+                    norm_prof = "lightweight"
+                elif norm_prof in ("balanced", "yolo26s", "standard"):
+                    norm_prof = "balanced"
+                else:
+                    norm_prof = None
+                if norm_prof and norm_prof != self.runtime_ai_profile:
+                    self.runtime_ai_profile = norm_prof
+                    os.environ["DEEPVISION_AI_PROFILE"] = norm_prof
+                    profile_changed = True
             if isinstance(rules, dict):
                 for k, v in rules.items():
                     self.runtime_anomaly_rules[k] = bool(v)
             self._persist_settings()
             active_iworkers = set(self.physical_workers.values())
 
+        if profile_changed:
+            try:
+                from apps.surveillance.ai.model_loader import reload_shared_yolo_model
+                reload_shared_yolo_model(self.runtime_ai_profile)
+            except Exception as e:
+                logger.warning(f"[INFERENCE_REGISTRY_RELOAD_WARN] {e}")
+
         for iw in active_iworkers:
+            if iw and iw.tracker is not None and profile_changed and hasattr(iw.tracker, "reload_model"):
+                try:
+                    iw.tracker.reload_model()
+                except Exception as e:
+                    logger.warning(f"[INFERENCE_WORKER_RELOAD_WARN] {e}")
             if iw and iw.tracker is not None and confidence_threshold is not None:
                 iw.tracker.confidence_threshold = self.runtime_confidence_threshold
             if iw and iw.anomaly_detector is not None and isinstance(rules, dict):
@@ -97,6 +131,7 @@ class InferenceRegistry:
         with self.lock:
             return {
                 "confidence_threshold": self.runtime_confidence_threshold,
+                "ai_profile": self.runtime_ai_profile,
                 "rules": dict(self.runtime_anomaly_rules),
             }
 

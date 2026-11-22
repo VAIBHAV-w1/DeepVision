@@ -86,10 +86,12 @@ class CameraWorker:
             self.state = "ONLINE"
             self._browser_frames_pushed += 1
             dt = now - self._browser_fps_window_start
-            if self._browser_frames_pushed >= 4 and dt > 0:
+            if self._browser_frames_pushed >= 2 and dt > 0:
                 self.fps = round(self._browser_frames_pushed / dt, 1)
-                self._browser_frames_pushed = 0
-                self._browser_fps_window_start = now
+                if self._browser_frames_pushed >= 6 or dt >= 1.5:
+                    self._browser_frames_pushed = 0
+                    self._browser_fps_window_start = now
+            self.last_acquisition_ms = round(max(0.1, (now_mono - self.last_capture_monotonic) * 1000.0), 3) if self.last_capture_monotonic else 0.5
             self.frame_condition.notify_all()
 
         try:

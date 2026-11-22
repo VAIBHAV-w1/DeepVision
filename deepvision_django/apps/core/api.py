@@ -779,6 +779,11 @@ def api_dashboard_stats(request):
     engine_reachable = is_engine_reachable(timeout=0.5)
     db_backend = getattr(connection, 'vendor', 'unknown')
 
+    from apps.surveillance.health.health_service import get_user_cameras_health
+    cam_healths = get_user_cameras_health(cam_ids) if cam_ids else []
+    active_fps_vals = [float(h.get("fps") or 0.0) for h in cam_healths if float(h.get("fps") or 0.0) > 0.0]
+    live_avg_fps = round(sum(active_fps_vals) / len(active_fps_vals), 1) if active_fps_vals else 0.0
+
     payload = {
         "total_cameras": total_cameras,
         "online_cameras": online_cameras,
@@ -798,7 +803,7 @@ def api_dashboard_stats(request):
             "cpu": cpu_usage,
             "memory": mem_usage,
             "storage": disk_usage,
-            "fps": 28,
+            "fps": live_avg_fps,
         },
         "engine_reachable": engine_reachable,
         "database_backend": db_backend,
@@ -1583,6 +1588,7 @@ def api_detection_settings(request):
 
         data = _parse_body(request)
         raw_conf = data.get("confidence_threshold", data.get("confThreshold"))
+        raw_profile = data.get("ai_profile")
         conf_val = None
         if raw_conf is not None:
             try:
@@ -1642,6 +1648,7 @@ def api_detection_settings(request):
             if is_staff:
                 inf_reg.apply_runtime_settings(
                     confidence_threshold=conf_val,
+                    ai_profile=raw_profile,
                     rules={
                         "LOITERING_ENABLED": loitering,
                         "RESTRICTED_ENTRY_ENABLED": restricted_entry,
@@ -1659,17 +1666,29 @@ def api_detection_settings(request):
                     if iw is not None and conf_val is not None and hasattr(iw, "tracker") and hasattr(iw.tracker, "confidence_threshold"):
                         iw.tracker.confidence_threshold = float(conf_val)
 
-        rt = inf_reg.get_runtime_settings() if inf_reg else {"confidence_threshold": conf_val or 0.35, "rules": {}}
+        rt = inf_reg.get_runtime_settings() if inf_reg else {"confidence_threshold": conf_val or 0.35, "ai_profile": "balanced", "rules": {}}
+        from apps.surveillance.ai.onnx_runtime import get_effective_cpu_count, get_model_profile_catalog
+        from apps.surveillance.ai.model_loader import get_shared_yolo_model
+        shared_m = None
+        try:
+            shared_m = get_shared_yolo_model()
+        except Exception:
+            pass
         log_audit(
             request,
             action="DETECTION_SETTINGS_UPDATED",
             resource_type="detection_settings",
-            description=f"Updated confidence_threshold={rt['confidence_threshold']} and 6 security event rules.",
+            description=f"Updated confidence_threshold={rt['confidence_threshold']}, ai_profile={rt.get('ai_profile', 'balanced')} and 6 security event rules.",
         )
         return JsonResponse({
             "success": True,
             "message": "Detection threshold and security event rules applied to active pipeline.",
             "confidence_threshold": rt["confidence_threshold"],
+            "ai_profile": rt.get("ai_profile", "balanced"),
+            "active_model": getattr(shared_m, "model_name", "yolo26s.onnx") if shared_m else "yolo26s.onnx",
+            "detector_backend": getattr(shared_m, "backend_id", "unknown") if shared_m else "standby",
+            "effective_cpus": get_effective_cpu_count(),
+            "model_catalog": get_model_profile_catalog(),
             "rules": {
                 "loitering": loitering,
                 "restrictedEntry": restricted_entry,
@@ -1680,12 +1699,24 @@ def api_detection_settings(request):
             },
         })
 
-    rt = inf_reg.get_runtime_settings() if inf_reg else {"confidence_threshold": 0.35, "rules": {}}
+    rt = inf_reg.get_runtime_settings() if inf_reg else {"confidence_threshold": 0.35, "ai_profile": "balanced", "rules": {}}
     prof = DetectionProfile.objects.filter(camera_id=primary_cam.id).first() if primary_cam else None
     rt_rules = rt.get("rules", {})
+    from apps.surveillance.ai.onnx_runtime import get_effective_cpu_count, get_model_profile_catalog
+    from apps.surveillance.ai.model_loader import get_shared_yolo_model
+    shared_m = None
+    try:
+        shared_m = get_shared_yolo_model()
+    except Exception:
+        pass
     return JsonResponse({
         "success": True,
         "confidence_threshold": rt.get("confidence_threshold", 0.35),
+        "ai_profile": rt.get("ai_profile", "balanced"),
+        "active_model": getattr(shared_m, "model_name", "yolo26s.onnx") if shared_m else "yolo26s.onnx",
+        "detector_backend": getattr(shared_m, "backend_id", "unknown") if shared_m else "standby",
+        "effective_cpus": get_effective_cpu_count(),
+        "model_catalog": get_model_profile_catalog(),
         "rules": {
             "loitering": bool(rt_rules.get("LOITERING_ENABLED", bool(prof.loitering_enabled) if prof is not None else True)),
             "restrictedEntry": bool(rt_rules.get("RESTRICTED_ENTRY_ENABLED", bool(prof.restricted_entry_enabled) if prof is not None else True)),

@@ -664,13 +664,24 @@ def camera_ingest_frame_view(request, camera_id):
         pass
 
     visible_persons_default = sum(1 for t in tracks_list if str(t.get("class_name", "")).lower() == "person")
+    seq_val = request.GET.get("seq") or request.headers.get("X-Frame-Seq")
+    try:
+        seq_out = int(seq_val) if seq_val is not None else None
+    except (ValueError, TypeError):
+        seq_out = None
     return JsonResponse({
         "success": True,
+        "seq": seq_out,
         "camera_id": camera.id,
         "frame_id": worker.frame_id,
         "fps": worker.fps,
         "ai_fps": getattr(inf_worker, "ai_fps", 0.0) if inf_worker else 0.0,
         "latency_ms": round(float(getattr(inf_worker, "latency_ms", 0.0) or 0.0), 2) if inf_worker else 0.0,
+        "p50_latency_ms": summary.get("p50_latency_ms", round(float(getattr(inf_worker, "latency_ms", 0.0) or 0.0), 2) if inf_worker else 0.0),
+        "p95_latency_ms": summary.get("p95_latency_ms", round(float(getattr(inf_worker, "latency_ms", 0.0) or 0.0), 2) if inf_worker else 0.0),
+        "frame_age_ms": summary.get("frame_age_ms", 0.0),
+        "ai_profile": summary.get("ai_profile", "balanced"),
+        "stage_timings": dict(getattr(inf_worker, "last_stage_timings", {}) or {}) if inf_worker else {},
         "tracks": len(tracks_list),
         "tracks_list": tracks_list,
         "currently_visible_persons": summary.get("currently_visible_persons", visible_persons_default),

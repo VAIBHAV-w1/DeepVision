@@ -16,7 +16,7 @@ export function Notifications({ onNavigate, pageParams = {} }) {
   // ----------------------------------------------------
   const [notifications, setNotifications] = useState([]);
   const [eventFilter, setEventFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('today');
+  const [dateFilter, setDateFilter] = useState('all');
   const [loadingNotifs, setLoadingNotifs] = useState(true);
   const [notifPage, setNotifPage] = useState(1);
   const [totalNotifs, setTotalNotifs] = useState(0);
@@ -51,6 +51,9 @@ export function Notifications({ onNavigate, pageParams = {} }) {
     try {
       setLoadingNotifs(true);
       const params = { page: notifPage, per_page: 20 };
+      if (dateFilter === 'today' || dateFilter === 'yesterday') {
+        params.date = dateFilter;
+      }
       const data = await api.notifications.list(params);
       if (data && data.notifications) {
         setNotifications(data.notifications);
@@ -62,7 +65,7 @@ export function Notifications({ onNavigate, pageParams = {} }) {
     } finally {
       setLoadingNotifs(false);
     }
-  }, [notifPage]);
+  }, [notifPage, dateFilter]);
 
   // ----------------------------------------------------
   // DATA FETCHING: Recordings (Figure 7.1.8)

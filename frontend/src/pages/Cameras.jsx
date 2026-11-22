@@ -141,6 +141,11 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   const [measuredFps, setMeasuredFps] = useState(0);
   const [measuredAiFps, setMeasuredAiFps] = useState(0);
   const [latencyMs, setLatencyMs] = useState(0);
+  const [p50LatencyMs, setP50LatencyMs] = useState(0);
+  const [p95LatencyMs, setP95LatencyMs] = useState(0);
+  const [frameAgeMs, setFrameAgeMs] = useState(0);
+  const [aiProfile, setAiProfile] = useState('balanced');
+  const [switchingProfile, setSwitchingProfile] = useState(false);
   const [visiblePersonsCount, setVisiblePersonsCount] = useState(0);
   const [activeTracksCount, setActiveTracksCount] = useState(0);
   const [uniquePersonsObserved, setUniquePersonsObserved] = useState(0);
@@ -181,6 +186,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   const browserStreamRef = useRef(null);
   const activeBridgeCamIdRef = useRef(null);
   const streamReloadPendingRef = useRef(false);
+  const liveStreamImgRef = useRef(null);
 
   // Add / Edit Camera Modal & Delete Confirm
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -307,17 +313,22 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     selectedCam && ((selectedCam.status === 'online' && !streamError) || streamLoaded || Boolean(snapshotUrl) || browserBridgeActive)
   );
 
-  // Poll live telemetry when viewing Live Monitor in DETECTION & TRACKING mode (paused or raw mode skips unnecessary AI stat polling noise)
+  // Poll live telemetry when viewing Live Monitor (paused or browser-push skips redundant polling; ingest already returns fresh telemetry)
   useEffect(() => {
     if (!selectedCam?.id || workspaceView !== 'live' || !isPlaying) return undefined;
     let active = true;
     const pollStats = async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const stats = await api.cameras.getStats(selectedCam.id);
         if (!active || !stats) return;
         if (typeof stats.fps === 'number') setMeasuredFps(Math.round(stats.fps * 10) / 10);
         if (typeof stats.ai_fps === 'number') setMeasuredAiFps(Math.round(stats.ai_fps * 10) / 10);
         if (typeof stats.latency_ms === 'number') setLatencyMs(Math.round(stats.latency_ms * 10) / 10);
+        if (typeof stats.p50_latency_ms === 'number') setP50LatencyMs(Math.round(stats.p50_latency_ms * 10) / 10);
+        if (typeof stats.p95_latency_ms === 'number') setP95LatencyMs(Math.round(stats.p95_latency_ms * 10) / 10);
+        if (typeof stats.frame_age_ms === 'number') setFrameAgeMs(Math.round(stats.frame_age_ms * 10) / 10);
+        if (typeof stats.ai_profile === 'string' && stats.ai_profile) setAiProfile(stats.ai_profile);
 
         if (Array.isArray(stats.tracks)) {
           setActiveTracksList(stats.tracks);
@@ -364,14 +375,15 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       }
     };
     pollStats();
-    const timer = setInterval(pollStats, viewMode === 'tracking' ? 1800 : 3500);
+    const pollMs = browserBridgeActive ? 5000 : viewMode === 'tracking' ? 1800 : 3500;
+    const timer = setInterval(pollStats, pollMs);
     return () => {
       active = false;
       clearInterval(timer);
     };
-  }, [selectedCam?.id, selectedCam?.status, workspaceView, viewMode, isPlaying]);
+  }, [selectedCam?.id, selectedCam?.status, workspaceView, viewMode, isPlaying, browserBridgeActive]);
 
-  // Snapshot fallback if MJPEG buffers >1.8s
+  // Snapshot fallback ONLY if MJPEG stream actually fails or stalls >6.5s (never preempt MJPEG at t=0!)
   useEffect(() => {
     const camId = selectedCam?.id;
     const canStream = Boolean(
@@ -380,13 +392,13 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       workspaceView === 'live' &&
       (selectedCam?.status === 'online' || browserBridgeActive)
     );
-    if (!canStream) {
+    if (!canStream || streamLoaded) {
       if (snapshotUrlRef.current) {
         URL.revokeObjectURL(snapshotUrlRef.current);
         snapshotUrlRef.current = null;
       }
       setSnapshotUrl(null);
-      setUseSnapshotFallback(false);
+      if (!canStream) setUseSnapshotFallback(false);
       return undefined;
     }
 
@@ -396,13 +408,17 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     const fallbackArmTimer = (!streamLoaded && !streamError)
       ? setTimeout(() => {
           if (!cancelled) setUseSnapshotFallback(true);
-        }, 1800)
+        }, 6500)
       : null;
 
-    const shouldPollSnapshots = streamError || useSnapshotFallback || (browserBridgeActive && !streamLoaded);
+    const shouldPollSnapshots = streamError || useSnapshotFallback;
     if (shouldPollSnapshots) {
       const fetchNextSnapshot = async () => {
         if (cancelled) return;
+        if (typeof document !== 'undefined' && document.hidden) {
+          pollTimer = setTimeout(fetchNextSnapshot, 400);
+          return;
+        }
         try {
           const resp = await fetch(
             `/api/cameras/${camId}/snapshot/?mode=${viewMode}&t=${Date.now()}`,
@@ -424,7 +440,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
           // ignore transient drop
         } finally {
           if (!cancelled) {
-            pollTimer = setTimeout(fetchNextSnapshot, 180);
+            pollTimer = setTimeout(fetchNextSnapshot, 120);
           }
         }
       };
@@ -438,14 +454,18 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     };
   }, [selectedCam?.id, selectedCam?.status, isPlaying, workspaceView, browserBridgeActive, streamLoaded, streamError, useSnapshotFallback, viewMode]);
 
-  // Browser Webcam Ingest Loop
+  // Browser Webcam Ingest Loop: binary JPEG Blob upload + bounded concurrency (max 2 in-flight, latest-seq ordering)
   useEffect(() => {
     if (!browserBridgeActive || !selectedCam?.id || !isPlaying) return undefined;
     let active = true;
-    let inFlight = false;
+    let inFlightCount = 0;
+    let seqCounter = 0;
+    let latestAppliedSeq = 0;
+    const targetCamId = selectedCam.id;
 
-    const pushFrame = async () => {
-      if (!active || inFlight) return;
+    const pushFrame = () => {
+      if (!active || inFlightCount >= 2) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
       const videoEl = browserVideoRef.current;
       if (!videoEl || videoEl.readyState < 2 || !videoEl.videoWidth) return;
 
@@ -456,50 +476,109 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       }
       const targetW = Math.min(640, videoEl.videoWidth);
       const targetH = Math.round((videoEl.videoHeight / videoEl.videoWidth) * targetW) || 360;
-      canvas.width = targetW;
-      canvas.height = targetH;
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.drawImage(videoEl, 0, 0, targetW, targetH);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
 
-      inFlight = true;
-      try {
-        const res = await api.cameras.ingestFrame(selectedCam.id, dataUrl);
-        if (active && res?.success) {
+      inFlightCount += 1;
+      const thisSeq = ++seqCounter;
+
+      const sendPayload = async (blob) => {
+        try {
+          if (!active || !blob) return;
+          const res = await api.cameras.ingestFrame(targetCamId, blob, thisSeq);
+          if (!active || !res?.success) return;
           setStreamError(false);
           if (streamReloadPendingRef.current) {
             streamReloadPendingRef.current = false;
             setStreamTimestamp(Date.now());
           }
-          if (typeof res.fps === 'number') setMeasuredFps(res.fps);
-          if (typeof res.ai_fps === 'number') setMeasuredAiFps(res.ai_fps);
-          if (typeof res.latency_ms === 'number') setLatencyMs(res.latency_ms);
-          if (Array.isArray(res.tracks_list)) setActiveTracksList(res.tracks_list);
-          if (typeof res.currently_visible_persons === 'number') setVisiblePersonsCount(res.currently_visible_persons);
-          if (typeof res.active_tracks === 'number') setActiveTracksCount(res.active_tracks);
-          if (typeof res.unique_persons_observed === 'number') setUniquePersonsObserved(res.unique_persons_observed);
-          if (typeof res.total_detection_events === 'number') setTotalDetectionEvents(res.total_detection_events);
-          if (Array.isArray(res.recent_detections)) setRecentDetections(res.recent_detections);
-          if (Array.isArray(res.recent_zone_events)) setRecentZoneEvents(res.recent_zone_events);
-          if (typeof res.detector_backend === 'string' && res.detector_backend) setDetectorBackend(res.detector_backend);
-          if (typeof res.tracker_backend === 'string' && res.tracker_backend) setTrackerBackend(res.tracker_backend);
+          if (thisSeq >= latestAppliedSeq) {
+            latestAppliedSeq = thisSeq;
+            if (typeof res.fps === 'number') setMeasuredFps(res.fps);
+            if (typeof res.ai_fps === 'number') setMeasuredAiFps(res.ai_fps);
+            if (typeof res.latency_ms === 'number') setLatencyMs(res.latency_ms);
+            if (typeof res.p50_latency_ms === 'number') setP50LatencyMs(res.p50_latency_ms);
+            if (typeof res.p95_latency_ms === 'number') setP95LatencyMs(res.p95_latency_ms);
+            if (typeof res.frame_age_ms === 'number') setFrameAgeMs(res.frame_age_ms);
+            if (typeof res.ai_profile === 'string' && res.ai_profile) setAiProfile(res.ai_profile);
+            if (Array.isArray(res.tracks_list)) setActiveTracksList(res.tracks_list);
+            if (typeof res.currently_visible_persons === 'number') setVisiblePersonsCount(res.currently_visible_persons);
+            if (typeof res.active_tracks === 'number') setActiveTracksCount(res.active_tracks);
+            if (typeof res.unique_persons_observed === 'number') setUniquePersonsObserved(res.unique_persons_observed);
+            if (typeof res.total_detection_events === 'number') setTotalDetectionEvents(res.total_detection_events);
+            if (Array.isArray(res.recent_detections)) setRecentDetections(res.recent_detections);
+            if (Array.isArray(res.recent_zone_events)) setRecentZoneEvents(res.recent_zone_events);
+            if (typeof res.detector_backend === 'string' && res.detector_backend) setDetectorBackend(res.detector_backend);
+            if (typeof res.tracker_backend === 'string' && res.tracker_backend) setTrackerBackend(res.tracker_backend);
+          }
+        } catch {
+          // Ignore single frame drop
+        } finally {
+          inFlightCount = Math.max(0, inFlightCount - 1);
         }
-      } catch {
-        // Ignore single frame drop
-      } finally {
-        inFlight = false;
+      };
+
+      if (typeof canvas.toBlob === 'function') {
+        canvas.toBlob((blob) => {
+          if (blob) {
+            sendPayload(blob);
+          } else {
+            inFlightCount = Math.max(0, inFlightCount - 1);
+          }
+        }, 'image/jpeg', 0.72);
+      } else {
+        sendPayload(canvas.toDataURL('image/jpeg', 0.72));
       }
     };
 
-    const initialTimer = setTimeout(pushFrame, 50);
-    const interval = setInterval(pushFrame, 220);
+    const initialTimer = setTimeout(pushFrame, 30);
+    const interval = setInterval(pushFrame, 125);
     return () => {
       active = false;
       clearTimeout(initialTimer);
       clearInterval(interval);
     };
   }, [browserBridgeActive, selectedCam?.id, isPlaying]);
+
+  // Abort active MJPEG stream immediately when leaving Live View, pausing, or unmounting
+  useEffect(() => {
+    const imgEl = liveStreamImgRef.current;
+    if (workspaceView !== 'live' || !isPlaying) {
+      if (imgEl && imgEl.src && !imgEl.src.startsWith('blob:')) {
+        imgEl.src = '';
+      }
+    }
+    return () => {
+      if (imgEl) {
+        imgEl.src = '';
+      }
+    };
+  }, [workspaceView, isPlaying, selectedCam?.id, viewMode]);
+
+  const handleSwitchAiProfile = async (nextProfile) => {
+    if (switchingProfile || nextProfile === aiProfile) return;
+    setSwitchingProfile(true);
+    try {
+      const res = await api.settings.saveDetection({ ai_profile: nextProfile });
+      if (res?.ai_profile) setAiProfile(res.ai_profile);
+      if (res?.detector_backend) setDetectorBackend(res.detector_backend);
+      addToast(
+        nextProfile === 'lightweight'
+          ? 'Switched to YOLO26n (High-Speed CPU profile).'
+          : 'Switched to YOLO26s (Balanced Accuracy profile).',
+        'success'
+      );
+    } catch (err) {
+      addToast(err?.message || 'Failed to switch AI profile', 'error');
+    } finally {
+      setSwitchingProfile(false);
+    }
+  };
 
   useEffect(() => {
     if (browserBridgeActive && browserVideoRef.current && browserStreamRef.current) {
@@ -1375,8 +1454,8 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
           </button>
         </div>
 
-        {/* Honest AI Backend Indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* Honest AI Backend & Explicit Speed/Accuracy Profile */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <span
             style={{
               fontSize: '0.74rem',
@@ -1400,6 +1479,28 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
           >
             AI: {viewMode === 'raw' ? t('cameras.rawNoOverlay', 'Raw Passthrough') : backendBadgeLabel}
           </span>
+          {viewMode === 'tracking' && !isViewer && (
+            <select
+              aria-label="AI Model Profile"
+              value={aiProfile}
+              disabled={switchingProfile}
+              onChange={(e) => handleSwitchAiProfile(e.target.value)}
+              title="YOLO26s provides higher accuracy; YOLO26n runs ~3.3x faster on single-vCPU cloud hosts"
+              style={{
+                padding: '4px 8px',
+                borderRadius: '6px',
+                backgroundColor: 'var(--bg-body, #090D16)',
+                border: '1px solid var(--border-color, #1E293B)',
+                color: 'var(--text-main, #F8FAFC)',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                cursor: switchingProfile ? 'wait' : 'pointer',
+              }}
+            >
+              <option value="balanced">YOLO26s (Balanced)</option>
+              <option value="lightweight">YOLO26n (Fast CPU)</option>
+            </select>
+          )}
         </div>
       </div>
 
@@ -1454,8 +1555,9 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
 
             {selectedCam ? (
               <img
+                ref={liveStreamImgRef}
                 key={`${selectedCam.id}-${viewMode}-${streamTimestamp}`}
-                src={displayViewportSrc}
+                src={isPlaying ? displayViewportSrc : undefined}
                 alt={`${selectedCam.name} ${viewMode}`}
                 onLoad={() => {
                   setStreamLoaded(true);
@@ -1596,12 +1698,14 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
               </button>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.76rem', color: 'var(--text-muted, #94A3B8)', fontFamily: 'var(--font-mono, monospace)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.76rem', color: 'var(--text-muted, #94A3B8)', fontFamily: 'var(--font-mono, monospace)', flexWrap: 'wrap' }}>
               <span>{t('cameras.fpsShort', 'FPS')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{measuredFps || 0}</strong></span>
               {viewMode === 'tracking' && (
                 <>
                   <span>{t('cameras.aiFpsShort', 'AI FPS')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{measuredAiFps || 0}</strong></span>
-                  <span>{t('cameras.latencyShort', 'Lat')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{latencyMs || 0}ms</strong></span>
+                  <span title={`P50: ${p50LatencyMs || latencyMs || 0}ms | P95: ${p95LatencyMs || latencyMs || 0}ms | Frame Age: ${frameAgeMs || 0}ms`}>
+                    {t('cameras.latencyShort', 'Lat')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{latencyMs || 0}ms</strong>
+                  </span>
                 </>
               )}
             </div>

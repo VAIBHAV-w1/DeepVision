@@ -240,10 +240,12 @@ class InferenceWorker:
         self.cached_detections = []
         self.cached_tracks = []
         self.latency_ms = 0.0
+        self.latency_samples = deque(maxlen=60)
         self.ai_fps = 0.0
         self.last_inference_time = 0.0
         self.last_inference_completion_time = 0.0
         self.source_frame_capture_monotonic = 0.0
+        self.last_frame_age_ms = 0.0
         self.active_persons = []
         self.active_items = []
         self.inference_id = 0
@@ -253,7 +255,10 @@ class InferenceWorker:
 
         self.track_history = TrackHistoryManager()
         self.behavior_analyzer = BehaviorAnalyzer()
-        self.motion_analyzer = IndependentMotionAnalyzer(method=os.getenv("DEEPVISION_MOTION_METHOD", "mog2"))
+        self.motion_analyzer = IndependentMotionAnalyzer(
+            method=os.getenv("DEEPVISION_MOTION_METHOD", "mog2"),
+            downscale_width=240,
+        )
         self.last_motion_state = {
             "motion_active": False,
             "motion_ratio": 0.0,
@@ -343,21 +348,21 @@ class InferenceWorker:
             if cond is not None:
                 with cond:
                     while camera_worker.running and camera_worker.frame_id == last_processed_frame_id:
-                        if not cond.wait(timeout=0.08):
+                        if not cond.wait(timeout=0.25):
                             break
                     if not camera_worker.running:
                         break
                     frame_id = camera_worker.frame_id
-                    frame = camera_worker.latest_frame.copy() if camera_worker.latest_frame is not None else None
+                    frame = camera_worker.latest_frame
                     source_cap_mono = getattr(camera_worker, "last_capture_monotonic", time.monotonic())
             else:
                 with camera_worker.lock:
                     frame_id = camera_worker.frame_id
-                    frame = camera_worker.latest_frame.copy() if camera_worker.latest_frame is not None else None
+                    frame = camera_worker.latest_frame
                     source_cap_mono = getattr(camera_worker, "last_capture_monotonic", time.monotonic())
 
             if frame is None or frame_id == last_processed_frame_id:
-                time.sleep(0.002)
+                time.sleep(0.004)
                 continue
 
             if last_processed_frame_id >= 0 and frame_id > last_processed_frame_id + 1:
@@ -366,7 +371,7 @@ class InferenceWorker:
             self.last_inference_time = now
             handoff_ms = max(0.0, (time.monotonic() - source_cap_mono) * 1000.0) if source_cap_mono > 0 else 0.0
 
-            t0 = time.time()
+            t0 = time.perf_counter()
             motion_state = self.last_motion_state
             try:
                 motion_state = self.motion_analyzer.analyze(frame)
@@ -381,17 +386,24 @@ class InferenceWorker:
                 results = []
                 raw_detections = []
                 stage_timings = {}
-            t1 = time.time()
+            t1 = time.perf_counter()
+            now_after = time.time()
             stage_timings["motion_ms"] = motion_state.get("process_ms", 0.0)
 
-            latency = (t1 - t0) * 1000
+            latency = (t1 - t0) * 1000.0
 
-            # Latest-frame scheduling respects configured interval to keep capture & recordings responsive
-            self.inference_interval = max(0.015, float(getattr(self, "inference_interval", 0.06)))
+            # Latest-frame scheduling respects configured interval AND yields briefly after heavy CPU passes
+            # so WSGI HTTP request/stream threads remain responsive under constrained cloud CPU quotas.
+            base_interval = max(0.015, float(getattr(self, "inference_interval", 0.06)))
+            if latency > 180.0 and "gpu" not in str(getattr(self.tracker, "detector_backend", "")).lower():
+                adaptive_cooldown = min(0.08, max(0.02, (latency / 1000.0) * 0.04))
+                effective_interval = max(base_interval, (latency / 1000.0) + adaptive_cooldown)
+            else:
+                effective_interval = base_interval
 
-            if fps_frame_times and (t1 - fps_frame_times[-1] > 2.0):
+            if fps_frame_times and (now_after - fps_frame_times[-1] > 2.0):
                 fps_frame_times.clear()
-            fps_frame_times.append(t1)
+            fps_frame_times.append(now_after)
             if len(fps_frame_times) > 10:
                 fps_frame_times.pop(0)
             if len(fps_frame_times) >= 2:
@@ -660,20 +672,28 @@ class InferenceWorker:
                 logger.warning(f"[InferenceWorker] Tracking / Anomaly warning camera {self.camera_id}: {e}")
 
             comp_mono = time.monotonic()
+            frame_age_after = round(max(0.0, (comp_mono - source_cap_mono) * 1000.0), 1) if source_cap_mono > 0 else 0.0
             with self.lock:
                 self.inference_id += 1
                 self.source_frame_id = frame_id
                 self.source_frame_capture_monotonic = source_cap_mono
                 self.last_inference_completion_time = comp_mono
+                self.last_frame_age_ms = frame_age_after
                 self.last_handoff_ms = round(handoff_ms, 2)
                 self.last_stage_timings = stage_timings
                 self.last_motion_state = motion_state
                 self.cached_detections = detection_list
                 self.cached_tracks = results
                 self.latency_ms = round(latency, 1)
+                self.latency_samples.append(self.latency_ms)
                 self.ai_fps = ai_fps
                 self.active_persons = active_persons
                 self.active_items = active_items
+
+            # Yield briefly after heavy CPU passes so web/stream threads stay responsive
+            sleep_for = max(0.0, effective_interval - (time.time() - now))
+            if sleep_for > 0.005:
+                time.sleep(min(sleep_for, 0.06))
 
         print(f"[INFERENCE_LOOP_EXIT] camera_id={self.camera_id}")
 
@@ -836,6 +856,11 @@ class InferenceWorker:
             trk_backend = getattr(self.tracker, "tracker_backend", "unknown") if self.tracker else "unknown"
             motion_snapshot = dict(self.last_motion_state or {})
             dropped_inf = int(self.inference_dropped_frames)
+            samples = sorted(self.latency_samples)
+            p50_lat = samples[len(samples) // 2] if samples else round(float(self.latency_ms or 0.0), 1)
+            p95_lat = samples[min(len(samples) - 1, int(0.95 * len(samples)))] if samples else round(float(self.latency_ms or 0.0), 1)
+            frame_age_ms = round(float(self.last_frame_age_ms or 0.0), 1)
+            ai_profile = "lightweight" if "yolo26n" in str(det_backend).lower() else "balanced"
         return {
             "currently_visible_persons": visible_persons,
             "active_tracks": active_tracks_count,
@@ -847,6 +872,10 @@ class InferenceWorker:
             "restricted_entry_enabled": bool(cam_cfg.get("restricted_entry_enabled", bool(self.cached_zones))),
             "detector_backend": det_backend,
             "tracker_backend": trk_backend,
+            "ai_profile": ai_profile,
+            "p50_latency_ms": round(float(p50_lat), 1),
+            "p95_latency_ms": round(float(p95_lat), 1),
+            "frame_age_ms": frame_age_ms,
             "motion_active": bool(motion_snapshot.get("motion_active", False)),
             "motion_ratio": float(motion_snapshot.get("motion_ratio", 0.0)),
             "motion_lighting_shift": bool(motion_snapshot.get("lighting_shift", False)),
