@@ -310,7 +310,12 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   }, [selectedCam?.id, selectedCam?.is_recording]);
 
   const isCameraLive = Boolean(
-    selectedCam && ((selectedCam.status === 'online' && !streamError) || streamLoaded || Boolean(snapshotUrl) || browserBridgeActive)
+    selectedCam &&
+      !streamError &&
+      (streamLoaded ||
+        Boolean(snapshotUrl) ||
+        (selectedCam.status === 'online' && measuredFps > 0) ||
+        (browserBridgeActive && measuredFps > 0))
   );
 
   // Poll live telemetry when viewing Live Monitor (paused or browser-push skips redundant polling; ingest already returns fresh telemetry)
@@ -322,12 +327,13 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       try {
         const stats = await api.cameras.getStats(selectedCam.id);
         if (!active || !stats) return;
-        if (typeof stats.fps === 'number') setMeasuredFps(Math.round(stats.fps * 10) / 10);
-        if (typeof stats.ai_fps === 'number') setMeasuredAiFps(Math.round(stats.ai_fps * 10) / 10);
-        if (typeof stats.latency_ms === 'number') setLatencyMs(Math.round(stats.latency_ms * 10) / 10);
-        if (typeof stats.p50_latency_ms === 'number') setP50LatencyMs(Math.round(stats.p50_latency_ms * 10) / 10);
-        if (typeof stats.p95_latency_ms === 'number') setP95LatencyMs(Math.round(stats.p95_latency_ms * 10) / 10);
-        if (typeof stats.frame_age_ms === 'number') setFrameAgeMs(Math.round(stats.frame_age_ms * 10) / 10);
+        const liveOnline = stats.status === 'online' || Boolean(stats.live);
+        if (typeof stats.fps === 'number') setMeasuredFps(liveOnline ? Math.round(stats.fps * 10) / 10 : 0);
+        if (typeof stats.ai_fps === 'number') setMeasuredAiFps(liveOnline ? Math.round(stats.ai_fps * 10) / 10 : 0);
+        if (typeof stats.latency_ms === 'number') setLatencyMs(liveOnline ? Math.round(stats.latency_ms * 10) / 10 : 0);
+        if (typeof stats.p50_latency_ms === 'number') setP50LatencyMs(liveOnline ? Math.round(stats.p50_latency_ms * 10) / 10 : 0);
+        if (typeof stats.p95_latency_ms === 'number') setP95LatencyMs(liveOnline ? Math.round(stats.p95_latency_ms * 10) / 10 : 0);
+        if (typeof stats.frame_age_ms === 'number') setFrameAgeMs(liveOnline ? Math.round(stats.frame_age_ms * 10) / 10 : 0);
         if (typeof stats.ai_profile === 'string' && stats.ai_profile) setAiProfile(stats.ai_profile);
 
         if (Array.isArray(stats.tracks)) {
@@ -367,8 +373,18 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
         if (typeof stats.is_recording === 'boolean') {
           setIsRecording(stats.is_recording);
         }
-        if (stats.status === 'online' && selectedCam.status !== 'online') {
-          setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, status: 'online' } : c)));
+        if (stats.status && stats.status !== selectedCam.status) {
+          setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, status: stats.status } : c)));
+        }
+        if (stats.status === 'offline' && (streamLoaded || snapshotUrl)) {
+          setStreamLoaded(false);
+          setSnapshotUrl(null);
+          setUseSnapshotFallback(false);
+          setStreamError(true);
+        } else if (stats.status === 'online' && stats.live && streamError && !snapshotUrl) {
+          setStreamError(false);
+          setUseSnapshotFallback(false);
+          setStreamTimestamp(Date.now());
         }
       } catch {
         // Keep last telemetry sample on transient error
@@ -381,17 +397,12 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       active = false;
       clearInterval(timer);
     };
-  }, [selectedCam?.id, selectedCam?.status, workspaceView, viewMode, isPlaying, browserBridgeActive]);
+  }, [selectedCam?.id, selectedCam?.status, workspaceView, viewMode, isPlaying, browserBridgeActive, streamLoaded, snapshotUrl, streamError]);
 
-  // Snapshot fallback ONLY if MJPEG stream actually fails or stalls >6.5s (never preempt MJPEG at t=0!)
+  // Snapshot fallback ONLY if MJPEG stream actually fails or stalls >6.5s on a genuinely live camera (never mask 503 offline!)
   useEffect(() => {
     const camId = selectedCam?.id;
-    const canStream = Boolean(
-      camId &&
-      isPlaying &&
-      workspaceView === 'live' &&
-      (selectedCam?.status === 'online' || browserBridgeActive)
-    );
+    const canStream = Boolean(camId && isPlaying && workspaceView === 'live');
     if (!canStream || streamLoaded) {
       if (snapshotUrlRef.current) {
         URL.revokeObjectURL(snapshotUrlRef.current);
@@ -404,27 +415,39 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
 
     let cancelled = false;
     let pollTimer = null;
+    let upgradeTimer = null;
+    const abortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
 
-    const fallbackArmTimer = (!streamLoaded && !streamError)
+    const fallbackArmTimer = (!streamLoaded && !streamError && (browserBridgeActive || selectedCam?.status === 'online'))
       ? setTimeout(() => {
           if (!cancelled) setUseSnapshotFallback(true);
         }, 6500)
       : null;
 
-    const shouldPollSnapshots = streamError || useSnapshotFallback;
+    const shouldPollSnapshots = (streamError || useSnapshotFallback) && (browserBridgeActive || selectedCam?.status === 'online');
     if (shouldPollSnapshots) {
+      upgradeTimer = setInterval(() => {
+        if (!cancelled && snapshotUrlRef.current) {
+          setUseSnapshotFallback(false);
+          setStreamError(false);
+          setStreamTimestamp(Date.now());
+        }
+      }, 12000);
+
       const fetchNextSnapshot = async () => {
         if (cancelled) return;
         if (typeof document !== 'undefined' && document.hidden) {
           pollTimer = setTimeout(fetchNextSnapshot, 400);
           return;
         }
+        let nextDelay = 140;
         try {
           const resp = await fetch(
-            `/api/cameras/${camId}/snapshot/?mode=${viewMode}&t=${Date.now()}`,
-            { credentials: 'include', cache: 'no-store' }
+            `${api.cameras.getSnapshotUrl(camId)}?mode=${viewMode}&t=${Date.now()}`,
+            { credentials: 'include', cache: 'no-store', signal: abortCtrl?.signal }
           );
-          if (!cancelled && resp.ok) {
+          const sigHeader = resp.headers?.get('X-DeepVision-Signal');
+          if (!cancelled && resp.ok && sigHeader !== 'offline') {
             const blob = await resp.blob();
             if (!cancelled && blob.size > 512) {
               const objUrl = URL.createObjectURL(blob);
@@ -435,12 +458,24 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
               setSnapshotUrl(objUrl);
               setStreamError(false);
             }
+          } else if (!cancelled && (resp.status === 503 || sigHeader === 'offline')) {
+            if (snapshotUrlRef.current) {
+              URL.revokeObjectURL(snapshotUrlRef.current);
+              snapshotUrlRef.current = null;
+            }
+            setSnapshotUrl(null);
+            setStreamLoaded(false);
+            setStreamError(true);
+            setMeasuredFps(0);
+            setMeasuredAiFps(0);
+            setLatencyMs(0);
+            nextDelay = 4500;
           }
         } catch {
-          // ignore transient drop
+          nextDelay = 1500;
         } finally {
           if (!cancelled) {
-            pollTimer = setTimeout(fetchNextSnapshot, 120);
+            pollTimer = setTimeout(fetchNextSnapshot, nextDelay);
           }
         }
       };
@@ -449,8 +484,12 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
 
     return () => {
       cancelled = true;
+      if (abortCtrl) {
+        try { abortCtrl.abort(); } catch {}
+      }
       if (fallbackArmTimer) clearTimeout(fallbackArmTimer);
       if (pollTimer) clearTimeout(pollTimer);
+      if (upgradeTimer) clearInterval(upgradeTimer);
     };
   }, [selectedCam?.id, selectedCam?.status, isPlaying, workspaceView, browserBridgeActive, streamLoaded, streamError, useSnapshotFallback, viewMode]);
 
@@ -495,6 +534,10 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
           setStreamError(false);
           if (streamReloadPendingRef.current) {
             streamReloadPendingRef.current = false;
+            setUseSnapshotFallback(false);
+            setSnapshotUrl(null);
+            setStreamError(false);
+            setStreamLoaded(false);
             setStreamTimestamp(Date.now());
           }
           if (thisSeq >= latestAppliedSeq) {
@@ -619,6 +662,12 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     setStreamLoaded(false);
     setUseSnapshotFallback(false);
     setStreamTimestamp(Date.now());
+    setMeasuredFps(0);
+    setMeasuredAiFps(0);
+    setLatencyMs(0);
+    setP50LatencyMs(0);
+    setP95LatencyMs(0);
+    setFrameAgeMs(0);
     setActiveTracksList([]);
     setActiveTracksCount(0);
     setVisiblePersonsCount(0);
@@ -1560,12 +1609,16 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
                 src={isPlaying ? displayViewportSrc : undefined}
                 alt={`${selectedCam.name} ${viewMode}`}
                 onLoad={() => {
-                  setStreamLoaded(true);
+                  if (!snapshotUrl) {
+                    setStreamLoaded(true);
+                  }
                   setStreamError(false);
                 }}
                 onError={() => {
-                  setStreamLoaded(false);
-                  setStreamError(true);
+                  if (!snapshotUrl) {
+                    setStreamLoaded(false);
+                    setStreamError(true);
+                  }
                 }}
                 style={{
                   width: '100%',

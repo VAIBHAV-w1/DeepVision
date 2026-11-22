@@ -110,12 +110,15 @@ def generate_raw_stream(camera_id: int, user_id: int) -> Generator[bytes, None, 
 
     try:
         worker = camera_registry.get_worker(camera_id, user_id)
-        start_no_frame_time = time.time()
-        update_camera_health(camera_id, status="online", stream_active=True, detection_active=False, tracking_active=False)
+        last_new_frame_mono = time.monotonic()
+        has_yielded_frame = False
+        init_status = "online" if float(getattr(worker, "last_valid_frame_time", 0.0) or 0.0) > 0.0 else "connecting"
+        update_camera_health(camera_id, status=init_status, stream_active=True, detection_active=False, tracking_active=False)
         cond = getattr(worker, "frame_condition", None)
 
         while True:
             if not worker.running:
+                update_camera_health(camera_id, status="offline", fps=0.0, stream_active=False)
                 break
 
             if cond is not None:
@@ -124,6 +127,7 @@ def generate_raw_stream(camera_id: int, user_id: int) -> Generator[bytes, None, 
                         if not cond.wait(timeout=0.25):
                             break
                     if not worker.running:
+                        update_camera_health(camera_id, status="offline", fps=0.0, stream_active=False)
                         break
                     current_id = worker.frame_id
                     frame = worker.latest_frame
@@ -135,24 +139,29 @@ def generate_raw_stream(camera_id: int, user_id: int) -> Generator[bytes, None, 
                     cap_mono = getattr(worker, "last_capture_monotonic", time.monotonic())
 
             if current_id == last_processed_id or frame is None:
-                if frame is None and (time.time() - start_no_frame_time > 10.0):
-                    logger.warning(f"[RAW_STREAM] Camera {camera_id}: No frame received within 10s timeout.")
+                idle_sec = time.monotonic() - last_new_frame_mono
+                is_reconn = bool(getattr(worker, "is_reconnecting", False))
+                if (frame is None and idle_sec > 10.0) or (has_yielded_frame and idle_sec > 12.0 and not is_reconn) or (idle_sec > 18.0):
+                    logger.warning(f"[RAW_STREAM] Camera {camera_id}: No fresh frame within {idle_sec:.1f}s; closing stale stream.")
+                    update_camera_health(camera_id, status="offline", fps=0.0, stream_active=False, last_error="Stream timed out waiting for fresh camera frames.")
                     break
                 time.sleep(0.003)
                 continue
 
-            start_no_frame_time = time.time()
+            last_new_frame_mono = time.monotonic()
+            has_yielded_frame = True
             last_processed_id = current_id
 
             now = time.time()
             disp_frame_times.append(now)
             if len(disp_frame_times) > 15:
                 disp_frame_times.pop(0)
+            display_fps = 0.0
             if len(disp_frame_times) >= 2:
                 elapsed = disp_frame_times[-1] - disp_frame_times[0]
                 if elapsed > 0:
                     display_fps = round((len(disp_frame_times) - 1) / elapsed, 1)
-                    update_camera_health(camera_id, fps=display_fps)
+            update_camera_health(camera_id, status="online", fps=display_fps if display_fps > 0 else None)
 
             cap_handoff_ms = max(0.0, (time.monotonic() - cap_mono) * 1000.0) if cap_mono > 0 else 0.0
             acq_ms = float(getattr(worker, "last_acquisition_ms", 0.0) or 0.0)
@@ -441,13 +450,26 @@ def generate_tracking_stream(camera_id: int, user_id: int) -> Generator[bytes, N
 
     try:
         worker = camera_registry.get_worker(camera_id, user_id)
-        inference_worker = inference_registry.get_worker(camera_id, worker)
-        start_no_frame_time = time.time()
-        update_camera_health(camera_id, status="online", stream_active=True, detection_active=True, tracking_active=True)
+        try:
+            inference_worker = inference_registry.get_worker(camera_id, worker) if get_inference_registry else None
+        except Exception as inf_init_err:
+            logger.warning(f"[TRACKING_STREAM_INF_INIT_WARN] camera_id={camera_id}: {inf_init_err}")
+            inference_worker = None
+        last_new_frame_mono = time.monotonic()
+        has_yielded_frame = False
+        init_status = "online" if float(getattr(worker, "last_valid_frame_time", 0.0) or 0.0) > 0.0 else "connecting"
+        update_camera_health(
+            camera_id,
+            status=init_status,
+            stream_active=True,
+            detection_active=bool(inference_worker),
+            tracking_active=bool(inference_worker),
+        )
         cond = getattr(worker, "frame_condition", None)
 
         while True:
             if not worker.running:
+                update_camera_health(camera_id, status="offline", fps=0.0, ai_fps=0.0, inference_latency_ms=0.0, stream_active=False)
                 break
 
             if cond is not None:
@@ -456,6 +478,7 @@ def generate_tracking_stream(camera_id: int, user_id: int) -> Generator[bytes, N
                         if not cond.wait(timeout=0.25):
                             break
                     if not worker.running:
+                        update_camera_health(camera_id, status="offline", fps=0.0, ai_fps=0.0, inference_latency_ms=0.0, stream_active=False)
                         break
                     current_id = worker.frame_id
                     frame = worker.latest_frame
@@ -467,13 +490,25 @@ def generate_tracking_stream(camera_id: int, user_id: int) -> Generator[bytes, N
                     cap_mono = getattr(worker, "last_capture_monotonic", time.monotonic())
 
             if current_id == last_processed_id or frame is None:
-                if frame is None and (time.time() - start_no_frame_time > 10.0):
-                    logger.warning(f"[TRACKING_STREAM] Camera {camera_id}: No frame received within 10s timeout.")
+                idle_sec = time.monotonic() - last_new_frame_mono
+                is_reconn = bool(getattr(worker, "is_reconnecting", False))
+                if (frame is None and idle_sec > 10.0) or (has_yielded_frame and idle_sec > 12.0 and not is_reconn) or (idle_sec > 18.0):
+                    logger.warning(f"[TRACKING_STREAM] Camera {camera_id}: No fresh frame within {idle_sec:.1f}s; closing stale stream.")
+                    update_camera_health(
+                        camera_id,
+                        status="offline",
+                        fps=0.0,
+                        ai_fps=0.0,
+                        inference_latency_ms=0.0,
+                        stream_active=False,
+                        last_error="Stream timed out waiting for fresh camera frames.",
+                    )
                     break
                 time.sleep(0.003)
                 continue
 
-            start_no_frame_time = time.time()
+            last_new_frame_mono = time.monotonic()
+            has_yielded_frame = True
             last_processed_id = current_id
             now = time.time()
             disp_frame_times.append(now)
@@ -485,20 +520,38 @@ def generate_tracking_stream(camera_id: int, user_id: int) -> Generator[bytes, N
                 if elapsed > 0:
                     display_fps = round((len(disp_frame_times) - 1) / elapsed, 1)
 
-            annotated_frame, telemetry = render_annotated_frame(
-                frame,
-                camera_id,
-                inference_worker=inference_worker,
-                current_id=current_id,
-                cap_mono=cap_mono,
-                display_fps=display_fps,
-                worker=worker,
-            )
+            try:
+                annotated_frame, telemetry = render_annotated_frame(
+                    frame,
+                    camera_id,
+                    inference_worker=inference_worker,
+                    current_id=current_id,
+                    cap_mono=cap_mono,
+                    display_fps=display_fps,
+                    worker=worker,
+                )
+            except Exception as ann_err:
+                logger.warning(f"[TRACKING_ANNOTATE_ERROR] camera_id={camera_id}: {ann_err}")
+                annotated_frame = frame
+                telemetry = {
+                    "camera_id": camera_id,
+                    "fps": display_fps,
+                    "ai_fps": 0.0,
+                    "latency_ms": 0.0,
+                    "stage_timings": {},
+                    "_raw_counts": {"ai_fps": 0.0, "latency_ms": 0.0},
+                }
+
             raw_counts = telemetry.pop("_raw_counts", {})
             ai_fps = raw_counts.get("ai_fps", 0.0)
             latency_ms = raw_counts.get("latency_ms", 0.0)
-            if display_fps > 0:
-                update_camera_health(camera_id, fps=display_fps, ai_fps=ai_fps, inference_latency_ms=latency_ms)
+            update_camera_health(
+                camera_id,
+                status="online",
+                fps=display_fps if display_fps > 0 else None,
+                ai_fps=ai_fps,
+                inference_latency_ms=latency_ms,
+            )
 
             t_enc0 = time.monotonic()
             ret, buffer = cv2.imencode(".jpg", annotated_frame, _JPEG_STREAM_QUALITY)

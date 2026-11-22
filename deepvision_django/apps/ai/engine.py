@@ -32,7 +32,11 @@ from django.conf import settings
 from apps.surveillance.camera.registry import get_camera_registry
 from apps.surveillance.ai.registry import get_inference_registry
 from apps.surveillance.recording import recording_service
-from apps.surveillance.health.health_service import get_camera_health, update_camera_health
+from apps.surveillance.health.health_service import (
+    get_camera_health,
+    get_live_camera_status,
+    update_camera_health,
+)
 from apps.surveillance.streaming.stream_service import (
     generate_raw_stream,
     generate_tracking_stream,
@@ -242,8 +246,16 @@ def get_camera_snapshot(camera_id: int, user_id: int, allow_start: bool = True, 
         success, buffer = cv2.imencode(".jpg", out_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         return buffer.tobytes() if success else None
 
-    # 1. Grab from active worker (including shared physical hardware worker) if available
-    if worker and worker.running and worker.latest_frame is not None:
+    # 1. Grab from active worker (including shared physical hardware worker) if available and fresh
+    live_info = get_live_camera_status(camera_id, worker=worker) if worker else None
+    if (
+        worker
+        and worker.running
+        and worker.latest_frame is not None
+        and live_info is not None
+        and live_info.get("status") not in ("offline",)
+        and (live_info.get("frame_age_sec") is None or float(live_info.get("frame_age_sec") or 0.0) <= 15.0)
+    ):
         with worker.lock:
             frame = worker.latest_frame
         if frame is None:
@@ -359,6 +371,15 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
         or (getattr(inf_worker, "latency_ms", 0.0) if inf_worker else 0.0)
         or 0.0
     )
+    live_info = get_live_camera_status(camera_id, worker=active_worker)
+    live_status = live_info["status"]
+    if live_status in ("offline", "connecting"):
+        real_fps = 0.0
+        cap_fps = 0.0
+    if live_status == "offline":
+        inf_fps = 0.0
+        lat_ms = 0.0
+
     visible_persons_default = sum(1 for t in tracks_list if str(t.get("class_name", "")).lower() == "person")
     return {
         "camera_id": camera_id,
@@ -388,13 +409,17 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
         "ai_fps": inf_fps,
         "inference_fps": round(float(inf_fps), 2),
         "latency_ms": lat_ms,
-        "p50_latency_ms": summary.get("p50_latency_ms", telemetry.get("p50_latency_ms", lat_ms)),
-        "p95_latency_ms": summary.get("p95_latency_ms", telemetry.get("p95_latency_ms", lat_ms)),
-        "frame_age_ms": telemetry.get("frame_age_ms", summary.get("frame_age_ms", 0.0)),
+        "p50_latency_ms": 0.0 if live_status == "offline" else summary.get("p50_latency_ms", telemetry.get("p50_latency_ms", lat_ms)),
+        "p95_latency_ms": 0.0 if live_status == "offline" else summary.get("p95_latency_ms", telemetry.get("p95_latency_ms", lat_ms)),
+        "frame_age_ms": 0.0 if live_status == "offline" else telemetry.get("frame_age_ms", summary.get("frame_age_ms", 0.0)),
+        "frame_age_sec": live_info.get("frame_age_sec"),
         "ai_profile": summary.get("ai_profile", telemetry.get("ai_profile", "balanced")),
         "stage_timings": telemetry.get("stage_timings", {}) or (getattr(inf_worker, "last_stage_timings", {}) if inf_worker else {}),
         "inference_age_ms": telemetry.get("inference_age_ms", 0.0),
-        "status": health.get("status", "active"),
+        "status": live_status,
+        "live": live_info["live"],
+        "signal_state": live_info["signal_state"],
+        "worker_running": live_info["worker_running"],
         "is_recording": is_rec,
     }
 

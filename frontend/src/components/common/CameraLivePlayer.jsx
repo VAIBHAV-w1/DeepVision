@@ -30,7 +30,12 @@ export function CameraLivePlayer(props) {
   const cameraId = camera?.id || propCameraId || 4;
   const cameraName = camera?.name || propCameraName || `Camera 0${cameraId}`;
   const cameraLocation = camera?.location || 'Primary Sector';
-  const isCameraOnline = camera?.status === 'online';
+  const liveStatus = liveStats?.status;
+  const isCameraOnline = Boolean(
+    !isError &&
+      liveStatus !== 'offline' &&
+      (liveStatus === 'online' || isLoaded)
+  );
 
   // Mode: 'raw' (RAW STREAM) | 'tracking' (DETECTION & TRACKING)
   const effectiveModeProp = activeModeProp || modeProp || 'tracking';
@@ -80,6 +85,9 @@ export function CameraLivePlayer(props) {
             setLiveStats(data);
             if (typeof data.is_recording === 'boolean') {
               setLocalRecording(data.is_recording);
+            }
+            if (data.status === 'offline') {
+              setIsLoaded(false);
             }
           }
         }
@@ -133,7 +141,7 @@ export function CameraLivePlayer(props) {
     }
   }, [cameraId]);
 
-  // Abort active MJPEG HTTP stream strictly on component unmount (captures DOM node before React nulls ref)
+  // Abort active MJPEG HTTP stream on camera/mode change or unmount
   useEffect(() => {
     const imgEl = imgRef.current;
     return () => {
@@ -142,7 +150,7 @@ export function CameraLivePlayer(props) {
         imgEl.removeAttribute('src');
       }
     };
-  }, []);
+  }, [cameraId, mode, streamKey]);
 
   // Fullscreen event listener
   useEffect(() => {
@@ -575,6 +583,7 @@ export function CameraLivePlayer(props) {
         {/* Live Decoded MJPEG Stream Image */}
         <img
           ref={imgRef}
+          key={`${cameraId}-${mode}-${streamKey}`}
           id="camera-live-stream"
           src={streamUrl}
           data-camera-id={cameraId}

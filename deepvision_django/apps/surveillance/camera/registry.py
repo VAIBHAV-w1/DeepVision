@@ -146,11 +146,11 @@ class CameraRegistry:
             worker = self._workers.get(camera_id)
             if worker and worker.running:
                 return worker
-            # Also check if another logical camera already opened the same physical source
+            # Also check if another logical camera already opened the same non-browser physical source
             try:
                 from apps.cameras.models import Camera
                 camera = Camera.objects.filter(id=camera_id).only("id", "source_type", "source").first()
-                if camera:
+                if camera and camera.source_type != "browser":
                     physical_key = get_physical_source_key(camera.source_type, camera.source)
                     phys_worker = self._physical_map.get(physical_key)
                     if phys_worker and phys_worker.running:

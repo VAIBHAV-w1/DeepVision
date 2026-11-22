@@ -346,9 +346,21 @@ def camera_snapshot_view(request, camera_id):
         mode = "raw"
 
     from apps.surveillance.camera.registry import get_camera_registry
+    from apps.surveillance.health.health_service import get_live_camera_status
     active_worker = get_camera_registry().get_active_worker(camera.id)
-    if camera.status == "offline" and not (active_worker and active_worker.running and active_worker.latest_frame is not None):
-        return HttpResponse(_get_offline_snapshot_bytes(), content_type="image/jpeg")
+    live_info = get_live_camera_status(camera.id, worker=active_worker)
+    allow_placeholder = request.GET.get("placeholder") == "1"
+
+    def _offline_snap_response():
+        status_code = 200 if allow_placeholder else 503
+        resp = HttpResponse(_get_offline_snapshot_bytes(), content_type="image/jpeg", status=status_code)
+        resp["X-DeepVision-Signal"] = "offline"
+        resp["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+        return resp
+
+    if not (active_worker and active_worker.running and active_worker.latest_frame is not None and live_info["status"] != "offline"):
+        if camera.status == "offline":
+            return _offline_snap_response()
 
     # Fast preview thumbnail lookup; only warm local OpenCV capture when physical video hardware exists
     has_local_capture = (os.name == "nt") or os.path.exists("/dev/video0")
@@ -359,12 +371,15 @@ def camera_snapshot_view(request, camera_id):
     )
     jpeg_bytes = get_camera_snapshot(camera.id, camera.user_id, allow_start=allow_sync_start, mode=mode)
     if jpeg_bytes:
-        return HttpResponse(jpeg_bytes, content_type="image/jpeg")
+        resp = HttpResponse(jpeg_bytes, content_type="image/jpeg")
+        resp["X-DeepVision-Signal"] = "live"
+        resp["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+        return resp
     if has_local_capture and camera.source_type in ("webcam", "usb"):
         import threading
         from apps.ai.engine import warm_camera_capture_only
         threading.Thread(target=warm_camera_capture_only, args=(camera.id, camera.user_id), daemon=True).start()
-    return HttpResponse(_get_offline_snapshot_bytes(), content_type="image/jpeg")
+    return _offline_snap_response()
 
 
 @never_cache
@@ -664,6 +679,8 @@ def camera_ingest_frame_view(request, camera_id):
         pass
 
     visible_persons_default = sum(1 for t in tracks_list if str(t.get("class_name", "")).lower() == "person")
+    from apps.surveillance.health.health_service import get_live_camera_status
+    live_info = get_live_camera_status(camera.id, worker=worker)
     seq_val = request.GET.get("seq") or request.headers.get("X-Frame-Seq")
     try:
         seq_out = int(seq_val) if seq_val is not None else None
@@ -680,6 +697,7 @@ def camera_ingest_frame_view(request, camera_id):
         "p50_latency_ms": summary.get("p50_latency_ms", round(float(getattr(inf_worker, "latency_ms", 0.0) or 0.0), 2) if inf_worker else 0.0),
         "p95_latency_ms": summary.get("p95_latency_ms", round(float(getattr(inf_worker, "latency_ms", 0.0) or 0.0), 2) if inf_worker else 0.0),
         "frame_age_ms": summary.get("frame_age_ms", 0.0),
+        "frame_age_sec": live_info.get("frame_age_sec"),
         "ai_profile": summary.get("ai_profile", "balanced"),
         "stage_timings": dict(getattr(inf_worker, "last_stage_timings", {}) or {}) if inf_worker else {},
         "tracks": len(tracks_list),
@@ -700,7 +718,9 @@ def camera_ingest_frame_view(request, camera_id):
         "tracker_backend": tracker_backend,
         "frame_width": fw,
         "frame_height": fh,
-        "camera_status": "online",
+        "camera_status": live_info["status"],
+        "live": live_info["live"],
+        "signal_state": live_info["signal_state"],
     })
 
 
