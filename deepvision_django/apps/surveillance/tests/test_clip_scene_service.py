@@ -294,8 +294,9 @@ class ClipSceneServiceTests(TransactionTestCase):
             },
             "top_matches": [],
         }
-        scheduler._record_scene_event_if_relevant(self.cam.id, self.admin.id, sample)
-        scheduler._record_scene_event_if_relevant(self.cam.id, self.admin.id, sample)
+        with mock.patch("apps.surveillance.ai.clip_service.time.monotonic", return_value=15.0):
+            scheduler._record_scene_event_if_relevant(self.cam.id, self.admin.id, sample)
+            scheduler._record_scene_event_if_relevant(self.cam.id, self.admin.id, sample)
         events = list_scene_events(user_id=self.admin.id, camera_id=self.cam.id)
         self.assertEqual(len(events), 1)
 

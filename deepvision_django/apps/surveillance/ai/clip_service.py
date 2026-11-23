@@ -689,8 +689,8 @@ class ClipSceneScheduler:
         cam_id = int(camera_id)
 
         with self._lock:
-            last_sub = self._last_submit_mono.get(cam_id, 0.0)
-            if not force and (now_mono - last_sub) < interval:
+            last_sub = self._last_submit_mono.get(cam_id)
+            if not force and last_sub is not None and (now_mono - last_sub) < interval:
                 return False
             self._last_submit_mono[cam_id] = now_mono
 
@@ -758,8 +758,8 @@ class ClipSceneScheduler:
         with self._lock:
             streak = self._streak_by_cam_prompt.get(key, 0) + 1
             self._streak_by_cam_prompt[key] = streak
-            last_emit = self._cooldown_by_cam_prompt.get(key, 0.0)
-            if (now_mono - last_emit) < cooldown:
+            last_emit = self._cooldown_by_cam_prompt.get(key)
+            if last_emit is not None and (now_mono - last_emit) < cooldown:
                 return
             self._cooldown_by_cam_prompt[key] = now_mono
 
