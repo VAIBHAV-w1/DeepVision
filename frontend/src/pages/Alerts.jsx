@@ -36,6 +36,9 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
   });
   const [loading, setLoading] = useState(true);
 
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
   // Selected Incident Workspace state
   const [activeAlertId, setActiveAlertId] = useState(selectedId ? Number(selectedId) : null);
   const [activeIncidentData, setActiveIncidentData] = useState(null);
@@ -264,7 +267,7 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
 
         <div className="incident-workspace-flow" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* 2. AI ANALYSIS */}
-          <IncidentAnalysis analysis={ai_analysis} />
+          <IncidentAnalysis analysis={ai_analysis} onOpenIncident={(id) => setActiveAlertId(id)} />
 
           {/* 3. INCIDENT MEDIA */}
           <IncidentMedia
@@ -538,8 +541,65 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
           )}
         </div>
 
-        <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)' }}>
-          Showing <strong>{alerts.length}</strong> of <strong>{totalCount}</strong> incidents
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          {selectedIds.length > 0 && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', background: 'var(--bg-surface-raised)', border: '1px solid var(--border-color)' }}>
+              <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>{selectedIds.length} selected</span>
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={async () => {
+                  try {
+                    setBulkBusy(true);
+                    const res = await api.alerts.bulkAction('acknowledge', selectedIds);
+                    addToast(`Acknowledged ${res?.updated ?? 0} alert(s).`, 'success');
+                    setSelectedIds([]);
+                    fetchAlerts();
+                  } catch {
+                    addToast('Bulk acknowledge failed.', 'error');
+                  } finally {
+                    setBulkBusy(false);
+                  }
+                }}
+                className="btn btn-secondary btn-sm"
+                style={{ fontSize: '0.74rem', padding: '3px 8px' }}
+              >
+                Acknowledge Selected
+              </button>
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={async () => {
+                  try {
+                    setBulkBusy(true);
+                    const res = await api.alerts.bulkAction('resolve', selectedIds);
+                    addToast(`Resolved ${res?.updated ?? 0} alert(s).`, 'success');
+                    setSelectedIds([]);
+                    fetchAlerts();
+                  } catch {
+                    addToast('Bulk resolve failed.', 'error');
+                  } finally {
+                    setBulkBusy(false);
+                  }
+                }}
+                className="btn btn-primary btn-sm"
+                style={{ fontSize: '0.74rem', padding: '3px 8px' }}
+              >
+                Resolve Selected
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedIds([])}
+                className="btn btn-ghost btn-sm"
+                style={{ fontSize: '0.74rem', padding: '3px 6px' }}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+          <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+            Showing <strong>{alerts.length}</strong> of <strong>{totalCount}</strong> incidents
+          </div>
         </div>
       </div>
 
@@ -549,6 +609,20 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
           <table className="cctv-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-surface-raised)' }}>
+                <th style={{ padding: '0.75rem 0.75rem', textAlign: 'center', width: '36px' }}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all visible alerts"
+                    checked={alerts.length > 0 && alerts.every((a) => selectedIds.includes(a.id))}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedIds(alerts.map((a) => a.id));
+                      } else {
+                        setSelectedIds([]);
+                      }
+                    }}
+                  />
+                </th>
                 <th style={{ padding: '0.75rem 1rem', textAlign: 'left' }}>Incident / Anomaly</th>
                 <th style={{ padding: '0.75rem 1rem', textAlign: 'left' }}>Camera Source</th>
                 <th style={{ padding: '0.75rem 1rem', textAlign: 'left' }}>Severity</th>
@@ -570,6 +644,20 @@ export function Alerts({ onNavigate, selectedId, initialCameraId, initialHasVide
                     style={{ borderBottom: '1px solid var(--border-color)', cursor: 'pointer', transition: 'background 0.15s ease' }}
                     className="incident-row-hover"
                   >
+                    <td style={{ padding: '0.75rem 0.75rem', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select alert ${alertItem.id}`}
+                        checked={selectedIds.includes(alertItem.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedIds((prev) => (prev.includes(alertItem.id) ? prev : [...prev, alertItem.id]));
+                          } else {
+                            setSelectedIds((prev) => prev.filter((x) => x !== alertItem.id));
+                          }
+                        }}
+                      />
+                    </td>
                     <td style={{ padding: '0.75rem 1rem' }}>
                       <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '2px' }}>
                         {alertItem.title}

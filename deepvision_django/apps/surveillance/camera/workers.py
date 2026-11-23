@@ -19,12 +19,28 @@ class CameraWorker:
     Reads frames at native FPS and stores them in a thread-safe rolling buffer.
     Multiple stream clients share ONE CameraWorker.
     """
-    def __init__(self, camera_id, cap_source, source_type, user_id=None, physical_source_id=None):
+    def __init__(
+        self,
+        camera_id,
+        cap_source,
+        source_type,
+        user_id=None,
+        physical_source_id=None,
+        target_width=None,
+        target_height=None,
+    ):
         self.camera_id = camera_id
         self.cap_source = cap_source
         self.source_type = source_type
         self.user_id = user_id
         self.physical_source_id = physical_source_id or str(cap_source)
+        self.target_width = int(target_width) if target_width else 1280
+        self.target_height = int(target_height) if target_height else 720
+        self.frame_width = 0
+        self.frame_height = 0
+        self.fourcc = ""
+        self._cached_bound_ids = {camera_id}
+        self._bound_ids_ts = 0.0
         
         self.capture = None
         self.thread = None
@@ -83,6 +99,9 @@ class CameraWorker:
             self.is_browser_pushed = True
             self.running = True
             self.latest_frame = frame
+            self.frame_height, self.frame_width = frame.shape[:2]
+            if not self.fourcc:
+                self.fourcc = "JPEG/BROWSER"
             self.rolling_buffer.append(frame)
             self.frame_id += 1
             self.last_capture_monotonic = now_mono
@@ -155,6 +174,15 @@ class CameraWorker:
         with self.lock:
             return list(self.rolling_buffer)[-max_frames:]
 
+    def get_media_profile(self):
+        with self.lock:
+            return {
+                "width": int(self.frame_width or 0),
+                "height": int(self.frame_height or 0),
+                "fourcc": self.fourcc or ("JPEG/BROWSER" if self.is_browser_pushed else "NATIVE"),
+                "fps": round(float(self.fps or 0.0), 1),
+            }
+
     def start(self):
         self.is_starting = True
         self.start_event.clear()
@@ -163,7 +191,11 @@ class CameraWorker:
         try:
             with self.lock:
                 if not self.running:
-                    self.capture = safe_open_video_capture(self.cap_source)
+                    self.capture = safe_open_video_capture(
+                        self.cap_source,
+                        target_width=self.target_width,
+                        target_height=self.target_height,
+                    )
                     if not self.capture.isOpened():
                         err_detail = getattr(self.capture, "last_error", None)
                         try:
@@ -173,10 +205,12 @@ class CameraWorker:
                         self.capture = None
                         suffix = f" ({err_detail})" if err_detail else ""
                         raise RuntimeError(f"Failed to open video capture source for camera {self.camera_id}{suffix}.")
+                    self.fourcc = getattr(self.capture, "_negotiated_fourcc", "") or self.fourcc
                     probed = getattr(self.capture, "_probed_frame", None)
                     if probed is not None and getattr(probed, "size", 0) > 0:
                         now = time.time()
                         self.latest_frame = probed
+                        self.frame_height, self.frame_width = probed.shape[:2]
                         self.rolling_buffer.append(probed)
                         self.frame_id = 1
                         self.last_capture_monotonic = time.monotonic()
@@ -258,6 +292,7 @@ class CameraWorker:
 
                     with self.frame_condition:
                         self.latest_frame = frame
+                        self.frame_height, self.frame_width = frame.shape[:2]
                         self.rolling_buffer.append(frame)
                         self.frame_id += 1
                         self.last_capture_monotonic = now_mono
@@ -269,10 +304,13 @@ class CameraWorker:
 
                     try:
                         from apps.surveillance.recording import recording_service
-                        from apps.surveillance.camera.registry import get_camera_registry
-                        bound_ids = set(get_camera_registry().get_bound_camera_ids(self.physical_source_id))
-                        bound_ids.add(self.camera_id)
-                        for cid in bound_ids:
+                        if (now_mono - self._bound_ids_ts) >= 0.5:
+                            from apps.surveillance.camera.registry import get_camera_registry
+                            bound_ids = set(get_camera_registry().get_bound_camera_ids(self.physical_source_id))
+                            bound_ids.add(self.camera_id)
+                            self._cached_bound_ids = bound_ids
+                            self._bound_ids_ts = now_mono
+                        for cid in self._cached_bound_ids:
                             recording_service.write_frame(cid, frame)
                     except Exception:
                         pass
@@ -356,7 +394,11 @@ class CameraWorker:
                 pass
         time.sleep(0.4)
         try:
-            new_cap = safe_open_video_capture(self.cap_source)
+            new_cap = safe_open_video_capture(
+                self.cap_source,
+                target_width=self.target_width,
+                target_height=self.target_height,
+            )
             if new_cap and new_cap.isOpened():
                 with self.lock:
                     self.capture = new_cap

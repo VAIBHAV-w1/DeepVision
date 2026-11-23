@@ -29,11 +29,17 @@ class SparseOptFlowGMC:
         if raw_frame is None or cv2 is None:
             return eye
         h, w = raw_frame.shape[:2]
-        gray = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2GRAY) if raw_frame.ndim == 3 else raw_frame
         if self.downscale > 1:
-            gray = cv2.resize(gray, (max(16, w // self.downscale), max(16, h // self.downscale)))
+            small = cv2.resize(
+                raw_frame,
+                (max(16, w // self.downscale), max(16, h // self.downscale)),
+                interpolation=cv2.INTER_NEAREST,
+            )
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY) if small.ndim == 3 else small
+        else:
+            gray = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2GRAY) if raw_frame.ndim == 3 else raw_frame
 
-        kps = cv2.goodFeaturesToTrack(gray, maxCorners=200, qualityLevel=0.01, minDistance=8, blockSize=3)
+        kps = cv2.goodFeaturesToTrack(gray, maxCorners=80, qualityLevel=0.02, minDistance=8, blockSize=3)
         if not self.initialized or self.prev_frame is None or self.prev_kps is None or len(self.prev_kps) < 6:
             self.prev_frame = gray
             self.prev_kps = kps

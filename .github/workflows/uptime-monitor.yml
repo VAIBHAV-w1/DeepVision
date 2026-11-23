@@ -1,0 +1,157 @@
+name: DeepVision External Uptime Monitor
+
+on:
+  schedule:
+    # Scheduled external availability check every 15 minutes
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe-production-endpoints:
+    name: Probe DeepVision Frontend & Backend Availability
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check Owned Production Endpoints with Bounded Backoff
+        id: probe
+        env:
+          UPTIME_INGEST_URL: ${{ secrets.UPTIME_INGEST_URL }}
+          UPTIME_INGEST_SECRET: ${{ secrets.UPTIME_INGEST_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import hashlib
+          import hmac
+          import json
+          import os
+          import ssl
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          TARGETS = [
+              {
+                  "target_id": "frontend_vercel",
+                  "name": "DeepVision Frontend (Vercel)",
+                  "url": "https://vsw-deepvision.vercel.app/",
+                  "kind": "html",
+              },
+              {
+                  "target_id": "backend_live_render",
+                  "name": "DeepVision Backend Liveness (Render)",
+                  "url": "https://deepvision-6ie7.onrender.com/api/health/live/",
+                  "kind": "json_live",
+              },
+              {
+                  "target_id": "backend_ready_render",
+                  "name": "DeepVision Backend Readiness & DB (Render)",
+                  "url": "https://deepvision-6ie7.onrender.com/api/health/",
+                  "kind": "json_health",
+              },
+          ]
+
+          ctx = ssl.create_default_context()
+          results = []
+          any_down = False
+
+          for t in TARGETS:
+              status = "down"
+              http_code = 0
+              latency_ms = 0.0
+              detail = ""
+              for attempt in range(3):
+                  t0 = time.perf_counter()
+                  try:
+                      req = urllib.request.Request(
+                          t["url"],
+                          headers={"User-Agent": "DeepVision-GitHub-UptimeMonitor/1.0"},
+                      )
+                      with urllib.request.urlopen(req, timeout=18, context=ctx) as resp:
+                          http_code = int(getattr(resp, "status", 200))
+                          body = resp.read(65536).decode("utf-8", errors="replace")
+                          latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+                      if t["kind"] == "json_health":
+                          data = json.loads(body)
+                          app_st = str(data.get("status") or "").lower()
+                          status = "up" if app_st == "healthy" else ("degraded" if app_st == "degraded" else "down")
+                          detail = str(data.get("diagnostic") or f"status={app_st}")[:160]
+                      elif t["kind"] == "json_live":
+                          data = json.loads(body)
+                          status = "up" if (http_code == 200 and str(data.get("status")).lower() == "alive") else "degraded"
+                          detail = f"django_app={data.get('django_app', 'unknown')}"
+                      else:
+                          status = "up" if (200 <= http_code < 400 and "<html" in body.lower()) else "degraded"
+                          detail = f"HTTP {http_code}"
+                      break
+                  except urllib.error.HTTPError as he:
+                      http_code = int(he.code)
+                      latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+                      detail = f"HTTP {he.code}"
+                      if http_code < 500 or attempt == 2:
+                          break
+                  except Exception as exc:
+                      latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+                      detail = str(exc)[:160]
+                      if attempt == 2:
+                          break
+                  time.sleep(3 * (attempt + 1))
+
+              if status == "down":
+                  any_down = True
+              results.append({
+                  "target_id": t["target_id"],
+                  "name": t["name"],
+                  "url": t["url"],
+                  "status": status,
+                  "http_status": http_code,
+                  "latency_ms": latency_ms,
+                  "detail": detail,
+                  "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              })
+
+          print(json.dumps({"results": results}, indent=2))
+          summary_path = os.getenv("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as fh:
+                  fh.write("## DeepVision External Uptime Check\n\n")
+                  fh.write("| Target | Status | HTTP | Latency (ms) | Detail |\n|---|---|---|---|---|\n")
+                  for r in results:
+                      fh.write(f"| {r['name']} | {r['status'].upper()} | {r['http_status']} | {r['latency_ms']} | {r['detail']} |\n")
+
+          ingest_url = (os.getenv("UPTIME_INGEST_URL") or "").strip()
+          ingest_secret = (os.getenv("UPTIME_INGEST_SECRET") or "").strip()
+          if ingest_url and ingest_secret:
+              if not ingest_url.startswith("https://"):
+                  print("Refusing non-HTTPS UPTIME_INGEST_URL")
+                  sys.exit(1)
+              payload = json.dumps({"results": results}).encode("utf-8")
+              ts = str(int(time.time()))
+              sig = "sha256=" + hmac.new(
+                  ingest_secret.encode("utf-8"),
+                  ts.encode("utf-8") + b"." + payload,
+                  hashlib.sha256,
+              ).hexdigest()
+              req = urllib.request.Request(
+                  ingest_url,
+                  data=payload,
+                  method="POST",
+                  headers={
+                      "Content-Type": "application/json",
+                      "X-DeepVision-Uptime-Timestamp": ts,
+                      "X-DeepVision-Uptime-Signature": sig,
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+                      print("Uptime ingest status:", resp.status)
+              except Exception as err:
+                  print("Uptime ingest delivery warning:", err)
+
+          if any_down:
+              sys.exit(1)
+          PY

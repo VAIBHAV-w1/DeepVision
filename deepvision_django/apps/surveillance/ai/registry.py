@@ -36,7 +36,8 @@ class InferenceRegistry:
         self.cleanup_timers = {}             # physical_source_id -> Timer
         self.phys_locks = {}                 # physical_source_id -> Lock (serializes worker creation)
         self.runtime_confidence_threshold = float(getattr(settings, "YOLO_CONFIDENCE_THRESHOLD", 0.35))
-        self.runtime_ai_profile = (os.getenv("DEEPVISION_AI_PROFILE") or "balanced").strip().lower()
+        from apps.surveillance.ai.onnx_runtime import resolve_default_profile
+        self.runtime_ai_profile = resolve_default_profile()
         if self.runtime_ai_profile not in ("balanced", "lightweight"):
             self.runtime_ai_profile = "balanced"
         self.runtime_anomaly_rules = {
@@ -165,7 +166,7 @@ class InferenceRegistry:
                         return p_iworker
 
                 threshold = self.runtime_confidence_threshold
-                interval_ms = getattr(settings, "YOLO_INFERENCE_INTERVAL_MS", 60)
+                interval_ms = getattr(settings, "YOLO_INFERENCE_INTERVAL_MS", 33)
                 imgsz = getattr(settings, "YOLO_IMAGE_SIZE", 640)
                 rules_snapshot = dict(self.runtime_anomaly_rules)
 

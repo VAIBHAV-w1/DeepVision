@@ -59,16 +59,16 @@ DEEPVISION_KNOWLEDGE = {
         "RAW Mode provides direct, low-latency video streaming from your camera without any AI bounding boxes or overlay graphics. It uses minimal CPU resources and displays the clean, unedited camera feed."
     ),
     "detection_mode": (
-        "Detection Mode runs real-time YOLO11 object detection on every camera frame. It displays color-coded bounding boxes, classified object names (such as person, mobile phone, backpack, chair), and model confidence scores (e.g., person 0.92)."
+        "Tracking & Detection Mode runs real-time YOLO26s (Balanced Accuracy) or YOLO26n (High-Performance) ONNX detection paired with BoT-SORT + Re-ID (or ByteTrack / OC-SORT) on every camera frame. It displays color-coded bounding boxes, classified object names, confidence scores, and persistent Track IDs."
     ),
     "tracking_mode": (
-        "Tracking Mode combines YOLO11 detection with ByteTrack to maintain object identities across frames. You\'ll see bounding boxes, object classes, confidence, and Track IDs (such as Track #1, Track #2). If a person is tracked across cameras, a persistent Global ID (e.g., PERSON-001) will also be displayed."
+        "Tracking & Detection Mode combines YOLO26 ONNX detection with BoT-SORT + Re-ID to maintain object identities across frames, complete with Kalman filtering, global motion compensation, and Track/Global IDs (e.g., #1, PERSON-001) across cameras."
     ),
     "yolo11": (
-        "DeepVision uses YOLO11 (specifically YOLO11n - Nano) because it offers state-of-the-art object detection accuracy with an ultra-lightweight memory footprint and fast inference latency. It accurately detects persons and retail items in real time."
+        "DeepVision runs verified YOLO26s (balanced recall) and YOLO26n (high-speed) ONNX models on OpenVINO (Intel Iris Xe iGPU or CPU) with ONNX Runtime fallback for low-latency real-time detection."
     ),
     "bytetrack": (
-        "ByteTrack is a high-performance multi-object tracker used by DeepVision. While YOLO11 detects objects in individual frames, ByteTrack utilizes a Kalman filter and Hungarian matching algorithm to associate detections across consecutive frames, giving objects consistent Track IDs even through brief occlusions."
+        "DeepVision supports multi-object tracking led by BoT-SORT + Re-ID (with camera motion compensation and appearance re-identification) alongside ByteTrack and OC-SORT Kalman association to keep consistent Track IDs across brief occlusions."
     ),
     "track_id": (
         "A Track ID (e.g., Track #4) is a unique integer assigned by ByteTrack to an object continuously visible in a camera\'s field of view. It prevents duplicate detections and allows DeepVision to analyze trajectory, speed, and dwell time."
@@ -114,14 +114,14 @@ DEEPVISION_KNOWLEDGE = {
         "4. Use the 'Test Connection' button on the camera\'s edit page to view real-time diagnostics."
     ),
     "camera_live_vs_ai": (
-        "'Camera LIVE' means the physical camera hardware or network stream is actively feeding video frames into DeepVision\'s capture buffer.\n"
-        "'AI RUNNING' means the YOLO11 and ByteTrack background inference threads are actively analyzing those frames for objects, tracking paths, and anomalies."
+        "'Camera LIVE' means the physical camera hardware, browser camera, or network stream is actively feeding video frames into DeepVision's capture buffer.\n"
+        "'AI RUNNING' means the YOLO26 + BoT-SORT background inference threads are actively analyzing those frames for objects, tracking paths, and anomalies."
     ),
     "fullscreen": (
         "To enter Fullscreen mode, open any camera in 'Live View' and click the 'Fullscreen' button in the control panel, or press the 'F' key. The video feed will expand to fill your entire monitor with streamlined HUD controls. Press 'Esc' or click the exit button to return."
     ),
     "what_is_deepvision": (
-        "DeepVision is an intelligent AI surveillance platform designed for commercial, residential, and industrial security. It combines live video ingestion, YOLO11n object detection, ByteTrack multi-object tracking, spatial anomaly detection, instant alerts, and automated MP4 evidence generation."
+        "DeepVision is an intelligent AI SOC & video surveillance platform combining live HD ingestion (Standard 480p / High HD 720p / Full Source), YOLO26 ONNX detection, BoT-SORT+ReID tracking, spatial anomaly detection, evidence-linked triage, and MP4 recording."
     )
 }
 
@@ -208,7 +208,7 @@ def answer_query(user_query: str) -> str:
         return DEEPVISION_KNOWLEDGE["yolo11"]
     elif any(k in q_lower for k in ["what is detection mode", "detection mode", "detection view", "how does detection work"]):
         return DEEPVISION_KNOWLEDGE["detection_mode"]
-    elif any(k in q_lower for k in ["what is yolo", "yolo11", "yolo11n", "yolo model"]):
+    elif any(k in q_lower for k in ["what is yolo", "yolo26", "yolo11", "yolo11n", "yolo model"]):
         return DEEPVISION_KNOWLEDGE["yolo11"]
 
     # 6. RAW mode
@@ -260,8 +260,8 @@ def answer_query(user_query: str) -> str:
     # Default friendly fallback if query mentions cameras or DeepVision generally
     if any(k in q_lower for k in ["camera", "video", "deepvision", "security", "stream", "feed", "alert", "monitor"]):
         return (
-            "DeepVision provides real-time surveillance with RAW, Detection (YOLO11), and Tracking (ByteTrack) modes. "
-            "You can manage cameras, configure alerts, capture MP4 recordings, and review evidence clips. "
+            "DeepVision provides real-time AI surveillance with RAW and Tracking & Detection (YOLO26 + BoT-SORT+ReID) modes, "
+            "plus SOC alert triage, incident cases, MP4 recordings, and video quality settings. "
             "What specific feature would you like help with?"
         )
 

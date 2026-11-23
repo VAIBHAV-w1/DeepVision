@@ -349,8 +349,15 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
         if not zones_list and hasattr(inf_worker, "get_cached_zones"):
             zones_list = list(inf_worker.get_cached_zones(camera_id) or [])
 
-    from apps.cameras.surveillance_config import get_camera_surveillance_config
+    from apps.cameras.surveillance_config import get_camera_surveillance_config, resolve_video_quality_profile
     cam_cfg = get_camera_surveillance_config(camera_id, has_enabled_zones=bool(zones_list))
+    quality_id = str(cam_cfg.get("video_quality", "high"))
+    q_prof = resolve_video_quality_profile(quality_id)
+    media_prof = active_worker.get_media_profile() if (active_worker and hasattr(active_worker, "get_media_profile")) else {}
+    fw = int(media_prof.get("width") or health.get("width") or telemetry.get("frame_width") or 0)
+    fh = int(media_prof.get("height") or health.get("height") or telemetry.get("frame_height") or 0)
+    res_str = f"{fw}x{fh}" if (fw > 0 and fh > 0) else ""
+    fourcc_str = str(media_prof.get("fourcc") or telemetry.get("fourcc") or "")
 
     is_rec = False
     try:
@@ -416,6 +423,12 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
         "ai_profile": summary.get("ai_profile", telemetry.get("ai_profile", "balanced")),
         "stage_timings": telemetry.get("stage_timings", {}) or (getattr(inf_worker, "last_stage_timings", {}) if inf_worker else {}),
         "inference_age_ms": telemetry.get("inference_age_ms", 0.0),
+        "video_quality": quality_id,
+        "video_quality_label": q_prof.get("label", "High HD (720p)"),
+        "frame_width": fw,
+        "frame_height": fh,
+        "resolution": res_str,
+        "fourcc": fourcc_str,
         "status": live_status,
         "live": live_info["live"],
         "signal_state": live_info["signal_state"],

@@ -22,12 +22,15 @@ import numpy as np
 class IndependentMotionAnalyzer:
     """Computes scene motion evidence independently of object classification."""
 
-    def __init__(self, method: str = "mog2", downscale_width: int = 320):
+    def __init__(self, method: str = "mog2", downscale_width: int = 160):
         self.method = (method or "mog2").strip().lower()
         self.downscale_width = max(120, int(downscale_width))
         self._bg_knn = cv2.createBackgroundSubtractorKNN(history=200, dist2Threshold=400.0, detectShadows=True) if cv2 else None
         self._bg_mog2 = cv2.createBackgroundSubtractorMOG2(history=200, varThreshold=16, detectShadows=True) if cv2 else None
+        self._k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)) if cv2 else None
+        self._k_close = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)) if cv2 else None
         self._prev_gray: Optional[np.ndarray] = None
+        self._prev_luma_mean: Optional[float] = None
         self._last_result: Dict[str, Any] = {
             "motion_active": False,
             "motion_ratio": 0.0,
@@ -53,26 +56,25 @@ class IndependentMotionAnalyzer:
         scale = min(1.0, self.downscale_width / float(max(1, orig_w)))
         sw = max(64, int(round(orig_w * scale)))
         sh = max(48, int(round(orig_h * scale)))
-        small = cv2.resize(bgr_frame, (sw, sh), interpolation=cv2.INTER_AREA) if scale < 0.99 else bgr_frame
+        small = cv2.resize(bgr_frame, (sw, sh), interpolation=cv2.INTER_LINEAR) if scale < 0.99 else bgr_frame
         gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
         lighting_shift = False
         temporal_ratio = 0.0
         mean_flow_px = 0.0
+        curr_luma_mean = float(cv2.mean(blurred)[0])
 
         if self._prev_gray is not None and self._prev_gray.shape == blurred.shape:
-            # Global illumination/exposure step detector: uniform median jump across whole frame
-            signed_diff = blurred.astype(np.int16) - self._prev_gray.astype(np.int16)
-            med_shift = abs(float(np.median(signed_diff)))
-            abs_diff = np.abs(signed_diff)
-            temporal_ratio = float(np.count_nonzero(abs_diff > 20)) / float(max(1, sw * sh))
+            med_shift = abs(curr_luma_mean - float(self._prev_luma_mean or curr_luma_mean))
+            abs_diff = cv2.absdiff(blurred, self._prev_gray)
+            temporal_ratio = float(cv2.countNonZero(abs_diff > 20)) / float(max(1, sw * sh))
             if med_shift >= 12.0 or temporal_ratio >= 0.62:
                 lighting_shift = True
 
         if self.method == "mog2":
             raw_fg = self._bg_mog2.apply(blurred)
-            fg_mask = (raw_fg == 255).astype(np.uint8) * 255
+            _, fg_mask = cv2.threshold(raw_fg, 254, 255, cv2.THRESH_BINARY)
         elif self.method == "optical_flow":
             fg_mask = np.zeros((sh, sw), dtype=np.uint8)
             if self._prev_gray is not None and self._prev_gray.shape == blurred.shape:
@@ -88,17 +90,16 @@ class IndependentMotionAnalyzer:
         else:
             # Default: KNN with shadow rejection (gray shadow pixel value 127 discarded, only 255 kept)
             raw_fg = self._bg_knn.apply(blurred)
-            fg_mask = (raw_fg == 255).astype(np.uint8) * 255
+            _, fg_mask = cv2.threshold(raw_fg, 254, 255, cv2.THRESH_BINARY)
 
         self._prev_gray = blurred
+        self._prev_luma_mean = curr_luma_mean
 
         if lighting_shift:
             fg_mask[:] = 0
 
-        k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        k_close = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
-        cleaned = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, k_open)
-        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, k_close)
+        cleaned = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, self._k_open)
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, self._k_close)
 
         motion_ratio = float(np.count_nonzero(cleaned)) / float(max(1, sw * sh))
         regions: List[Dict[str, Any]] = []

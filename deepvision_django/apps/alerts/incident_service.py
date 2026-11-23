@@ -345,18 +345,32 @@ def get_incident_context(alert_id: int, user_id: Optional[int] = None) -> Dict[s
     # Sort timeline chronologically by timestamp
     timeline.sort(key=lambda x: x.get("timestamp") or "")
 
+    from apps.alerts.soc_triage import analyze_incident, sanitize_untrusted_text
+    soc_analysis = analyze_incident(
+        alert,
+        evidence_items=evidence_items,
+        recording_data=recording_data,
+        incident_case=incident_case,
+        timeline=timeline,
+    )
+    clean_cam_name, _ = sanitize_untrusted_text(alert.camera.name if alert.camera else "Channel 01", max_len=100)
+    clean_loc_name, _ = sanitize_untrusted_text(
+        alert.location or (alert.camera.location if alert.camera else "Default Zone"),
+        max_len=100,
+    )
+
     return {
         "alert": {
             "id": alert.id,
-            "title": alert.title or alert.event_type or "Security Alert",
-            "message": alert.message or "",
+            "title": soc_analysis.get("title") or alert.event_type or "Security Alert",
+            "message": soc_analysis.get("message") or "",
             "event_type": alert.event_type,
             "severity": alert.severity,
             "status": alert.status,
             "confidence": alert.confidence,
-            "location": alert.location or (alert.camera.location if alert.camera else "Default Zone"),
+            "location": clean_loc_name,
             "camera_id": alert.camera_id,
-            "camera_name": alert.camera.name if alert.camera else "Channel 01",
+            "camera_name": clean_cam_name,
             "detected_at": alert.detected_at.isoformat() if alert.detected_at else "",
             "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else "",
             "resolved_at": alert.resolved_at.isoformat() if alert.resolved_at else "",
@@ -364,8 +378,8 @@ def get_incident_context(alert_id: int, user_id: Optional[int] = None) -> Dict[s
         },
         "camera": {
             "id": alert.camera.id if alert.camera else alert.camera_id,
-            "name": alert.camera.name if alert.camera else "Channel 01",
-            "location": alert.camera.location if alert.camera else "Default Zone",
+            "name": clean_cam_name,
+            "location": clean_loc_name,
             "status": alert.camera.status if alert.camera else "offline",
             "source_type": alert.camera.source_type if alert.camera else "directshow",
         },
@@ -374,16 +388,7 @@ def get_incident_context(alert_id: int, user_id: Optional[int] = None) -> Dict[s
             "snapshot": snapshot_ev,
             "recording": recording_data,
         },
-        "ai_analysis": {
-            "track_id": alert.track_id,
-            "event_type": alert.event_type,
-            "confidence": alert.confidence or 0.85,
-            "severity": alert.severity,
-            "message": alert.message,
-            "location": alert.location or (alert.camera.location if alert.camera else "Default Zone"),
-            "camera_name": alert.camera.name if alert.camera else "Channel 01",
-            "detected_at": alert.detected_at.isoformat() if alert.detected_at else "",
-        },
+        "ai_analysis": soc_analysis,
         "timeline": timeline,
         "evidence_items": evidence_items,
         "incident_case": incident_case,

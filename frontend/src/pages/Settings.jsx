@@ -79,6 +79,10 @@ export function Settings({ onNavigate }) {
     databaseLabel: "PostgreSQL / SQLite (18 Tables Connected)",
   });
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [uptimeData, setUptimeData] = useState(null);
+  const [probingUptime, setProbingUptime] = useState(false);
+  const isStaffUser = ['admin', 'supervisor', 'operator'].includes(String(user?.role || '').toLowerCase()) || Boolean(user?.is_superuser);
+  const isAdminUser = String(user?.role || '').toLowerCase() === 'admin' || Boolean(user?.is_superuser);
 
   useEffect(() => {
     let mounted = true;
@@ -1069,6 +1073,128 @@ export function Settings({ onNavigate }) {
           </button>
         </div>
       </div>
+
+      {/* Section 6.5: Admin/Staff-Only Website Uptime Monitor */}
+      {isStaffUser && (
+        <div
+          id="admin-uptime-monitor-card"
+          style={{
+            marginBottom: "18px",
+            padding: "18px",
+            background: "var(--bg-surface, #0C121D)",
+            border: "1px solid var(--border-color, #1A2436)",
+            borderRadius: "var(--radius-lg, 8px)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+            <div>
+              <h2 style={{ fontSize: "0.95rem", fontWeight: 700, margin: 0, color: "var(--text-main, #F8FAFC)" }}>
+                Website Uptime &amp; Availability Monitor (External HTTPS Probes)
+              </h2>
+              <div style={{ fontSize: "0.74rem", color: "var(--text-muted, #64748B)", marginTop: "3px" }}>
+                Scheduled every 15 min via GitHub Actions against allowlisted production URLs (SSRF-guarded, transition-only).
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={async () => {
+                  try {
+                    const res = await api.uptime.getStatus();
+                    if (res?.success) setUptimeData(res);
+                  } catch {}
+                }}
+              >
+                Refresh Status
+              </button>
+              {isAdminUser && (
+                <button
+                  type="button"
+                  disabled={probingUptime}
+                  data-testid="run-uptime-probe-btn"
+                  className="btn btn-primary btn-sm"
+                  onClick={async () => {
+                    try {
+                      setProbingUptime(true);
+                      const res = await api.uptime.checkNow();
+                      if (res?.success) {
+                        setUptimeData(res);
+                        addToast("Live HTTPS uptime check completed.", "success");
+                      }
+                    } catch (err) {
+                      addToast(err?.message || "Uptime probe failed.", "error");
+                    } finally {
+                      setProbingUptime(false);
+                    }
+                  }}
+                >
+                  {probingUptime ? "Probing..." : "Run Live Check"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {!uptimeData && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ alignSelf: "flex-start" }}
+              onClick={async () => {
+                try {
+                  const res = await api.uptime.getStatus();
+                  if (res?.success) setUptimeData(res);
+                } catch {}
+              }}
+            >
+              Load Uptime Telemetry
+            </button>
+          )}
+
+          {uptimeData?.targets && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "10px" }}>
+              {uptimeData.targets.map((tgt) => {
+                const st = String(tgt.current_status || "unknown").toLowerCase();
+                const stClass = st === "up" ? "status-live" : st === "down" ? "status-offline" : "status-warn";
+                return (
+                  <div
+                    key={tgt.target_id}
+                    style={{
+                      padding: "10px 12px",
+                      background: "var(--bg-canvas, #101826)",
+                      border: "1px solid var(--border-color, #1A2436)",
+                      borderRadius: "6px",
+                      fontSize: "0.78rem",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
+                      <strong style={{ color: "var(--text-main, #F8FAFC)" }}>{tgt.name}</strong>
+                      <span className={`status-pill ${stClass}`} style={{ fontSize: "0.66rem", textTransform: "uppercase" }}>
+                        {st.replace(/_/g, " ")}
+                      </span>
+                    </div>
+                    <div style={{ color: "var(--text-muted, #94A3B8)", display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <span>Latency: <strong style={{ color: "var(--text-main)" }}>{tgt.last_latency_ms != null ? `${tgt.last_latency_ms} ms` : "—"}</strong> · Failures: <strong>{tgt.consecutive_failures ?? 0}</strong></span>
+                      <span>Availability: <strong>{tgt.availability_pct != null ? `${tgt.availability_pct}% (${tgt.total_checks})` : "Awaiting probe"}</strong></span>
+                      <span>Outage dur: <strong>{tgt.current_outage_duration_seconds > 0 ? `${tgt.current_outage_duration_seconds}s active` : (tgt.last_outage_duration_seconds != null ? `${tgt.last_outage_duration_seconds}s last` : "0s")}</strong></span>
+                      {tgt.last_checked_at && <span>Checked: {new Date(tgt.last_checked_at).toLocaleString()}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {uptimeData?.tier_disclosure && (
+            <div style={{ fontSize: "0.73rem", color: "var(--text-muted, #64748B)", lineHeight: 1.45 }}>
+              {uptimeData.tier_disclosure}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Section 7: Advanced Diagnostics (Collapsible) */}
       <div

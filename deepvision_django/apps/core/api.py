@@ -25,7 +25,7 @@ from django.core.exceptions import PermissionDenied
 from django.middleware.csrf import get_token
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from django.views.decorators.cache import never_cache
-from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.csrf import ensure_csrf_cookie, csrf_exempt
 from django.core.paginator import Paginator
 from django.db.models import Q, Count
 from django.db import DatabaseError, OperationalError, InterfaceError, connection, close_old_connections
@@ -38,8 +38,9 @@ from apps.accounts.views import validate_signup_inputs, validate_password_streng
 from apps.cameras.models import Camera
 from apps.recordings.models import Recording
 from apps.evidence.models import Evidence
-from apps.alerts.models import Alert, IncidentCase, IncidentNote
+from apps.alerts.models import Alert, IncidentCase, IncidentNote, IncidentPolicy, IncidentPlaybook
 from apps.alerts.incident_service import get_incident_context
+from apps.alerts.soc_triage import analyze_incident, sanitize_untrusted_text
 from apps.notifications.models import Notification
 from apps.ai.engine import (
     get_engine_status,
@@ -700,18 +701,16 @@ def api_dashboard_stats(request):
     from django.utils import timezone
     try:
         import psutil
-        cpu_usage = int(psutil.cpu_percent(interval=None))
-        if cpu_usage == 0:
-            cpu_usage = 32
-        mem_usage = int(psutil.virtual_memory().percent)
-        disk_usage = int(psutil.disk_usage('/').percent)
+        cpu_usage = int(round(psutil.cpu_percent(interval=0.05)))
+        mem_usage = int(round(psutil.virtual_memory().percent))
+        disk_usage = int(round(psutil.disk_usage('/').percent))
     except Exception:
-        cpu_usage, mem_usage, disk_usage = 32, 56, 68
+        cpu_usage, mem_usage, disk_usage = 0, 0, 0
 
     twenty_four_hours_ago = timezone.now() - datetime.timedelta(hours=24)
+    one_hour_ago = timezone.now() - datetime.timedelta(hours=1)
     events_24h = Alert.objects.filter(user_id=user_id, detected_at__gte=twenty_four_hours_ago).count()
-    if events_24h == 0:
-        events_24h = min(24, Alert.objects.filter(user_id=user_id).count() or 24)
+    alerts_last_1h = Alert.objects.filter(user_id=user_id, detected_at__gte=one_hour_ago).count()
 
     from apps.surveillance.health.health_service import get_live_camera_status, get_user_cameras_health
     user_cameras = list(get_accessible_cameras_qs(request.user))
@@ -729,6 +728,9 @@ def api_dashboard_stats(request):
     total_recordings = Recording.objects.filter(user_id=user_id).count()
     total_evidence = Evidence.objects.filter(user_id=user_id).count()
     total_cases = IncidentCase.objects.filter(user_id=user_id).count()
+    open_cases = IncidentCase.objects.filter(user_id=user_id).exclude(status__iexact='closed').exclude(status__iexact='resolved').count()
+    active_policies = IncidentPolicy.objects.filter(user_id=user_id, enabled=True).count()
+    active_playbooks = IncidentPlaybook.objects.filter(user_id=user_id, enabled=True).count()
     unread_notifications = Notification.objects.filter(user_id=user_id, is_read=False).count()
     recent_alerts_qs = Alert.objects.filter(user_id=user_id).select_related('camera').only(
         'id', 'title', 'event_type', 'severity', 'status', 'camera_id', 'camera__name', 'detected_at'
@@ -799,6 +801,11 @@ def api_dashboard_stats(request):
         "total_recordings": total_recordings,
         "total_evidence": total_evidence,
         "total_cases": total_cases,
+        "open_cases": open_cases,
+        "alerts_last_1h": alerts_last_1h,
+        "cameras_recording": len(active_recording_cam_ids),
+        "active_policies": active_policies,
+        "active_playbooks": active_playbooks,
         "unread_notifications": unread_notifications,
         "recent_alerts": recent_alerts,
         "recent_recordings": recent_recordings,
@@ -991,6 +998,7 @@ def api_cameras_list(request):
             "suppress_duplicates",
             "cooldown_seconds",
             "debounce_frames",
+            "video_quality",
         ):
             if k in data:
                 cfg_updates[k] = data[k]
@@ -1027,6 +1035,7 @@ def api_cameras_list(request):
                 "require_alert": bool(cam_cfg.get("require_alert", True)),
                 "suppress_duplicates": bool(cam_cfg.get("suppress_duplicates", True)),
                 "cooldown_seconds": cam_cfg.get("cooldown_seconds", 30.0),
+                "video_quality": cam_cfg.get("video_quality", "high"),
                 "zone_count": 0,
                 "created_at": camera.created_at.isoformat() if camera.created_at else "",
             },
@@ -1076,6 +1085,7 @@ def api_cameras_list(request):
             "require_alert": bool(cam_cfg.get("require_alert", True)),
             "suppress_duplicates": bool(cam_cfg.get("suppress_duplicates", True)),
             "cooldown_seconds": cam_cfg.get("cooldown_seconds", 30.0),
+            "video_quality": cam_cfg.get("video_quality", "high"),
             "zone_count": z_cnt,
             "created_at": c.created_at.isoformat() if c.created_at else "",
         })
@@ -1164,15 +1174,23 @@ def api_camera_detail(request, camera_id):
             "suppress_duplicates",
             "cooldown_seconds",
             "debounce_frames",
+            "video_quality",
         ):
             if k in data:
                 cfg_updates[k] = data[k]
         z_cnt = RestrictedZone.objects.filter(camera_id=camera.id, enabled=True).count()
+        prev_cfg = get_camera_surveillance_config(camera.id, has_enabled_zones=(z_cnt > 0))
         cam_cfg = (
             save_camera_surveillance_config(camera.id, cfg_updates)
             if cfg_updates
-            else get_camera_surveillance_config(camera.id, has_enabled_zones=(z_cnt > 0))
+            else prev_cfg
         )
+        if not source_changed and cfg_updates.get("video_quality") and cfg_updates["video_quality"] != prev_cfg.get("video_quality"):
+            try:
+                from apps.surveillance.camera.registry import get_camera_registry
+                get_camera_registry().remove_camera(camera.id)
+            except Exception:
+                pass
         _invalidate_camera_zones(camera.id)
 
         _DASHBOARD_STATS_CACHE.clear()
@@ -1204,6 +1222,7 @@ def api_camera_detail(request, camera_id):
                 "require_alert": bool(cam_cfg.get("require_alert", True)),
                 "suppress_duplicates": bool(cam_cfg.get("suppress_duplicates", True)),
                 "cooldown_seconds": cam_cfg.get("cooldown_seconds", 30.0),
+                "video_quality": cam_cfg.get("video_quality", "high"),
                 "zone_count": z_cnt,
                 "created_at": camera.created_at.isoformat() if camera.created_at else "",
             },
@@ -2436,8 +2455,55 @@ def api_cases_list(request):
 @never_cache
 @login_required
 def api_case_detail(request, case_id):
-    """Returns single case details with forensic timeline notes."""
+    """Returns single case details with forensic timeline notes, or updates case status/priority (PATCH/POST)."""
     case = get_object_or_404(IncidentCase.objects.select_related('alert', 'alert__camera'), id=case_id, user_id=request.user.id)
+
+    if request.method in ("PATCH", "PUT", "POST"):
+        if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+            return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
+        data = _parse_body(request)
+        updated_fields = []
+        raw_status = data.get("status")
+        if isinstance(raw_status, str) and raw_status.strip():
+            norm_s = raw_status.strip().lower()
+            if norm_s == "investigating":
+                norm_s = "in_progress"
+            if norm_s in ("open", "in_progress", "resolved", "closed"):
+                case.status = norm_s
+                updated_fields.append("status")
+                if norm_s in ("resolved", "closed") and not case.closed_at:
+                    case.closed_at = timezone.now()
+                    updated_fields.append("closed_at")
+                elif norm_s in ("open", "in_progress") and case.closed_at is not None:
+                    case.closed_at = None
+                    updated_fields.append("closed_at")
+            else:
+                return JsonResponse({"success": False, "error": "Invalid case status."}, status=400)
+
+        raw_prio = data.get("priority")
+        if isinstance(raw_prio, str) and raw_prio.strip():
+            norm_p = raw_prio.strip().upper()
+            if norm_p in ("LOW", "MEDIUM", "HIGH", "CRITICAL"):
+                case.priority = norm_p
+                updated_fields.append("priority")
+            else:
+                return JsonResponse({"success": False, "error": "Invalid case priority."}, status=400)
+
+        if "assigned_to" in data:
+            clean_assignee, _ = sanitize_untrusted_text(data.get("assigned_to") or "", max_len=100)
+            case.assigned_to = clean_assignee or None
+            updated_fields.append("assigned_to")
+
+        if updated_fields:
+            case.save(update_fields=list(dict.fromkeys(updated_fields + ["updated_at"])))
+            log_audit(
+                request,
+                action="CASE_UPDATED",
+                resource_type="incident_case",
+                resource_id=case.id,
+                description=f"Updated case {case.case_number} (status={case.status}, priority={case.priority}).",
+            )
+
     notes = []
     if case.alert:
         for n in case.alert.incident_notes.all().select_related('user').order_by('created_at'):
@@ -2450,6 +2516,7 @@ def api_case_detail(request, case_id):
             })
 
     return JsonResponse({
+        "success": True,
         "case": {
             "id": case.id,
             "case_number": case.case_number,
@@ -2457,6 +2524,7 @@ def api_case_detail(request, case_id):
             "description": case.description or "",
             "priority": case.priority,
             "status": case.status,
+            "assigned_to": case.assigned_to or "Unassigned",
             "alert_id": case.alert_id,
             "alert_title": case.alert.title if case.alert else "",
             "camera_name": case.alert.camera.name if (case.alert and case.alert.camera) else "Channel 01",
@@ -2535,4 +2603,316 @@ def api_audit_logs(request):
         "success": True,
         "audit_logs": items,
         "total": len(items),
+    })
+
+
+# =========================================================================
+# SOC TRIAGE, BULK ACTIONS, POLICIES & PLAYBOOKS APIS
+# =========================================================================
+
+@never_cache
+@require_POST
+@login_required
+@handle_db_errors
+def api_alert_analyze(request, alert_id):
+    """Runs evidence-linked SOC analysis and duplicate correlation for an alert (supervised read/report)."""
+    context = get_incident_context(alert_id, user_id=request.user.id)
+    log_audit(
+        request,
+        action="ALERT_SOC_ANALYZED",
+        resource_type="alert",
+        resource_id=alert_id,
+        description=f"Generated evidence-linked SOC triage analysis for Alert #{alert_id}.",
+    )
+    return JsonResponse({
+        "success": True,
+        "alert_id": alert_id,
+        "ai_analysis": context.get("ai_analysis"),
+    })
+
+
+@require_POST
+@login_required
+@handle_db_errors
+def api_alerts_bulk_action(request):
+    """Operator-confirmed bulk acknowledge or resolve action on user-owned alerts."""
+    if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+        return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
+    data = _parse_body(request)
+    action = str(data.get("action") or "").strip().lower()
+    raw_ids = data.get("alert_ids")
+    if action not in ("acknowledge", "resolve"):
+        return JsonResponse({"success": False, "error": "Action must be 'acknowledge' or 'resolve'."}, status=400)
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return JsonResponse({"success": False, "error": "alert_ids list is required."}, status=400)
+
+    clean_ids = []
+    for item in raw_ids[:50]:
+        try:
+            clean_ids.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    if not clean_ids:
+        return JsonResponse({"success": False, "error": "No valid alert IDs supplied."}, status=400)
+
+    now = timezone.now()
+    qs = Alert.objects.filter(id__in=clean_ids, user_id=request.user.id)
+    if action == "acknowledge":
+        target_qs = qs.filter(status="new")
+        updated = target_qs.update(status="acknowledged", acknowledged_at=now)
+    else:
+        target_qs = qs.filter(status__in=["new", "acknowledged"])
+        updated = target_qs.update(status="resolved", resolved_at=now)
+
+    log_audit(
+        request,
+        action=f"ALERTS_BULK_{action.upper()}",
+        resource_type="alert",
+        resource_id=",".join(str(x) for x in clean_ids[:10]),
+        description=f"Operator bulk {action} applied to {updated} alert(s).",
+    )
+    _DASHBOARD_STATS_CACHE.clear()
+    return JsonResponse({"success": True, "action": action, "updated": int(updated)})
+
+
+@never_cache
+@login_required
+@handle_db_errors
+def api_soc_policies(request, policy_id=None):
+    """Lists or manages SOC IncidentPolicy SLA & Escalation definitions (zero schema change)."""
+    if policy_id is not None:
+        policy = get_object_or_404(IncidentPolicy, id=policy_id, user_id=request.user.id)
+        if request.method == "DELETE":
+            if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+                return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
+            pname = policy.name
+            policy.delete()
+            log_audit(request, action="POLICY_DELETED", resource_type="incident_policy", resource_id=policy_id, description=f"Deleted policy '{pname}'.")
+            return JsonResponse({"success": True})
+        if request.method in ("PUT", "PATCH", "POST"):
+            if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+                return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
+            data = _parse_body(request)
+            if "name" in data:
+                clean_name, _ = sanitize_untrusted_text(data["name"], max_len=100)
+                if clean_name:
+                    policy.name = clean_name
+            if "description" in data:
+                clean_desc, _ = sanitize_untrusted_text(data["description"], max_len=240)
+                policy.description = clean_desc
+            if "enabled" in data:
+                policy.enabled = bool(data["enabled"])
+            if "severity" in data and str(data["severity"]).strip().lower() in ("low", "medium", "high", "critical"):
+                policy.severity = str(data["severity"]).strip().lower()
+            for num_field, lo, hi in (("initial_response_minutes", 1, 1440), ("escalation_minutes", 1, 2880), ("resolution_minutes", 5, 10080)):
+                if num_field in data:
+                    try:
+                        setattr(policy, num_field, max(lo, min(hi, int(data[num_field]))))
+                    except (TypeError, ValueError):
+                        pass
+            for bfield in ("auto_escalate", "auto_create_case", "notify_on_escalation"):
+                if bfield in data:
+                    setattr(policy, bfield, bool(data[bfield]))
+            policy.save()
+            log_audit(request, action="POLICY_UPDATED", resource_type="incident_policy", resource_id=policy.id, description=f"Updated SLA policy '{policy.name}'.")
+            return JsonResponse({"success": True, "id": policy.id})
+
+    if request.method == "POST":
+        if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+            return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
+        data = _parse_body(request)
+        name, _ = sanitize_untrusted_text(data.get("name") or "High Severity SLA", max_len=100)
+        desc, _ = sanitize_untrusted_text(data.get("description") or "", max_len=240)
+        sev = str(data.get("severity") or "high").strip().lower()
+        if sev not in ("low", "medium", "high", "critical"):
+            sev = "high"
+        policy = IncidentPolicy.objects.create(
+            user_id=request.user.id,
+            name=name or "SOC SLA Policy",
+            description=desc,
+            enabled=bool(data.get("enabled", True)),
+            severity=sev,
+            initial_response_minutes=max(1, min(1440, int(data.get("initial_response_minutes") or 15))),
+            escalation_minutes=max(1, min(2880, int(data.get("escalation_minutes") or 30))),
+            resolution_minutes=max(5, min(10080, int(data.get("resolution_minutes") or 120))),
+            auto_escalate=bool(data.get("auto_escalate", True)),
+            auto_create_case=bool(data.get("auto_create_case", True)),
+            notify_on_escalation=bool(data.get("notify_on_escalation", True)),
+        )
+        log_audit(request, action="POLICY_CREATED", resource_type="incident_policy", resource_id=policy.id, description=f"Created SLA policy '{policy.name}'.")
+        return JsonResponse({"success": True, "id": policy.id}, status=201)
+
+    policies = []
+    for p in IncidentPolicy.objects.filter(user_id=request.user.id).order_by("initial_response_minutes", "id"):
+        clean_name, _ = sanitize_untrusted_text(p.name, max_len=100)
+        clean_desc, _ = sanitize_untrusted_text(p.description or "", max_len=240)
+        policies.append({
+            "id": p.id,
+            "name": clean_name,
+            "description": clean_desc,
+            "enabled": bool(p.enabled),
+            "severity": p.severity,
+            "initial_response_minutes": p.initial_response_minutes,
+            "escalation_minutes": p.escalation_minutes,
+            "resolution_minutes": p.resolution_minutes,
+            "auto_escalate": bool(p.auto_escalate),
+            "auto_create_case": bool(p.auto_create_case),
+            "notify_on_escalation": bool(p.notify_on_escalation),
+        })
+    return JsonResponse({"success": True, "policies": policies})
+
+
+@never_cache
+@login_required
+@handle_db_errors
+def api_soc_playbooks(request, playbook_id=None):
+    """Lists or manages SOC IncidentPlaybook response templates (never alters history silently)."""
+    if playbook_id is not None:
+        pb = get_object_or_404(IncidentPlaybook, id=playbook_id, user_id=request.user.id)
+        if request.method == "DELETE":
+            if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+                return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
+            pb.delete()
+            log_audit(request, action="PLAYBOOK_DELETED", resource_type="incident_playbook", resource_id=playbook_id, description=f"Deleted playbook #{playbook_id}.")
+            return JsonResponse({"success": True})
+        if request.method in ("PUT", "PATCH", "POST"):
+            if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+                return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
+            data = _parse_body(request)
+            if "name" in data:
+                pb.name, _ = sanitize_untrusted_text(data["name"], max_len=100)
+            if "description" in data:
+                pb.description, _ = sanitize_untrusted_text(data["description"], max_len=240)
+            if "enabled" in data:
+                pb.enabled = bool(data["enabled"])
+            pb.save()
+            log_audit(request, action="PLAYBOOK_UPDATED", resource_type="incident_playbook", resource_id=pb.id, description=f"Updated playbook '{pb.name}'.")
+            return JsonResponse({"success": True, "id": pb.id})
+
+    if request.method == "POST":
+        if getattr(request.user, 'role', '') == 'viewer' and not getattr(request.user, 'is_superuser', False):
+            return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
+        data = _parse_body(request)
+        name, _ = sanitize_untrusted_text(data.get("name") or "Perimeter Intrusion Playbook", max_len=100)
+        desc, _ = sanitize_untrusted_text(data.get("description") or "", max_len=240)
+        pb = IncidentPlaybook.objects.create(
+            user_id=request.user.id,
+            name=name or "SOC Playbook",
+            description=desc,
+            enabled=bool(data.get("enabled", True)),
+            priority=max(1, min(100, int(data.get("priority") or 1))),
+            severity=(str(data.get("severity") or "").strip().lower() or None),
+            event_type=(str(data.get("event_type") or "").strip().lower() or None),
+            create_case=bool(data.get("create_case", True)),
+            auto_escalate=bool(data.get("auto_escalate", True)),
+            send_notification=bool(data.get("send_notification", True)),
+            apply_sla_policy=bool(data.get("apply_sla_policy", True)),
+            cooldown_seconds=max(10, min(3600, int(data.get("cooldown_seconds") or 300))),
+        )
+        log_audit(request, action="PLAYBOOK_CREATED", resource_type="incident_playbook", resource_id=pb.id, description=f"Created playbook '{pb.name}'.")
+        return JsonResponse({"success": True, "id": pb.id}, status=201)
+
+    playbooks = []
+    for pb in IncidentPlaybook.objects.filter(user_id=request.user.id).order_by("priority", "id"):
+        cname, _ = sanitize_untrusted_text(pb.name, max_len=100)
+        cdesc, _ = sanitize_untrusted_text(pb.description or "", max_len=240)
+        playbooks.append({
+            "id": pb.id,
+            "name": cname,
+            "description": cdesc,
+            "enabled": bool(pb.enabled),
+            "priority": pb.priority,
+            "severity": pb.severity,
+            "event_type": pb.event_type,
+            "create_case": bool(pb.create_case),
+            "auto_escalate": bool(pb.auto_escalate),
+            "send_notification": bool(pb.send_notification),
+            "apply_sla_policy": bool(pb.apply_sla_policy),
+            "cooldown_seconds": pb.cooldown_seconds,
+        })
+    return JsonResponse({"success": True, "playbooks": playbooks})
+
+
+# =========================================================================
+# WEBSITE UPTIME MONITORING APIS (SSRF-SAFE, HMAC + ADMIN RBAC PROTECTED)
+# =========================================================================
+
+@csrf_exempt
+@require_POST
+@handle_db_errors
+def api_uptime_ingest(request):
+    """
+    Receives signed uptime probe results from the scheduled external monitor
+    (`.github/workflows/uptime-monitor.yml`). Enforces constant-time HMAC-SHA256 verification
+    and strict owned-host HTTPS SSRF validation.
+    """
+    from apps.core.uptime_service import verify_ingest_hmac, record_uptime_results
+
+    sig = request.headers.get("X-DeepVision-Uptime-Signature", "")
+    ts = request.headers.get("X-DeepVision-Uptime-Timestamp", "")
+    ok, reason = verify_ingest_hmac(request.body, sig, ts)
+    if not ok:
+        code = 503 if "not configured" in reason.lower() else 401
+        return JsonResponse({"success": False, "error": reason}, status=code)
+
+    data = _parse_body(request)
+    results = data.get("results")
+    if not isinstance(results, list) or not results:
+        return JsonResponse({"success": False, "error": "results list is required."}, status=400)
+
+    try:
+        outcome = record_uptime_results(results[:20], source="github_actions_external")
+    except ValueError as err:
+        return JsonResponse({"success": False, "error": str(err)}, status=400)
+
+    return JsonResponse({"success": True, **outcome})
+
+
+@never_cache
+@require_GET
+@login_required
+@handle_db_errors
+def api_uptime_status(request):
+    """
+    Admin/Staff-only Website Uptime Status endpoint reporting external probe history,
+    latency, consecutive failures, outage duration, and historical availability.
+    """
+    is_staff = getattr(request.user, 'role', '') in ('admin', 'supervisor', 'operator') or getattr(request.user, 'is_superuser', False)
+    if not is_staff:
+        return JsonResponse({"success": False, "error": "Administrator or staff privileges required."}, status=403)
+
+    from apps.core.uptime_service import get_uptime_status_summary
+    summary = get_uptime_status_summary()
+    return JsonResponse({"success": True, **summary})
+
+
+@require_POST
+@login_required
+@handle_db_errors
+def api_uptime_check_now(request):
+    """
+    Admin-only manual HTTPS availability check against strict owned-domain allowlist ONLY.
+    """
+    is_admin = getattr(request.user, 'role', '') == 'admin' or getattr(request.user, 'is_superuser', False)
+    if not is_admin:
+        return JsonResponse({"success": False, "error": "Administrator privileges required to trigger live probes."}, status=403)
+
+    from apps.core.uptime_service import (
+        probe_allowlisted_targets,
+        record_uptime_results,
+        get_uptime_status_summary,
+    )
+    results = probe_allowlisted_targets(timeout_seconds=8.0, max_retries=1)
+    outcome = record_uptime_results(results, source="admin_live_probe")
+    log_audit(
+        request,
+        action="UPTIME_PROBE_EXECUTED",
+        resource_type="uptime_monitor",
+        description=f"Executed live HTTPS availability check across {len(results)} allowlisted endpoints.",
+    )
+    return JsonResponse({
+        "success": True,
+        "probe_results": results,
+        "transitions": outcome.get("transitions", []),
+        **get_uptime_status_summary(),
     })

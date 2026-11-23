@@ -339,12 +339,14 @@ class DummyVideoCapture:
         pass
 
 
-def safe_open_video_capture(capture_source, timeout=None):
+def safe_open_video_capture(capture_source, timeout=None, target_width=None, target_height=None):
     """
     Safely opens a cv2.VideoCapture instance.
     For local cameras (integers) on Windows, attempts DirectShow (CAP_DSHOW) first,
-    checks if it's opened, and attempts a real frame read to verify usability.
+    negotiating MJPG + requested target resolution without distorting aspect ratio.
     """
+    req_w = int(target_width or 1280)
+    req_h = int(target_height or 720)
     if isinstance(capture_source, int):
         with _hardware_webcam_lock:
             if os.name == "nt" or sys.platform.startswith("win"):
@@ -356,8 +358,8 @@ def safe_open_video_capture(capture_source, timeout=None):
                             cv2.CAP_DSHOW,
                             [
                                 cv2.CAP_PROP_FOURCC, mjpg,
-                                cv2.CAP_PROP_FRAME_WIDTH, 1280,
-                                cv2.CAP_PROP_FRAME_HEIGHT, 720,
+                                cv2.CAP_PROP_FRAME_WIDTH, req_w,
+                                cv2.CAP_PROP_FRAME_HEIGHT, req_h,
                                 cv2.CAP_PROP_FPS, 30,
                             ],
                         )
@@ -365,10 +367,10 @@ def safe_open_video_capture(capture_source, timeout=None):
                         cap = cv2.VideoCapture(capture_source, cv2.CAP_DSHOW)
                         if cap.isOpened():
                             try:
-                                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-                                cap.set(cv2.CAP_PROP_FPS, 30)
                                 cap.set(cv2.CAP_PROP_FOURCC, mjpg)
+                                cap.set(cv2.CAP_PROP_FRAME_WIDTH, req_w)
+                                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, req_h)
+                                cap.set(cv2.CAP_PROP_FPS, 30)
                             except Exception:
                                 pass
 
@@ -396,7 +398,10 @@ def safe_open_video_capture(capture_source, timeout=None):
                             actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or frame.shape[1]
                             actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or frame.shape[0]
                             try:
+                                fcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
+                                fcc_str = "".join(chr((fcc_int >> (8 * i)) & 0xFF) for i in range(4)).strip("\x00 ") or "MJPG"
                                 setattr(cap, "_probed_frame", frame)
+                                setattr(cap, "_negotiated_fourcc", fcc_str)
                             except Exception:
                                 pass
                             print(f"[CAPTURE] DirectShow camera {capture_source} opened: {actual_w}x{actual_h} (luma={float(frame[::16, ::16].mean()):.1f}).")

@@ -14,6 +14,48 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [selectedCase, setSelectedCase] = useState(null);
+  const [caseNotes, setCaseNotes] = useState([]);
+  const [updatingCase, setUpdatingCase] = useState(false);
+  const [policies, setPolicies] = useState([]);
+  const [showPolicies, setShowPolicies] = useState(false);
+
+  const openCaseDetail = async (caseRow) => {
+    setSelectedCase(caseRow);
+    setCaseNotes([]);
+    try {
+      const detail = await api.cases.get(caseRow.id);
+      if (detail?.case) setSelectedCase(detail.case);
+      if (Array.isArray(detail?.notes)) setCaseNotes(detail.notes);
+    } catch {
+      // keep base row
+    }
+  };
+
+  const handleUpdateCaseStatus = async (caseId, nextStatus) => {
+    try {
+      setUpdatingCase(true);
+      const res = await api.cases.update(caseId, { status: nextStatus });
+      if (res?.case) {
+        setSelectedCase(res.case);
+        setCases((prev) => prev.map((row) => (row.id === caseId ? { ...row, ...res.case } : row)));
+      }
+    } finally {
+      setUpdatingCase(false);
+    }
+  };
+
+  const togglePoliciesPanel = async () => {
+    const next = !showPolicies;
+    setShowPolicies(next);
+    if (next && policies.length === 0) {
+      try {
+        const res = await api.soc.getPolicies();
+        if (Array.isArray(res?.policies)) setPolicies(res.policies);
+      } catch {
+        // Ignore
+      }
+    }
+  };
 
   const fetchCases = async () => {
     try {
@@ -55,14 +97,64 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
   return (
     <div className="cases-page-container">
       {/* Operational Header */}
-      <div className="hero-editorial-wrap" style={{ marginBottom: '1rem' }}>
-        <h1 className="editorial-hero-title" style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 4px 0', color: 'var(--text-main)' }}>
-          {t('cases.title', 'Incident Case Management')}
-        </h1>
-        <p className="editorial-hero-subtitle" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0 }}>
-          {t('cases.subtitle', 'Track investigation cases and security escalations')}
-        </p>
+      <div className="hero-editorial-wrap" style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <div>
+          <h1 className="editorial-hero-title" style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 4px 0', color: 'var(--text-main)' }}>
+            {t('cases.title', 'Incident Case Management')}
+          </h1>
+          <p className="editorial-hero-subtitle" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0 }}>
+            {t('cases.subtitle', 'Track investigation cases and security escalations')}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={togglePoliciesPanel}
+          className="btn btn-secondary btn-sm"
+          style={{ fontSize: '0.78rem' }}
+        >
+          {showPolicies ? 'Hide SLA Policies' : 'SLA Policies'}
+        </button>
       </div>
+
+      {showPolicies && (
+        <div style={{ marginBottom: '1.25rem', padding: '1rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem' }}>
+            <strong style={{ fontSize: '0.88rem' }}>Active SOC Incident SLA Policies ({policies.length})</strong>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              style={{ fontSize: '0.75rem' }}
+              onClick={async () => {
+                await api.soc.createPolicy({
+                  name: 'High Priority Perimeter SLA',
+                  severity: 'high',
+                  initial_response_minutes: 10,
+                  escalation_minutes: 25,
+                  resolution_minutes: 90,
+                });
+                const refreshed = await api.soc.getPolicies();
+                if (Array.isArray(refreshed?.policies)) setPolicies(refreshed.policies);
+              }}
+            >
+              + Add Default High SLA
+            </button>
+          </div>
+          {policies.length === 0 ? (
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No custom SLA policies configured yet.</div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' }}>
+              {policies.map((pol) => (
+                <div key={pol.id} style={{ padding: '0.65rem', borderRadius: '6px', background: 'var(--bg-surface-raised)', border: '1px solid var(--border-color)', fontSize: '0.78rem' }}>
+                  <div style={{ fontWeight: 700 }}>{pol.name} ({String(pol.severity || '').toUpperCase()})</div>
+                  <div style={{ color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Response: {pol.initial_response_minutes}m · Escalate: {pol.escalation_minutes}m · Resolve: {pol.resolution_minutes}m
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Controls & Filters Bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem', marginBottom: '2rem' }}>
@@ -177,7 +269,7 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
                   <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
                     <button
                       type="button"
-                      onClick={() => setSelectedCase(c)}
+                      onClick={() => openCaseDetail(c)}
                       className="btn btn-secondary btn-sm"
                       style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
                     >
@@ -252,27 +344,63 @@ export function Cases({ onNavigate, selectedId, initialAlertId }) {
               </div>
             )}
 
-            {/* Incident notes safely checked */}
-            {selectedCase.incident_notes || selectedCase.alert?.incident_notes ? (
+            {caseNotes.length > 0 && (
               <div style={{ marginBottom: '1.25rem' }}>
-                <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '4px' }}>Incident Notes:</strong>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', background: 'var(--bg-surface-secondary, rgba(0,0,0,0.02))', padding: '10px', borderRadius: 'var(--radius-sm)' }}>
-                  {selectedCase.incident_notes || selectedCase.alert?.incident_notes}
-                </p>
+                <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>Incident Notes ({caseNotes.length}):</strong>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
+                  {caseNotes.map((n) => (
+                    <div key={n.id} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'var(--bg-surface-secondary, rgba(0,0,0,0.08))', padding: '8px 10px', borderRadius: 'var(--radius-sm)' }}>
+                      <div>{n.note}</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>{n.author_name} · {formatDate(n.created_at)}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ) : null}
+            )}
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
-              {selectedCase.alert_id ? (
-                <button
-                  type="button"
-                  onClick={() => { const aid = selectedCase.alert_id; setSelectedCase(null); onNavigate('alerts', { selectedId: aid }); }}
-                  className="btn btn-primary btn-sm"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                >
-                  Open Incident Workspace →
-                </button>
-              ) : <div />}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {selectedCase.status === 'open' && (
+                  <button
+                    type="button"
+                    disabled={updatingCase}
+                    onClick={() => handleUpdateCaseStatus(selectedCase.id, 'in_progress')}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    Start Investigation
+                  </button>
+                )}
+                {selectedCase.status !== 'resolved' && selectedCase.status !== 'closed' && (
+                  <button
+                    type="button"
+                    disabled={updatingCase}
+                    onClick={() => handleUpdateCaseStatus(selectedCase.id, 'resolved')}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    Mark Resolved
+                  </button>
+                )}
+                {selectedCase.status !== 'closed' && (
+                  <button
+                    type="button"
+                    disabled={updatingCase}
+                    onClick={() => handleUpdateCaseStatus(selectedCase.id, 'closed')}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    Close Case
+                  </button>
+                )}
+                {selectedCase.alert_id && (
+                  <button
+                    type="button"
+                    onClick={() => { const aid = selectedCase.alert_id; setSelectedCase(null); onNavigate('alerts', { selectedId: aid }); }}
+                    className="btn btn-primary btn-sm"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    Open Incident Workspace →
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setSelectedCase(null)}

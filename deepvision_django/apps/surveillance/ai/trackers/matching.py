@@ -158,6 +158,8 @@ def extract_reid_embedding(bgr_frame: Optional[np.ndarray], xyxy: Tuple[int, int
     if (x2 - x1) < 12 or (y2 - y1) < 12:
         return None
     crop = bgr_frame[y1:y2, x1:x2]
+    if (x2 - x1) > 48 or (y2 - y1) > 96:
+        crop = cv2.resize(crop, (48, 96), interpolation=cv2.INTER_NEAREST)
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     ch = hsv.shape[0]
     mid = max(1, ch // 2)

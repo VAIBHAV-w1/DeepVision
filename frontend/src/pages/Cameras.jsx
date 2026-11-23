@@ -30,6 +30,13 @@ const DEFAULT_CAMERA_FORM = {
   require_alert: true,
   suppress_duplicates: true,
   cooldown_seconds: 30,
+  video_quality: 'high',
+};
+
+const QUALITY_SETTINGS_MAP = {
+  standard: { id: 'standard', label: 'Standard (480p)', maxWidth: 640, maxHeight: 480, jpegQuality: 0.78, intervalMs: 50 },
+  high: { id: 'high', label: 'High HD (720p)', maxWidth: 1280, maxHeight: 720, jpegQuality: 0.85, intervalMs: 42 },
+  full: { id: 'full', label: 'Full Source (1080p)', maxWidth: 1920, maxHeight: 1080, jpegQuality: 0.91, intervalMs: 40 },
 };
 
 function formatBackendLabel(detectorBackend, trackerBackend, t) {
@@ -146,6 +153,9 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   const [frameAgeMs, setFrameAgeMs] = useState(0);
   const [aiProfile, setAiProfile] = useState('balanced');
   const [switchingProfile, setSwitchingProfile] = useState(false);
+  const [liveResolution, setLiveResolution] = useState('');
+  const [liveFourcc, setLiveFourcc] = useState('');
+  const [switchingQuality, setSwitchingQuality] = useState(false);
   const [visiblePersonsCount, setVisiblePersonsCount] = useState(0);
   const [activeTracksCount, setActiveTracksCount] = useState(0);
   const [uniquePersonsObserved, setUniquePersonsObserved] = useState(0);
@@ -371,6 +381,8 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
         if (typeof stats.p95_latency_ms === 'number') setP95LatencyMs(liveOnline ? Math.round(stats.p95_latency_ms * 10) / 10 : 0);
         if (typeof stats.frame_age_ms === 'number') setFrameAgeMs(liveOnline ? Math.round(stats.frame_age_ms * 10) / 10 : 0);
         if (typeof stats.ai_profile === 'string' && stats.ai_profile) setAiProfile(stats.ai_profile);
+        if (typeof stats.resolution === 'string') setLiveResolution(liveOnline ? stats.resolution : '');
+        if (typeof stats.fourcc === 'string') setLiveFourcc(liveOnline ? stats.fourcc : '');
 
         if (Array.isArray(stats.tracks)) {
           setActiveTracksList(stats.tracks);
@@ -553,6 +565,8 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     let latestAppliedSeq = 0;
     const targetCamId = selectedCam.id;
 
+    const qualityCfg = QUALITY_SETTINGS_MAP[selectedCam?.video_quality] || QUALITY_SETTINGS_MAP.high;
+
     const pushFrame = () => {
       if (!active || inFlightCount >= 2) return;
       if (typeof document !== 'undefined' && document.hidden) return;
@@ -564,7 +578,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
         canvas = document.createElement('canvas');
         browserCanvasRef.current = canvas;
       }
-      const targetW = Math.min(640, videoEl.videoWidth);
+      const targetW = Math.min(qualityCfg.maxWidth, videoEl.videoWidth);
       const targetH = Math.round((videoEl.videoHeight / videoEl.videoWidth) * targetW) || 360;
       if (canvas.width !== targetW || canvas.height !== targetH) {
         canvas.width = targetW;
@@ -600,6 +614,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
             if (typeof res.p95_latency_ms === 'number') setP95LatencyMs(res.p95_latency_ms);
             if (typeof res.frame_age_ms === 'number') setFrameAgeMs(res.frame_age_ms);
             if (typeof res.ai_profile === 'string' && res.ai_profile) setAiProfile(res.ai_profile);
+            if (res.frame_width && res.frame_height) setLiveResolution(`${res.frame_width}x${res.frame_height}`);
             if (Array.isArray(res.tracks_list)) setActiveTracksList(res.tracks_list);
             if (typeof res.currently_visible_persons === 'number') setVisiblePersonsCount(res.currently_visible_persons);
             if (typeof res.active_tracks === 'number') setActiveTracksCount(res.active_tracks);
@@ -624,20 +639,20 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
           } else {
             inFlightCount = Math.max(0, inFlightCount - 1);
           }
-        }, 'image/jpeg', 0.72);
+        }, 'image/jpeg', qualityCfg.jpegQuality);
       } else {
-        sendPayload(canvas.toDataURL('image/jpeg', 0.72));
+        sendPayload(canvas.toDataURL('image/jpeg', qualityCfg.jpegQuality));
       }
     };
 
-    const initialTimer = setTimeout(pushFrame, 30);
-    const interval = setInterval(pushFrame, 125);
+    const initialTimer = setTimeout(pushFrame, 20);
+    const interval = setInterval(pushFrame, qualityCfg.intervalMs);
     return () => {
       active = false;
       clearTimeout(initialTimer);
       clearInterval(interval);
     };
-  }, [browserBridgeActive, selectedCam?.id, isPlaying]);
+  }, [browserBridgeActive, selectedCam?.id, selectedCam?.video_quality, isPlaying]);
 
   // Abort active MJPEG stream immediately when leaving Live View, pausing, or unmounting
   useEffect(() => {
@@ -784,10 +799,11 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
           ? camTarget.source
           : '';
       const chosenDeviceId = overrideDeviceId || storedBrowserDevice || selectedDeviceId;
+      const qualityCfg = QUALITY_SETTINGS_MAP[camTarget?.video_quality] || QUALITY_SETTINGS_MAP.high;
       const defaultFacing = camTarget?.source_type === 'phone' ? 'environment' : 'user';
       const primaryConstraints = chosenDeviceId
-        ? { deviceId: { exact: chosenDeviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
-        : { facingMode: defaultFacing, width: { ideal: 640 }, height: { ideal: 480 } };
+        ? { deviceId: { exact: chosenDeviceId }, width: { ideal: qualityCfg.maxWidth }, height: { ideal: qualityCfg.maxHeight }, frameRate: { ideal: 30 } }
+        : { facingMode: defaultFacing, width: { ideal: qualityCfg.maxWidth }, height: { ideal: qualityCfg.maxHeight }, frameRate: { ideal: 30 } };
 
       let mediaStream;
       try {
@@ -795,7 +811,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       } catch (constraintErr) {
         if (chosenDeviceId && (constraintErr?.name === 'OverconstrainedError' || constraintErr?.name === 'NotFoundError')) {
           mediaStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: defaultFacing, width: { ideal: 640 }, height: { ideal: 480 } },
+            video: { facingMode: defaultFacing, width: { ideal: qualityCfg.maxWidth }, height: { ideal: qualityCfg.maxHeight } },
             audio: false,
           });
         } else {
@@ -1084,6 +1100,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       require_alert: camObj.require_alert !== false,
       suppress_duplicates: camObj.suppress_duplicates !== false,
       cooldown_seconds: Number(camObj.cooldown_seconds || 30),
+      video_quality: camObj.video_quality || 'high',
     });
     setIsAddModalOpen(true);
   };
@@ -1892,6 +1909,45 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.76rem', color: 'var(--text-muted, #94A3B8)', fontFamily: 'var(--font-mono, monospace)', flexWrap: 'wrap' }}>
+              {liveResolution && (
+                <span title={`Active stream codec: ${liveFourcc || 'JPEG'}`}>
+                  <strong style={{ color: 'var(--dv-cyan-400, #22D3EE)' }}>{liveResolution}</strong>{liveFourcc ? ` · ${liveFourcc}` : ''}
+                </span>
+              )}
+              {selectedCam && (
+                <select
+                  aria-label="Stream Video Quality"
+                  disabled={switchingQuality}
+                  value={selectedCam.video_quality || 'high'}
+                  onChange={async (e) => {
+                    const nextQ = e.target.value;
+                    if (!selectedCam?.id) return;
+                    try {
+                      setSwitchingQuality(true);
+                      await api.cameras.update(selectedCam.id, { video_quality: nextQ });
+                      setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, video_quality: nextQ } : c)));
+                      setStreamTimestamp(Date.now());
+                      addToast(`Video quality set to ${QUALITY_SETTINGS_MAP[nextQ]?.label || nextQ}.`, 'success');
+                    } catch (err) {
+                      addToast(err?.message || 'Unable to change video quality.', 'error');
+                    } finally {
+                      setSwitchingQuality(false);
+                    }
+                  }}
+                  style={{
+                    backgroundColor: 'var(--bg-surface, #0F172A)',
+                    color: 'var(--text-main, #F8FAFC)',
+                    border: '1px solid var(--border-color, #1E293B)',
+                    borderRadius: '6px',
+                    padding: '2px 6px',
+                    fontSize: '0.72rem',
+                  }}
+                >
+                  <option value="standard">Quality: Standard (480p)</option>
+                  <option value="high">Quality: High HD (720p)</option>
+                  <option value="full">Quality: Full Source (Up to 1080p)</option>
+                </select>
+              )}
               <span>{t('cameras.fpsShort', 'FPS')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{measuredFps || 0}</strong></span>
               {viewMode === 'tracking' && (
                 <>
@@ -2351,6 +2407,21 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
               />
             </div>
           )}
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary, #94A3B8)', marginBottom: '4px' }}>
+              {t('cameras.videoQualityLabel', 'Capture & Stream Video Quality')}
+            </label>
+            <select
+              value={newCam.video_quality || 'high'}
+              onChange={(e) => setNewCam({ ...newCam, video_quality: e.target.value })}
+              style={{ width: '100%', padding: '8px 10px', backgroundColor: 'var(--bg-body, #090D16)', border: '1px solid var(--border-color, #1E293B)', borderRadius: '8px', color: 'var(--text-main, #F8FAFC)' }}
+            >
+              <option value="standard">Standard (480p — Lowest Bandwidth)</option>
+              <option value="high">High HD (720p — Recommended Balanced Clarity & FPS)</option>
+              <option value="full">Full Resolution / Source Quality (Native up to 1080p)</option>
+            </select>
+          </div>
 
           {/* Restricted-Entry Camera Registration Configuration */}
           <div
