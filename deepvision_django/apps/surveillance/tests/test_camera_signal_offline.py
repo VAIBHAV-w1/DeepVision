@@ -14,6 +14,7 @@ from apps.cameras.models import Camera
 from apps.core.models import AuditLog
 from apps.surveillance.ai.registry import get_inference_registry
 from apps.surveillance.camera.registry import get_camera_registry
+from apps.surveillance.camera.sources import get_physical_source_key
 from apps.surveillance.camera.workers import CameraWorker
 from apps.surveillance.health.health_service import (
     get_live_camera_status,
@@ -311,18 +312,19 @@ class CameraSignalOfflineRegressionTests(TransactionTestCase):
             status="online",
             is_active=True,
         )
+        phys_key = get_physical_source_key("webcam", "0")
         cam_reg = get_camera_registry()
         cw = CameraWorker(
             camera_id=self.cam.id,
             cap_source=0,
             source_type="webcam",
             user_id=self.owner.id,
-            physical_source_id="dshow://0",
+            physical_source_id=phys_key,
         )
         cw.running = True
         cw.last_valid_frame_time = time.time()
         cam_reg._workers[self.cam.id] = cw
-        cam_reg._physical_map["dshow://0"] = cw
+        cam_reg._physical_map[phys_key] = cw
 
         # Listing cameras calls get_active_worker(sibling.id), must NOT mutate _workers[sibling.id]
         list_resp = self.client.get("/api/cameras/")
@@ -335,7 +337,7 @@ class CameraSignalOfflineRegressionTests(TransactionTestCase):
             self.assertEqual(disc_resp.status_code, 200)
             mock_stop.assert_called_once()
         cw.running = False
-        cam_reg._physical_map.pop("dshow://0", None)
+        cam_reg._physical_map.pop(phys_key, None)
 
     def test_cloud_environment_blocks_local_webcam_capture_without_device(self):
         cam_reg = get_camera_registry()
@@ -418,19 +420,20 @@ class CameraSignalOfflineRegressionTests(TransactionTestCase):
             status="online",
             is_active=True,
         )
+        phys_key = get_physical_source_key("webcam", "0")
         cam_reg = get_camera_registry()
         cw = CameraWorker(
             camera_id=self.cam.id,
             cap_source=0,
             source_type="webcam",
             user_id=self.owner.id,
-            physical_source_id="dshow://0",
+            physical_source_id=phys_key,
         )
         cw.running = True
         cw.latest_frame = np.full((240, 320, 3), 110, dtype=np.uint8)
         cw.last_valid_frame_time = time.time()
         cam_reg._workers[self.cam.id] = cw
-        cam_reg._physical_map["dshow://0"] = cw
+        cam_reg._physical_map[phys_key] = cw
 
         with patch("apps.surveillance.recording.recording_service.start_recording") as mock_start_rec, patch(
             "apps.surveillance.recording.recording_service.write_frame"
@@ -452,7 +455,7 @@ class CameraSignalOfflineRegressionTests(TransactionTestCase):
             cam_reg.remove_camera(sibling.id)
             mock_stop.assert_called_once()
         cw.running = False
-        cam_reg._physical_map.pop("dshow://0", None)
+        cam_reg._physical_map.pop(phys_key, None)
 
     def test_recording_and_http_206_playback_lifecycle(self):
         import os
