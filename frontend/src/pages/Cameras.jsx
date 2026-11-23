@@ -179,6 +179,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
 
   // Browser Webcam / Phone Camera Bridge
   const [browserBridgeActive, setBrowserBridgeActive] = useState(false);
+  const [browserError, setBrowserError] = useState('');
   const [browserDevices, setBrowserDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const browserVideoRef = useRef(null);
@@ -187,6 +188,9 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   const activeBridgeCamIdRef = useRef(null);
   const streamReloadPendingRef = useRef(false);
   const liveStreamImgRef = useRef(null);
+  const streamLoadedRef = useRef(false);
+  const streamErrorRef = useRef(false);
+  const mjpegFailCountRef = useRef(0);
 
   // Add / Edit Camera Modal & Delete Confirm
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -251,6 +255,14 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     return undefined;
   }, [refreshBrowserDevices]);
 
+  useEffect(() => {
+    streamLoadedRef.current = streamLoaded;
+  }, [streamLoaded]);
+
+  useEffect(() => {
+    streamErrorRef.current = streamError;
+  }, [streamError]);
+
   const stopBrowserBridge = useCallback(() => {
     if (browserStreamRef.current) {
       browserStreamRef.current.getTracks().forEach((trk) => {
@@ -291,6 +303,30 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   }, [fetchCameras]);
 
   const selectedCam = cameras.find((c) => c.id === Number(selectedCameraId)) || cameras[0] || null;
+
+  useEffect(() => {
+    if (!browserBridgeActive || !selectedCam?.id) return undefined;
+    const camId = selectedCam.id;
+    const handleTabUnload = () => {
+      stopBrowserBridge();
+      try {
+        const csrfMatch = document.cookie.match(/(?:^|;\s*)deepvision_django_csrftoken=([^;]+)/);
+        const csrfVal = csrfMatch ? decodeURIComponent(csrfMatch[1]) : '';
+        fetch(`/api/cameras/${camId}/disconnect/`, {
+          method: 'POST',
+          credentials: 'include',
+          keepalive: true,
+          headers: csrfVal ? { 'X-CSRFToken': csrfVal } : {},
+        }).catch(() => {});
+      } catch {}
+    };
+    window.addEventListener('pagehide', handleTabUnload);
+    window.addEventListener('beforeunload', handleTabUnload);
+    return () => {
+      window.removeEventListener('pagehide', handleTabUnload);
+      window.removeEventListener('beforeunload', handleTabUnload);
+    };
+  }, [browserBridgeActive, selectedCam?.id, stopBrowserBridge]);
 
   useEffect(() => {
     if (
@@ -376,12 +412,16 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
         if (stats.status && stats.status !== selectedCam.status) {
           setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, status: stats.status } : c)));
         }
-        if (stats.status === 'offline' && (streamLoaded || snapshotUrl)) {
+        if (stats.status === 'offline' && (streamLoadedRef.current || snapshotUrlRef.current)) {
           setStreamLoaded(false);
+          if (snapshotUrlRef.current) {
+            URL.revokeObjectURL(snapshotUrlRef.current);
+            snapshotUrlRef.current = null;
+          }
           setSnapshotUrl(null);
           setUseSnapshotFallback(false);
           setStreamError(true);
-        } else if (stats.status === 'online' && stats.live && streamError && !snapshotUrl) {
+        } else if (stats.status === 'online' && stats.live && streamErrorRef.current && !snapshotUrlRef.current) {
           setStreamError(false);
           setUseSnapshotFallback(false);
           setStreamTimestamp(Date.now());
@@ -397,12 +437,17 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       active = false;
       clearInterval(timer);
     };
-  }, [selectedCam?.id, selectedCam?.status, workspaceView, viewMode, isPlaying, browserBridgeActive, streamLoaded, snapshotUrl, streamError]);
+  }, [selectedCam?.id, selectedCam?.status, workspaceView, viewMode, isPlaying, browserBridgeActive]);
 
   // Snapshot fallback ONLY if MJPEG stream actually fails or stalls >6.5s on a genuinely live camera (never mask 503 offline!)
   useEffect(() => {
     const camId = selectedCam?.id;
-    const canStream = Boolean(camId && isPlaying && workspaceView === 'live');
+    const canStream = Boolean(
+      camId &&
+        isPlaying &&
+        workspaceView === 'live' &&
+        !(selectedCam?.source_type === 'browser' && !browserBridgeActive && selectedCam?.status !== 'online')
+    );
     if (!canStream || streamLoaded) {
       if (snapshotUrlRef.current) {
         URL.revokeObjectURL(snapshotUrlRef.current);
@@ -418,21 +463,27 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     let upgradeTimer = null;
     const abortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
 
+    const armDelayMs = browserBridgeActive ? 2500 : 6500;
     const fallbackArmTimer = (!streamLoaded && !streamError && (browserBridgeActive || selectedCam?.status === 'online'))
       ? setTimeout(() => {
           if (!cancelled) setUseSnapshotFallback(true);
-        }, 6500)
+        }, armDelayMs)
       : null;
 
     const shouldPollSnapshots = (streamError || useSnapshotFallback) && (browserBridgeActive || selectedCam?.status === 'online');
     if (shouldPollSnapshots) {
-      upgradeTimer = setInterval(() => {
-        if (!cancelled && snapshotUrlRef.current) {
-          setUseSnapshotFallback(false);
-          setStreamError(false);
-          setStreamTimestamp(Date.now());
-        }
-      }, 12000);
+      if (mjpegFailCountRef.current < 2) {
+        upgradeTimer = setInterval(() => {
+          if (!cancelled && snapshotUrlRef.current) {
+            URL.revokeObjectURL(snapshotUrlRef.current);
+            snapshotUrlRef.current = null;
+            setSnapshotUrl(null);
+            setUseSnapshotFallback(false);
+            setStreamError(false);
+            setStreamTimestamp(Date.now());
+          }
+        }, 12000);
+      }
 
       const fetchNextSnapshot = async () => {
         if (cancelled) return;
@@ -658,9 +709,16 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       setCameraAlerts([]);
       return;
     }
+    mjpegFailCountRef.current = 0;
+    setBrowserError('');
     setStreamError(false);
     setStreamLoaded(false);
     setUseSnapshotFallback(false);
+    if (snapshotUrlRef.current) {
+      URL.revokeObjectURL(snapshotUrlRef.current);
+      snapshotUrlRef.current = null;
+    }
+    setSnapshotUrl(null);
     setStreamTimestamp(Date.now());
     setMeasuredFps(0);
     setMeasuredAiFps(0);
@@ -675,6 +733,9 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     setTotalDetectionEvents(0);
     setRecentDetections([]);
     setRecentZoneEvents([]);
+    setActiveIntrusions([]);
+    setDetectorBackend('unknown');
+    setTrackerBackend('unknown');
     setDraftPoints([]);
     setEditingZone(null);
     refreshCameraZonesAndAlerts(selectedCam.id);
@@ -695,6 +756,13 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     if (nextMode === 'raw') {
       setZoneEditorOpen(false);
     }
+    mjpegFailCountRef.current = 0;
+    if (snapshotUrlRef.current) {
+      URL.revokeObjectURL(snapshotUrlRef.current);
+      snapshotUrlRef.current = null;
+    }
+    setSnapshotUrl(null);
+    setUseSnapshotFallback(false);
     setStreamLoaded(false);
     setStreamError(false);
     setStreamTimestamp(Date.now());
@@ -703,10 +771,13 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   const handleStartBrowserBridge = async (targetCam = null, overrideDeviceId = null) => {
     const camTarget = targetCam && targetCam.id ? targetCam : selectedCam;
     if (!navigator.mediaDevices?.getUserMedia) {
-      addToast('Browser camera API (getUserMedia) is not supported in this browser.', 'error');
+      const msg = 'Browser camera API (getUserMedia) is not supported in this browser.';
+      setBrowserError(msg);
+      addToast(msg, 'error');
       return;
     }
     try {
+      setBrowserError('');
       stopBrowserBridge();
       const storedBrowserDevice =
         camTarget?.source_type === 'browser' && camTarget.source && camTarget.source !== '0' && camTarget.source.length > 8
@@ -732,9 +803,22 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
         }
       }
 
+      const [videoTrack] = mediaStream.getVideoTracks();
+      if (videoTrack) {
+        videoTrack.addEventListener('ended', () => {
+          stopBrowserBridge();
+          setBrowserError('Browser camera stream ended or was disconnected.');
+          if (camTarget?.id) {
+            api.cameras.disconnect(camTarget.id).catch(() => {});
+          }
+          addToast('Browser camera stream ended.', 'warning');
+        }, { once: true });
+      }
+
       browserStreamRef.current = mediaStream;
       activeBridgeCamIdRef.current = camTarget?.id || null;
       streamReloadPendingRef.current = true;
+      mjpegFailCountRef.current = 0;
       setBrowserBridgeActive(true);
       setStreamError(false);
       setStreamLoaded(false);
@@ -748,7 +832,13 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       }, 50);
       addToast(`Connected browser camera for ${camTarget?.name || 'Camera'}`, 'success');
     } catch (err) {
-      addToast(err?.message || 'Failed to access browser camera.', 'error');
+      const msg = err?.name === 'NotAllowedError'
+        ? 'Camera permission denied by browser. Allow camera access in site permissions and retry.'
+        : err?.name === 'NotFoundError'
+        ? 'No compatible camera device found in browser.'
+        : err?.message || 'Failed to access browser camera.';
+      setBrowserError(msg);
+      addToast(msg, 'error');
     }
   };
 
@@ -801,18 +891,34 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     }
     try {
       setIsReconnecting(true);
+      setBrowserError('');
       setStreamError(false);
+      setStreamLoaded(false);
+      setUseSnapshotFallback(false);
+      mjpegFailCountRef.current = 0;
+      if (snapshotUrlRef.current) {
+        URL.revokeObjectURL(snapshotUrlRef.current);
+        snapshotUrlRef.current = null;
+      }
+      setSnapshotUrl(null);
+
       const res = await api.cameras.testCamera(target.id);
+      if (res?.success) {
+        try {
+          await api.cameras.warm(target.id, true);
+        } catch (_) {}
+      }
       const newStatus = res?.camera_status || (res?.success ? 'online' : 'offline');
       setCameras((prev) => prev.map((c) => (c.id === target.id ? { ...c, status: newStatus } : c)));
       setStreamTimestamp(Date.now());
       if (res?.success) {
-        setStreamLoaded(true);
         addToast(`Camera "${target.name}" connected (${res.width || 640}x${res.height || 480})`, 'success');
       } else {
+        setStreamError(true);
         addToast(res?.message || `Camera "${target.name}" is unreachable.`, 'warning');
       }
     } catch (err) {
+      setStreamError(true);
       addToast(err.message || `Reconnect failed for ${target.name}`, 'error');
     } finally {
       setIsReconnecting(false);
@@ -1369,7 +1475,12 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   // =========================================================================
   // RENDER: CLEAN LIVE MONITORING VIEW (TWO MODES ONLY)
   // =========================================================================
-  const streamImgSrc = selectedCam
+  const isBrowserStandby = Boolean(
+    selectedCam?.source_type === 'browser' &&
+      !browserBridgeActive &&
+      selectedCam?.status !== 'online'
+  );
+  const streamImgSrc = selectedCam && !isBrowserStandby
     ? `${api.cameras.getStreamUrl(selectedCam.id, viewMode)}&t=${streamTimestamp}`
     : '';
   const displayViewportSrc = snapshotUrl || streamImgSrc;
@@ -1606,16 +1717,18 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
               <img
                 ref={liveStreamImgRef}
                 key={`${selectedCam.id}-${viewMode}-${streamTimestamp}`}
-                src={isPlaying ? displayViewportSrc : undefined}
+                src={isPlaying && displayViewportSrc ? displayViewportSrc : undefined}
                 alt={`${selectedCam.name} ${viewMode}`}
                 onLoad={() => {
                   if (!snapshotUrl) {
+                    mjpegFailCountRef.current = 0;
                     setStreamLoaded(true);
                   }
                   setStreamError(false);
                 }}
                 onError={() => {
-                  if (!snapshotUrl) {
+                  if (!snapshotUrl && displayViewportSrc) {
+                    mjpegFailCountRef.current += 1;
                     setStreamLoaded(false);
                     setStreamError(true);
                   }
@@ -1624,7 +1737,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
                   width: '100%',
                   height: '100%',
                   objectFit: 'contain',
-                  display: 'block',
+                  display: displayViewportSrc ? 'block' : 'none',
                   backgroundColor: '#020617',
                 }}
               />
@@ -1647,7 +1760,34 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
               />
             )}
 
-            {streamError && !snapshotUrl && !browserBridgeActive && (
+            {(isBrowserStandby || (browserError && !browserBridgeActive)) && !snapshotUrl && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  backgroundColor: 'rgba(2, 6, 23, 0.88)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '12px',
+                  padding: '24px',
+                  textAlign: 'center',
+                  zIndex: 8,
+                }}
+              >
+                <p style={{ margin: 0, color: browserError ? '#FCA5A5' : '#E2E8F0', fontSize: '0.92rem', fontWeight: 600 }}>
+                  {browserError || 'Browser Webcam Ready — grant camera access to start live capture and AI tracking.'}
+                </p>
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                  <button type="button" onClick={() => handleStartBrowserBridge(selectedCam)} className="btn btn-primary btn-sm">
+                    {browserError ? 'Retry Browser Webcam' : 'Start Browser Webcam'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!isBrowserStandby && !browserError && streamError && !snapshotUrl && !browserBridgeActive && (
               <div
                 style={{
                   position: 'absolute',

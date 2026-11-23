@@ -13,6 +13,16 @@ _camera_registry_instance = None
 _registry_lock = threading.Lock()
 
 
+def _has_local_capture_hardware() -> bool:
+    import os
+    if os.name == "nt":
+        return True
+    try:
+        return any(name.startswith("video") for name in os.listdir("/dev"))
+    except OSError:
+        return os.path.exists("/dev/video0")
+
+
 class CameraRegistry:
     def __init__(self):
         self._workers = {}  # camera_id -> CameraWorker
@@ -71,6 +81,14 @@ class CameraRegistry:
                     raise RuntimeError(f"Network camera {camera_id} ({physical_key}) is unreachable (retry backoff active).")
 
             # 4. Resolve source and allocate new CameraWorker
+            if source_type in ("webcam", "usb") and not _has_local_capture_hardware():
+                if camera.status != "offline":
+                    Camera.objects.filter(id=camera_id).update(status="offline")
+                raise RuntimeError(
+                    f"No local USB/DirectShow hardware attached to this server for camera {camera_id}. "
+                    "Use Browser Webcam capture instead."
+                )
+
             cap_source = resolve_camera_capture_source(source_type, source)
             worker = CameraWorker(
                 camera_id=camera_id,
@@ -127,11 +145,28 @@ class CameraRegistry:
         """
         Returns an active worker for camera_id, or creates a passive browser-ingest CameraWorker
         if physical capture cannot be opened (e.g., cloud-hosted server receiving browser getUserMedia frames).
+        Never mutates a shared physical hardware worker into browser-pushed mode.
         """
+        old_hardware_to_stop = None
+        worker_out = None
         with self._lock:
             worker = self._workers.get(camera_id)
             if worker and worker.running:
-                return worker
+                if getattr(worker, "is_browser_pushed", False):
+                    return worker
+                # Detach this logical camera from a hardware capture worker before binding a browser worker
+                self._workers.pop(camera_id, None)
+                still_shared = any(w is worker for w in self._workers.values())
+                if still_shared:
+                    if getattr(worker, "camera_id", None) == camera_id:
+                        remaining = [cid for cid, w in self._workers.items() if w is worker]
+                        if remaining:
+                            worker.camera_id = remaining[0]
+                else:
+                    phys_key = getattr(worker, "physical_source_id", None)
+                    if phys_key and self._physical_map.get(phys_key) is worker:
+                        self._physical_map.pop(phys_key, None)
+                    old_hardware_to_stop = worker
 
             from apps.cameras.models import Camera
             camera = Camera.objects.filter(id=camera_id).first()
@@ -139,7 +174,14 @@ class CameraRegistry:
                 raise ValueError(f"Camera with ID {camera_id} not found in database.")
 
             owner_id = user_id or camera.user_id
-            return self._ensure_browser_worker_locked(camera_id, camera, owner_id, mark_online=True)
+            worker_out = self._ensure_browser_worker_locked(camera_id, camera, owner_id, mark_online=True)
+
+        if old_hardware_to_stop is not None:
+            try:
+                old_hardware_to_stop.stop()
+            except Exception:
+                pass
+        return worker_out
 
     def get_active_worker(self, camera_id: int) -> CameraWorker:
         with self._lock:
@@ -147,14 +189,14 @@ class CameraRegistry:
             if worker and worker.running:
                 return worker
             # Also check if another logical camera already opened the same non-browser physical source
+            # Read-only lookup: never mutate self._workers here, and never re-bind cameras explicitly marked offline.
             try:
                 from apps.cameras.models import Camera
-                camera = Camera.objects.filter(id=camera_id).only("id", "source_type", "source").first()
-                if camera and camera.source_type != "browser":
+                camera = Camera.objects.filter(id=camera_id).only("id", "source_type", "source", "status").first()
+                if camera and camera.source_type != "browser" and camera.status == "online":
                     physical_key = get_physical_source_key(camera.source_type, camera.source)
                     phys_worker = self._physical_map.get(physical_key)
                     if phys_worker and phys_worker.running:
-                        self._workers[camera_id] = phys_worker
                         return phys_worker
             except Exception:
                 pass
@@ -172,8 +214,11 @@ class CameraRegistry:
             worker = self._workers.pop(camera_id, None)
             if worker:
                 phys_key = getattr(worker, "physical_source_id", None)
-                still_shared = any(w is worker for w in self._workers.values())
-                if not still_shared:
+                remaining_ids = [cid for cid, w in self._workers.items() if w is worker]
+                if remaining_ids:
+                    if getattr(worker, "camera_id", None) == camera_id:
+                        worker.camera_id = remaining_ids[0]
+                else:
                     if phys_key and self._physical_map.get(phys_key) is worker:
                         self._physical_map.pop(phys_key, None)
                     worker_to_stop = worker

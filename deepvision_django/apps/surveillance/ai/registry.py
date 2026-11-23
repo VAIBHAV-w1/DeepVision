@@ -246,8 +246,13 @@ class InferenceRegistry:
             still_bound = [cid for cid, pid in self.camera_to_physical.items() if pid == phys_id]
             p_iworker = self.physical_workers.get(phys_id)
             if p_iworker is not None:
+                with p_iworker.lock:
+                    p_iworker.bound_camera_ids.discard(camera_id)
+                    if still_bound and getattr(p_iworker, "camera_id", None) == camera_id:
+                        p_iworker.camera_id = still_bound[0]
                 p_iworker.ref_count = max(0, p_iworker.ref_count - 1)
-                if not still_bound and p_iworker.ref_count <= 0:
+                if not still_bound:
+                    p_iworker.ref_count = 0
                     timer = self.cleanup_timers.pop(phys_id, None)
                     if timer is not None:
                         timer.cancel()
@@ -259,9 +264,25 @@ class InferenceRegistry:
             except Exception as e:
                 logger.warning(f"[REGISTRY_WARN] Error stopping inference worker for camera {camera_id}: {e}")
 
+    def ensure_worker(self, camera_id, camera_worker):
+        """Returns active live InferenceWorker for camera_id without stacking ref_count on repeated pushes."""
+        iw = self.get_active_worker(camera_id)
+        if iw is not None:
+            return iw
+        return self.get_worker(camera_id, camera_worker)
+
     def get_active_worker(self, camera_id):
         with self.lock:
-            return self.workers.get(camera_id)
+            iw = self.workers.get(camera_id)
+            if iw is None:
+                return None
+            if not getattr(iw, "running", False) or (iw.thread is not None and not iw.thread.is_alive()):
+                self.workers.pop(camera_id, None)
+                phys_id = self.camera_to_physical.pop(camera_id, None)
+                if phys_id and self.physical_workers.get(phys_id) is iw:
+                    self.physical_workers.pop(phys_id, None)
+                return None
+            return iw
 
 
 _inference_registry = InferenceRegistry()

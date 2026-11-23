@@ -397,11 +397,29 @@ def camera_stats_view(request, camera_id):
 @login_required
 def camera_warm_view(request, camera_id):
     """
-    Pre-warms camera workers on canonical engine.
+    Pre-warms camera workers on canonical engine and returns live status.
+    Supports capture_only=1 to warm only CameraWorker without starting AI inference.
     """
     camera = get_user_camera_or_404(request.user, camera_id)
-    success = warm_camera(camera.id, camera.user_id)
-    return JsonResponse({"status": "ok", "warmed": success})
+    capture_only = str(request.GET.get("capture_only", "") or request.POST.get("capture_only", "")).strip().lower() in ("1", "true", "yes")
+    if capture_only:
+        from apps.ai.engine import warm_camera_capture_only
+        success = warm_camera_capture_only(camera.id, camera.user_id)
+    else:
+        success = warm_camera(camera.id, camera.user_id)
+    from apps.surveillance.health.health_service import get_live_camera_status
+    live_info = get_live_camera_status(camera.id)
+    if success and live_info.get("status") == "online" and camera.status != "online":
+        from django.utils import timezone
+        camera.status = "online"
+        camera.updated_at = timezone.now()
+        camera.save(update_fields=["status", "updated_at"])
+    return JsonResponse({
+        "status": "ok",
+        "warmed": bool(success),
+        "camera_status": live_info.get("status", "offline"),
+        "live": bool(live_info.get("live", False)),
+    })
 
 
 @never_cache
@@ -615,9 +633,37 @@ def camera_ingest_frame_view(request, camera_id):
     if fw > 1920 or fh > 1080:
         return JsonResponse({"success": False, "error": f"Frame dimensions ({fw}x{fh}) exceed maximum allowed (1920x1080)."}, status=413)
 
+    seq_raw = request.GET.get("seq") or request.headers.get("X-Frame-Seq")
+    seq_out = None
+    if seq_raw is not None and str(seq_raw).strip() != "":
+        try:
+            seq_out = int(seq_raw)
+        except (ValueError, TypeError):
+            return JsonResponse({"success": False, "error": "Invalid frame sequence number."}, status=400)
+        if seq_out < 0:
+            return JsonResponse({"success": False, "error": "Frame sequence number must be non-negative."}, status=400)
+
     cam_reg = get_camera_registry()
     worker = cam_reg.get_or_create_browser_worker(camera.id, camera.user_id)
-    worker.ingest_external_frame(frame)
+    accepted = worker.ingest_external_frame(frame, seq=seq_out)
+    received_at_iso = timezone.now().isoformat()
+    if not accepted:
+        from apps.surveillance.health.health_service import get_live_camera_status
+        live_info = get_live_camera_status(camera.id, worker=worker)
+        return JsonResponse({
+            "success": True,
+            "accepted": False,
+            "stale_sequence": True,
+            "seq": seq_out,
+            "latest_seq": worker.last_ingest_seq,
+            "received_at": received_at_iso,
+            "camera_id": camera.id,
+            "frame_id": worker.frame_id,
+            "fps": worker.fps,
+            "camera_status": live_info["status"],
+            "live": live_info["live"],
+            "signal_state": live_info["signal_state"],
+        })
 
     if camera.status != "online":
         camera.status = "online"
@@ -628,9 +674,7 @@ def camera_ingest_frame_view(request, camera_id):
     inf_worker = None
     try:
         inf_reg = get_inference_registry()
-        inf_worker = inf_reg.get_active_worker(camera.id)
-        if not inf_worker or not getattr(inf_worker, "running", False):
-            inf_worker = inf_reg.get_worker(camera.id, worker)
+        inf_worker = inf_reg.ensure_worker(camera.id, worker)
     except Exception:
         pass
 
@@ -681,14 +725,11 @@ def camera_ingest_frame_view(request, camera_id):
     visible_persons_default = sum(1 for t in tracks_list if str(t.get("class_name", "")).lower() == "person")
     from apps.surveillance.health.health_service import get_live_camera_status
     live_info = get_live_camera_status(camera.id, worker=worker)
-    seq_val = request.GET.get("seq") or request.headers.get("X-Frame-Seq")
-    try:
-        seq_out = int(seq_val) if seq_val is not None else None
-    except (ValueError, TypeError):
-        seq_out = None
     return JsonResponse({
         "success": True,
+        "accepted": True,
         "seq": seq_out,
+        "received_at": received_at_iso,
         "camera_id": camera.id,
         "frame_id": worker.frame_id,
         "fps": worker.fps,

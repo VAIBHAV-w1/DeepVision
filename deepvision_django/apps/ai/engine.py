@@ -484,9 +484,9 @@ def start_camera_recording(camera_id: int, user_id: int) -> Dict[str, Any]:
                 "recording_id": active.id,
             }
 
-        # Ensure CameraWorker is active and bound to this logical camera_id so frames stream into the MP4 writer
+        # Ensure CameraWorker is active and explicitly bound to this logical camera_id so frames stream into the MP4 writer
         cam_reg = get_camera_registry()
-        worker = cam_reg.get_active_worker(camera_id)
+        worker = cam_reg.workers.get(camera_id)
         if worker is None or not worker.running:
             worker = cam_reg.get_worker(camera_id, user_id)
 
