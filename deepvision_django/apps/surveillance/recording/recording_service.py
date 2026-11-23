@@ -168,7 +168,7 @@ class AsyncRecordingWriter(threading.Thread):
         self.join(timeout=timeout)
 
 
-def start_recording(user_id, camera_id, fps=15.0, min_free_mb=None):
+def start_recording(user_id, camera_id, fps=25.0, min_free_mb=None):
     """
     Creates a new Recording record with status='recording' using Django ORM.
     Enforces minimum free disk storage threshold and spawns an asynchronous background writer.

@@ -89,6 +89,8 @@ class CameraRegistry:
                     "Use Browser Webcam capture instead."
                 )
 
+            from apps.cameras.surveillance_config import get_camera_surveillance_config, resolve_video_quality_profile
+            q_prof = resolve_video_quality_profile(get_camera_surveillance_config(camera_id).get("video_quality"))
             cap_source = resolve_camera_capture_source(source_type, source)
             worker = CameraWorker(
                 camera_id=camera_id,
@@ -96,6 +98,8 @@ class CameraRegistry:
                 source_type=source_type,
                 user_id=owner_id,
                 physical_source_id=physical_key,
+                target_width=q_prof.get("max_width", 1280),
+                target_height=q_prof.get("max_height", 720),
             )
             try:
                 worker.start()

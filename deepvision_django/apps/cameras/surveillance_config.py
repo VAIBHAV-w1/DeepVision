@@ -20,6 +20,45 @@ _CONFIG_LOCK = threading.Lock()
 _EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
 VALID_PURPOSES = frozenset({"general", "restricted_entry"})
+VALID_VIDEO_QUALITIES = frozenset({"standard", "high", "full"})
+VIDEO_QUALITY_PROFILES = {
+    "standard": {
+        "id": "standard",
+        "label": "Standard (480p)",
+        "max_width": 640,
+        "max_height": 480,
+        "stream_jpeg_quality": 78,
+        "browser_jpeg_quality": 0.78,
+        "browser_max_fps": 20,
+    },
+    "high": {
+        "id": "high",
+        "label": "High HD (720p)",
+        "max_width": 1280,
+        "max_height": 720,
+        "stream_jpeg_quality": 86,
+        "browser_jpeg_quality": 0.85,
+        "browser_max_fps": 24,
+    },
+    "full": {
+        "id": "full",
+        "label": "Full Resolution / Source Quality",
+        "max_width": 1920,
+        "max_height": 1080,
+        "stream_jpeg_quality": 92,
+        "browser_jpeg_quality": 0.91,
+        "browser_max_fps": 25,
+    },
+}
+
+
+def resolve_video_quality_profile(quality: Any) -> Dict[str, Any]:
+    q = str(quality or "high").strip().lower()
+    if q not in VIDEO_QUALITY_PROFILES:
+        q = "high"
+    return dict(VIDEO_QUALITY_PROFILES[q])
+
+
 VALID_DIRECTIONS = frozenset({
     "any",
     "enter",
@@ -108,6 +147,7 @@ def default_camera_config(has_enabled_zones: bool = False) -> Dict[str, Any]:
         "suppress_duplicates": True,
         "cooldown_seconds": 30.0,
         "debounce_frames": 2,
+        "video_quality": "high",
         "updated_at": None,
     }
 
@@ -221,6 +261,10 @@ def save_camera_surveillance_config(camera_id: int, updates: Dict[str, Any]) -> 
                 current["debounce_frames"] = max(1, min(15, int(updates["debounce_frames"])))
             except (TypeError, ValueError):
                 pass
+        if "video_quality" in updates:
+            vq = str(updates["video_quality"] or "high").strip().lower()
+            if vq in VALID_VIDEO_QUALITIES:
+                current["video_quality"] = vq
 
         current["updated_at"] = datetime.utcnow().isoformat() + "Z"
         store["cameras"][key] = current

@@ -69,7 +69,7 @@ export function Dashboard({ onNavigate }) {
     } else if (lower.includes('object') || lower.includes('bag')) {
       title = t('dashboard.objectLeft', 'Object Left (Bag)');
     } else {
-      title = t('dashboard.securityEventDetected', 'Security Event Detected');
+      title = a.title || t('dashboard.securityEventDetected', 'Security Event Detected');
     }
 
     return {

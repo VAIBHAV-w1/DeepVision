@@ -137,12 +137,31 @@ def get_effective_cpu_count() -> int:
     return host_cpus
 
 
+def resolve_default_profile() -> str:
+    """Resolves the safest fast default profile for the current hardware without hiding model identity."""
+    explicit_profile = (os.getenv("DEEPVISION_AI_PROFILE") or "").strip().lower()
+    if explicit_profile:
+        if explicit_profile in ("lightweight", "nano", "low_resource", "cpu_lite", "fast", "fast_cpu"):
+            return "lightweight"
+        return "balanced"
+    has_gpu = False
+    try:
+        import openvino as ov
+        avail = ov.Core().available_devices
+        has_gpu = any(str(d).upper().startswith("GPU") for d in avail)
+    except Exception:
+        has_gpu = False
+    if not has_gpu and get_effective_cpu_count() <= 2:
+        return "lightweight"
+    return "balanced"
+
+
 def resolve_selected_model_name(profile_override: Optional[str] = None) -> str:
     """Resolves active ONNX checkpoint filename based on explicit profile, env, or default."""
     explicit = (os.getenv("DEEPVISION_MODEL_NAME") or "").strip()
     if explicit and not profile_override:
         return explicit
-    profile = (profile_override or os.getenv("DEEPVISION_AI_PROFILE") or "balanced").strip().lower()
+    profile = (profile_override or os.getenv("DEEPVISION_AI_PROFILE") or resolve_default_profile()).strip().lower()
     if profile in ("lightweight", "nano", "low_resource", "cpu_lite", "fast", "fast_cpu"):
         return "yolo26n.onnx"
     return "yolo26s.onnx"
@@ -176,12 +195,14 @@ class _InferenceBuffers:
         self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
     def _apply_lowlight_enhancement(self, bgr_frame: np.ndarray) -> np.ndarray:
-        """Apply LAB CLAHE only on dark/low-contrast frames so normal scenes stay fast and untouched."""
-        sample = bgr_frame[::4, ::4] if (bgr_frame.shape[0] >= 32 and bgr_frame.shape[1] >= 32) else bgr_frame
+        """Apply LAB CLAHE strictly on genuinely dark frames so well-lit scenes stay fast and crisp."""
+        sample = bgr_frame[::8, ::8] if (bgr_frame.shape[0] >= 32 and bgr_frame.shape[1] >= 32) else bgr_frame
         gray = cv2.cvtColor(sample, cv2.COLOR_BGR2GRAY)
         mean_luma = float(np.mean(gray))
+        if mean_luma >= 72.0:
+            return bgr_frame
         std_luma = float(np.std(gray))
-        if mean_luma > 85.0 and std_luma > 38.0:
+        if mean_luma >= 55.0 and std_luma >= 28.0:
             return bgr_frame
         lab = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2LAB)
         l_ch, a_ch, b_ch = cv2.split(lab)
@@ -205,10 +226,9 @@ class _InferenceBuffers:
         top, left = int(round(dh - 0.1)), int(round(dw - 0.1))
 
         self.canvas.fill(114)
-        interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
         roi = self.canvas[top:top + nh, left:left + nw]
         if nw != w or nh != h:
-            cv2.resize(bgr_frame, (nw, nh), dst=roi, interpolation=interp)
+            cv2.resize(bgr_frame, (nw, nh), dst=roi, interpolation=cv2.INTER_LINEAR)
         else:
             np.copyto(roi, bgr_frame)
 
@@ -482,15 +502,26 @@ class SharedONNXEngine:
         available = list(core.available_devices)
         if device not in available and not any(d.startswith(device) for d in available):
             raise RuntimeError(f"OpenVINO device {device} not in available_devices={available}")
-        if self.cache_dir:
-            os.makedirs(self.cache_dir, exist_ok=True)
-            core.set_property({"CACHE_DIR": self.cache_dir})
+        effective_cache_dir = self.cache_dir or os.path.abspath(
+            os.path.join(os.path.dirname(self.model_path), "..", "instance", "ov_cache")
+        )
+        try:
+            os.makedirs(effective_cache_dir, exist_ok=True)
+            core.set_property({"CACHE_DIR": effective_cache_dir})
+        except Exception:
+            pass
 
         ov_model = core.read_model(self.model_path)
         pshape = ov_model.inputs[0].partial_shape
         if len(pshape) == 4 and pshape[2].is_static and pshape[3].is_static:
             self.input_size = int(pshape[2].get_length())
-        config = {"PERFORMANCE_HINT": "LATENCY"}
+        if device.startswith("GPU"):
+            config = {
+                "PERFORMANCE_HINT": "LATENCY",
+                "INFERENCE_PRECISION_HINT": "f16",
+            }
+        else:
+            config = {"PERFORMANCE_HINT": "LATENCY"}
         if device == "CPU":
             eff_cpus = get_effective_cpu_count()
             num_threads = max(1, min(4, eff_cpus))
@@ -506,11 +537,15 @@ class SharedONNXEngine:
                 fallback_cfg["INFERENCE_NUM_THREADS"] = config["INFERENCE_NUM_THREADS"]
             compiled = core.compile_model(ov_model, device, fallback_cfg)
 
-        # Probe real forward inference before declaring backend usable
+        # Probe real forward inference + warm up execution graph once before serving frames
         probe_x = np.zeros((1, 3, self.input_size, self.input_size), dtype=np.float32)
         probe_req = compiled.create_infer_request()
         probe_out = next(iter(probe_req.infer([probe_x]).values()))
         self._validate_probe_output(probe_out)
+        try:
+            probe_req.infer([probe_x])
+        except Exception:
+            pass
 
         self._ov_compiled = compiled
         self._default_buffers = _InferenceBuffers(self.input_size)

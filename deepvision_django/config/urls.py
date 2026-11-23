@@ -137,7 +137,9 @@ urlpatterns = [
 
     # Alerts & Cases REST APIs
     path('api/alerts/', api_views.api_alerts_list, name='api_alerts_list'),
+    path('api/alerts/bulk-action/', api_views.api_alerts_bulk_action, name='api_alerts_bulk_action'),
     path('api/alerts/<int:alert_id>/', api_views.api_alert_detail, name='api_alert_detail'),
+    path('api/alerts/<int:alert_id>/analyze/', api_views.api_alert_analyze, name='api_alert_analyze'),
     path('api/alerts/<int:alert_id>/incident-context/', api_views.api_alert_incident_context, name='api_alert_incident_context'),
     path('api/alerts/<int:alert_id>/evidence/', api_views.api_alert_scoped_evidence, name='api_alert_scoped_evidence'),
     path('api/alerts/<int:alert_id>/recordings/', api_views.api_alert_scoped_recordings, name='api_alert_scoped_recordings'),
@@ -151,6 +153,10 @@ urlpatterns = [
     path('api/cases/', api_views.api_cases_list, name='api_cases_list'),
     path('api/cases/<int:case_id>/', api_views.api_case_detail, name='api_case_detail'),
     path('api/cases/<int:case_id>/note/', api_views.api_case_add_note, name='api_case_add_note'),
+    path('api/soc/policies/', api_views.api_soc_policies, name='api_soc_policies'),
+    path('api/soc/policies/<int:policy_id>/', api_views.api_soc_policies, name='api_soc_policy_detail'),
+    path('api/soc/playbooks/', api_views.api_soc_playbooks, name='api_soc_playbooks'),
+    path('api/soc/playbooks/<int:playbook_id>/', api_views.api_soc_playbooks, name='api_soc_playbook_detail'),
 
     # Notifications REST APIs
     path('api/notifications/', notification_views.api_notifications_list_view, name='api_notifications'),
@@ -164,6 +170,9 @@ urlpatterns = [
 
     # Assistant, Audit Logs & Health Endpoints
     path('api/audit-logs/', api_views.api_audit_logs, name='api_audit_logs'),
+    path('api/uptime/ingest/', api_views.api_uptime_ingest, name='api_uptime_ingest'),
+    path('api/uptime/status/', api_views.api_uptime_status, name='api_uptime_status'),
+    path('api/uptime/check-now/', api_views.api_uptime_check_now, name='api_uptime_check_now'),
     path('api/assistant/chat/', core_views.assistant_chat_view, name='assistant_chat'),
     path('api/assistant/chat', core_views.assistant_chat_view, name='assistant_chat_no_slash'),
     path('health/', core_views.health_check_view, name='health'),

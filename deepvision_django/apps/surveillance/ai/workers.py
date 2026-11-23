@@ -257,7 +257,7 @@ class InferenceWorker:
         self.behavior_analyzer = BehaviorAnalyzer()
         self.motion_analyzer = IndependentMotionAnalyzer(
             method=os.getenv("DEEPVISION_MOTION_METHOD", "mog2"),
-            downscale_width=240,
+            downscale_width=160,
         )
         self.last_motion_state = {
             "motion_active": False,
@@ -395,8 +395,11 @@ class InferenceWorker:
 
                 # Latest-frame scheduling respects configured interval AND yields briefly after heavy CPU passes
                 # so WSGI HTTP request/stream threads remain responsive under constrained cloud CPU quotas.
-                base_interval = max(0.015, float(getattr(self, "inference_interval", 0.06)))
-                if latency > 180.0 and "gpu" not in str(getattr(self.tracker, "detector_backend", "")).lower():
+                base_interval = max(0.015, float(getattr(self, "inference_interval", 0.033)))
+                is_gpu_backend = "gpu" in str(getattr(self.tracker, "detector_backend", "")).lower()
+                if is_gpu_backend:
+                    effective_interval = min(base_interval, 0.033)
+                elif latency > 180.0:
                     adaptive_cooldown = min(0.08, max(0.02, (latency / 1000.0) * 0.04))
                     effective_interval = max(base_interval, (latency / 1000.0) + adaptive_cooldown)
                 else:

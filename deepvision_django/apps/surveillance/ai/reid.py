@@ -72,6 +72,9 @@ class GlobalIdentityRegistry:
         if crop is None or crop.size == 0:
             return None
         try:
+            ch, cw = crop.shape[:2]
+            if cw > 64 or ch > 128:
+                crop = cv2.resize(crop, (64, 128), interpolation=cv2.INTER_NEAREST)
             hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
             hist = cv2.calcHist([hsv], [0, 1], None, [24, 24], [0, 180, 0, 256])
             cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
@@ -103,11 +106,14 @@ class GlobalIdentityRegistry:
             if key in self.local_to_global:
                 g_id = self.local_to_global[key]
                 if g_id in self.global_persons:
-                    self.global_persons[g_id]["last_seen_time"] = timestamp
-                    self.global_persons[g_id]["last_camera_id"] = camera_id
-                    self.global_persons[g_id]["last_local_track_id"] = local_track_id
-                    if crop is not None:
-                        self.global_persons[g_id]["histogram"] = self.calculate_hsv_histogram(crop)
+                    gp = self.global_persons[g_id]
+                    gp["last_seen_time"] = timestamp
+                    gp["last_camera_id"] = camera_id
+                    gp["last_local_track_id"] = local_track_id
+                    last_hist_t = float(gp.get("last_hist_time") or 0.0)
+                    if crop is not None and (gp.get("histogram") is None or (timestamp - last_hist_t) >= 1.5):
+                        gp["histogram"] = self.calculate_hsv_histogram(crop)
+                        gp["last_hist_time"] = timestamp
                 return g_id, self.global_persons.get(g_id, {}).get("reid_status", "UNCERTAIN")
 
             # Calculate histogram of new crop

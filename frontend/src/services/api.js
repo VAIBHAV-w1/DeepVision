@@ -360,6 +360,8 @@ export const api = {
     getScopedTimeline: (id) => request(`/api/alerts/${id}/timeline/`),
     acknowledge: (id) => request(`/alerts/${id}/acknowledge/`, { method: 'POST' }),
     resolve: (id) => request(`/alerts/${id}/resolve/`, { method: 'POST' }),
+    analyze: (id) => request(`/api/alerts/${id}/analyze/`, { method: 'POST' }),
+    bulkAction: (action, alertIds) => request('/api/alerts/bulk-action/', { method: 'POST', body: { action, alert_ids: alertIds } }),
     createCase: (id, data = {}) => request(`/api/alerts/${id}/create-case/`, { method: 'POST', body: data }),
     addNote: (id, note) => request(`/api/alerts/${id}/note/`, { method: 'POST', body: { note } }),
   },
@@ -371,7 +373,20 @@ export const api = {
       return request(`/api/cases/${q ? '?' + q : ''}`);
     },
     get: (id) => request(`/api/cases/${id}/`),
+    update: (id, data) => request(`/api/cases/${id}/`, { method: 'PATCH', body: data }),
     addNote: (id, note) => request(`/api/cases/${id}/note/`, { method: 'POST', body: { note } }),
+  },
+
+  // SOC Policies & Playbooks
+  soc: {
+    getPolicies: () => request('/api/soc/policies/'),
+    createPolicy: (data) => request('/api/soc/policies/', { method: 'POST', body: data }),
+    updatePolicy: (id, data) => request(`/api/soc/policies/${id}/`, { method: 'PATCH', body: data }),
+    deletePolicy: (id) => request(`/api/soc/policies/${id}/`, { method: 'DELETE' }),
+    getPlaybooks: () => request('/api/soc/playbooks/'),
+    createPlaybook: (data) => request('/api/soc/playbooks/', { method: 'POST', body: data }),
+    updatePlaybook: (id, data) => request(`/api/soc/playbooks/${id}/`, { method: 'PATCH', body: data }),
+    deletePlaybook: (id) => request(`/api/soc/playbooks/${id}/`, { method: 'DELETE' }),
   },
 
   // Notifications
@@ -402,10 +417,14 @@ export const api = {
     chat: (message) => request('/api/assistant/chat/', { method: 'POST', body: { message } }),
   },
 
-  // System Diagnostics
+  // System Diagnostics & Admin Uptime Monitoring
   health: {
     get: () => request('/api/health/'),
     getSurveillance: () => request('/api/surveillance/health/'),
+  },
+  uptime: {
+    getStatus: () => request('/api/uptime/status/'),
+    checkNow: () => request('/api/uptime/check-now/', { method: 'POST' }),
   },
 };
 

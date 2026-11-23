@@ -592,9 +592,9 @@ def camera_ingest_frame_view(request, camera_id):
     if err_resp is not None:
         return err_resp
 
-    if _check_ingest_rate_limit(request.user.id, camera.id, max_fps=15, window_sec=1.0):
+    if _check_ingest_rate_limit(request.user.id, camera.id, max_fps=30, window_sec=1.0):
         resp = JsonResponse(
-            {"success": False, "error": "Frame ingestion rate limit exceeded (max 15 FPS per camera)."},
+            {"success": False, "error": "Frame ingestion rate limit exceeded (max 30 FPS per camera)."},
             status=429,
         )
         resp["Retry-After"] = "1"

@@ -96,6 +96,17 @@ def clear_camera_telemetry(camera_id: int) -> None:
     _stream_telemetry.pop(int(camera_id), None)
 
 
+def _resolve_stream_encode_params(camera_id: int):
+    try:
+        from apps.cameras.surveillance_config import get_camera_surveillance_config, resolve_video_quality_profile
+        cfg = get_camera_surveillance_config(camera_id)
+        q_prof = resolve_video_quality_profile(cfg.get("video_quality"))
+        q_val = max(55, min(95, int(os.getenv("DEEPVISION_STREAM_JPEG_QUALITY", str(q_prof["stream_jpeg_quality"])))))
+        return str(q_prof["id"]), [int(cv2.IMWRITE_JPEG_QUALITY), q_val]
+    except Exception:
+        return "high", _JPEG_STREAM_QUALITY
+
+
 def generate_raw_stream(camera_id: int, user_id: int) -> Generator[bytes, None, None]:
     """
     Generator for ORIGINAL CCTV raw video stream (no AI overlays).
@@ -105,6 +116,9 @@ def generate_raw_stream(camera_id: int, user_id: int) -> Generator[bytes, None, 
     last_processed_id = -1
     disp_frame_times: List[float] = []
     start_no_frame_time = time.time()
+    last_health_sync_mono = 0.0
+    last_cfg_sync_mono = 0.0
+    video_quality_id, encode_params = _resolve_stream_encode_params(camera_id)
 
     update_camera_health(camera_id, delta_stream_count=1)
 
@@ -148,7 +162,8 @@ def generate_raw_stream(camera_id: int, user_id: int) -> Generator[bytes, None, 
                 time.sleep(0.003)
                 continue
 
-            last_new_frame_mono = time.monotonic()
+            now_mono = time.monotonic()
+            last_new_frame_mono = now_mono
             has_yielded_frame = True
             last_processed_id = current_id
 
@@ -161,12 +176,19 @@ def generate_raw_stream(camera_id: int, user_id: int) -> Generator[bytes, None, 
                 elapsed = disp_frame_times[-1] - disp_frame_times[0]
                 if elapsed > 0:
                     display_fps = round((len(disp_frame_times) - 1) / elapsed, 1)
-            update_camera_health(camera_id, status="online", fps=display_fps if display_fps > 0 else None)
 
-            cap_handoff_ms = max(0.0, (time.monotonic() - cap_mono) * 1000.0) if cap_mono > 0 else 0.0
+            fh, fw = frame.shape[:2]
+            if (now_mono - last_health_sync_mono) >= 0.25:
+                last_health_sync_mono = now_mono
+                update_camera_health(camera_id, status="online", fps=display_fps if display_fps > 0 else None, width=fw, height=fh)
+            if (now_mono - last_cfg_sync_mono) >= 2.5:
+                last_cfg_sync_mono = now_mono
+                video_quality_id, encode_params = _resolve_stream_encode_params(camera_id)
+
+            cap_handoff_ms = max(0.0, (now_mono - cap_mono) * 1000.0) if cap_mono > 0 else 0.0
             acq_ms = float(getattr(worker, "last_acquisition_ms", 0.0) or 0.0)
             t_enc0 = time.monotonic()
-            ret, buffer = cv2.imencode(".jpg", frame, _JPEG_STREAM_QUALITY)
+            ret, buffer = cv2.imencode(".jpg", frame, encode_params)
             encode_ms = (time.monotonic() - t_enc0) * 1000.0
             if not ret:
                 continue
@@ -218,6 +240,10 @@ def render_annotated_frame(
 
     out = frame.copy()
     fh, fw = out.shape[:2]
+    res_scale = max(0.75, min(1.6, fw / 1280.0))
+    box_thick = max(2, int(round(2.0 * res_scale)))
+    font_sm = round(0.50 * res_scale, 2)
+    font_zone = round(0.56 * res_scale, 2)
     now_mono = time.monotonic()
 
     cached_tracks = []
@@ -310,20 +336,27 @@ def render_annotated_frame(
         if is_intruded:
             z_color = (0, 0, 235)
             if np is not None and len(poly_pts) >= 3:
-                overlay = out.copy()
-                pts_arr = np.array(poly_pts, dtype=np.int32).reshape((-1, 1, 2))
-                cv2.fillPoly(overlay, [pts_arr], (0, 0, 180))
-                cv2.addWeighted(out, 0.78, overlay, 0.22, 0, out)
-                cv2.polylines(out, [pts_arr], True, z_color, 3)
+                pts_arr = np.array(poly_pts, dtype=np.int32)
+                rx0 = max(0, int(np.min(pts_arr[:, 0])))
+                ry0 = max(0, int(np.min(pts_arr[:, 1])))
+                rx1 = min(fw, int(np.max(pts_arr[:, 0])) + 1)
+                ry1 = min(fh, int(np.max(pts_arr[:, 1])) + 1)
+                if rx1 > rx0 and ry1 > ry0:
+                    roi_dst = out[ry0:ry1, rx0:rx1]
+                    roi_ovr = roi_dst.copy()
+                    pts_local = (pts_arr - np.array([rx0, ry0], dtype=np.int32)).reshape((-1, 1, 2))
+                    cv2.fillPoly(roi_ovr, [pts_local], (0, 0, 180))
+                    cv2.addWeighted(roi_dst, 0.78, roi_ovr, 0.22, 0, roi_dst)
+                cv2.polylines(out, [pts_arr.reshape((-1, 1, 2))], True, z_color, max(2, box_thick + 1))
             zlabel = f"[!] RESTRICTED ENTRY: {zname.upper()}"
-            cv2.putText(out, zlabel, (max(8, lx + 8), max(24, ly + 22)), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 0, 255), 2)
+            cv2.putText(out, zlabel, (max(8, lx + 8), max(24, ly + 22)), cv2.FONT_HERSHEY_SIMPLEX, font_zone, (0, 0, 255), box_thick)
         else:
             z_color = (0, 165, 255)
             if np is not None and len(poly_pts) >= 3:
                 pts_arr = np.array(poly_pts, dtype=np.int32).reshape((-1, 1, 2))
-                cv2.polylines(out, [pts_arr], True, z_color, 2)
+                cv2.polylines(out, [pts_arr], True, z_color, box_thick)
             zlabel = f"ZONE: {zname}"
-            cv2.putText(out, zlabel, (max(8, lx + 8), max(20, ly + 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.52, z_color, 2)
+            cv2.putText(out, zlabel, (max(8, lx + 8), max(20, ly + 20)), cv2.FONT_HERSHEY_SIMPLEX, font_sm, z_color, box_thick)
 
     ui_tracks = []
     if not hide_boxes:
@@ -342,9 +375,9 @@ def render_annotated_frame(
                 box_color = (0, 200, 100) if not is_stale_detection else (0, 180, 180)
                 short_gid = "-".join(str(gid).split("-")[:2]) if gid else ""
                 label = f"person #{tid} {tconf:.2f} ({short_gid})" if short_gid else f"person #{tid} {tconf:.2f}"
-            cv2.rectangle(out, (tx1, ty1), (tx2, ty2), box_color, 2)
-            cv2.circle(out, (int(round(rpx)), int(round(rpy))), 4, box_color, -1)
-            cv2.putText(out, label, (tx1, max(18, ty1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 2)
+            cv2.rectangle(out, (tx1, ty1), (tx2, ty2), box_color, box_thick)
+            cv2.circle(out, (int(round(rpx)), int(round(rpy))), max(3, box_thick + 2), box_color, -1)
+            cv2.putText(out, label, (tx1, max(18, ty1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, font_sm, box_color, box_thick)
 
         # 3. Items (Orange)
         for item in (active_items or []):
@@ -385,6 +418,10 @@ def render_annotated_frame(
         "anomalies": cached_anomalies,
         "zones": cached_zones,
         "active_intrusions": list(active_intrusions),
+        "frame_width": int(fw),
+        "frame_height": int(fh),
+        "resolution": f"{int(fw)}x{int(fh)}",
+        "fourcc": getattr(worker, "fourcc", "") if worker is not None else "",
         "currently_visible_persons": summary.get("currently_visible_persons", len(active_persons)),
         "active_tracks": summary.get("active_tracks", len(ui_tracks)),
         "unique_persons_observed": summary.get("unique_persons_observed", len(active_persons)),
@@ -445,6 +482,9 @@ def generate_tracking_stream(camera_id: int, user_id: int) -> Generator[bytes, N
     last_processed_id = -1
     disp_frame_times: List[float] = []
     start_no_frame_time = time.time()
+    last_health_sync_mono = 0.0
+    last_cfg_sync_mono = 0.0
+    video_quality_id, encode_params = _resolve_stream_encode_params(camera_id)
 
     update_camera_health(camera_id, delta_stream_count=1)
 
@@ -545,16 +585,25 @@ def generate_tracking_stream(camera_id: int, user_id: int) -> Generator[bytes, N
             raw_counts = telemetry.pop("_raw_counts", {})
             ai_fps = raw_counts.get("ai_fps", 0.0)
             latency_ms = raw_counts.get("latency_ms", 0.0)
-            update_camera_health(
-                camera_id,
-                status="online",
-                fps=display_fps if display_fps > 0 else None,
-                ai_fps=ai_fps,
-                inference_latency_ms=latency_ms,
-            )
+            now_mono = time.monotonic()
+            fh_cur, fw_cur = annotated_frame.shape[:2]
+            if (now_mono - last_health_sync_mono) >= 0.25:
+                last_health_sync_mono = now_mono
+                update_camera_health(
+                    camera_id,
+                    status="online",
+                    fps=display_fps if display_fps > 0 else None,
+                    ai_fps=ai_fps,
+                    inference_latency_ms=latency_ms,
+                    width=fw_cur,
+                    height=fh_cur,
+                )
+            if (now_mono - last_cfg_sync_mono) >= 2.5:
+                last_cfg_sync_mono = now_mono
+                video_quality_id, encode_params = _resolve_stream_encode_params(camera_id)
 
             t_enc0 = time.monotonic()
-            ret, buffer = cv2.imencode(".jpg", annotated_frame, _JPEG_STREAM_QUALITY)
+            ret, buffer = cv2.imencode(".jpg", annotated_frame, encode_params)
             encode_ms = (time.monotonic() - t_enc0) * 1000.0
             if not ret:
                 continue
