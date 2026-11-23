@@ -208,6 +208,68 @@ def analyze_incident(
     correlated = find_correlated_alerts(alert)
     sla_policy = match_sla_policy(alert)
 
+    # Gather verifiable CLIP scene-understanding context for this camera/window (strictly separated from YOLO)
+    clip_scene: Dict[str, Any] = {
+        "available": False,
+        "analyzed": False,
+        "status": "unavailable",
+        "score_semantics": "Raw CLIP cosine similarity [-1.0, 1.0]; not a calibrated probability.",
+    }
+    try:
+        from datetime import datetime as _dt
+        from apps.surveillance.ai.clip_service import get_clip_analyzer, get_clip_scheduler, list_scene_events
+        analyzer = get_clip_analyzer()
+        clip_st = analyzer.get_status()
+        clip_scene = {
+            "available": bool(clip_st.get("available")),
+            "analyzed": False,
+            "status": clip_st.get("status", "disabled_by_config"),
+            "model_name": clip_st.get("model_name"),
+            "device": clip_st.get("device"),
+            "score_semantics": "Raw CLIP cosine similarity [-1.0, 1.0]; not a calibrated probability.",
+        }
+        cam_events = list_scene_events(user_id=alert.user_id, camera_id=alert.camera_id, limit=10)
+        best_ev = None
+        if alert.detected_at and cam_events:
+            best_diff = 999999.0
+            for ev in cam_events:
+                try:
+                    ev_dt = _dt.fromisoformat(str(ev.get("timestamp") or "").replace("Z", "+00:00"))
+                    diff_s = abs((alert.detected_at - ev_dt).total_seconds())
+                    if diff_s <= 180.0 and diff_s < best_diff:
+                        best_diff = diff_s
+                        best_ev = ev
+                except Exception:
+                    continue
+        if best_ev is None and alert.camera_id:
+            live_sc = get_clip_scheduler().get_camera_scene(alert.camera_id)
+            if live_sc and live_sc.get("analyzed"):
+                best_ev = live_sc
+        if best_ev is not None:
+            raw_desc = best_ev.get("matched_description") or best_ev.get("top_description") or ""
+            clean_desc, desc_inj = sanitize_untrusted_text(raw_desc, max_len=160)
+            if desc_inj:
+                injection_fields.append("clip_scene_description")
+            cos_sim = best_ev.get("cosine_similarity")
+            if cos_sim is None:
+                cos_sim = best_ev.get("top_cosine_similarity")
+            rel_score = best_ev.get("relative_candidate_score")
+            if rel_score is None:
+                rel_score = best_ev.get("top_relative_candidate_score")
+            clip_scene.update({
+                "available": True,
+                "analyzed": True,
+                "status": "analyzed",
+                "matched_description": clean_desc,
+                "cosine_similarity": round(float(cos_sim), 4) if cos_sim is not None else None,
+                "relative_candidate_score": round(float(rel_score), 4) if rel_score is not None else None,
+                "model_name": best_ev.get("model_name") or clip_st.get("model_name"),
+                "device": best_ev.get("device") or clip_st.get("device"),
+                "timestamp": best_ev.get("timestamp") or best_ev.get("analyzed_at") or "",
+            })
+    except Exception:
+        pass
+
     has_video = any(e.get("evidence_type") == "video" and e.get("file_available") for e in ev_list)
     has_snap = any(e.get("evidence_type") == "snapshot" and e.get("file_available") for e in ev_list)
     has_rec = bool(recording_data and recording_data.get("file_available"))
@@ -224,6 +286,13 @@ def analyze_incident(
             "kind": "detection",
             "label": f"YOLO26 + BoT-SORT detection ({int(round(conf * 100))}% conf)",
             "timestamp": alert.detected_at.isoformat(),
+            "available": True,
+        })
+    if clip_scene.get("analyzed") and clip_scene.get("matched_description"):
+        supporting_evidence.append({
+            "kind": "clip_scene",
+            "label": f"CLIP scene match '{clip_scene['matched_description']}' (cos={clip_scene.get('cosine_similarity')})",
+            "timestamp": clip_scene.get("timestamp") or (alert.detected_at.isoformat() if alert.detected_at else ""),
             "available": True,
         })
     for ev in ev_list[:4]:
@@ -321,6 +390,7 @@ def analyze_incident(
         "sla_policy": sla_policy,
         "recommended_next_steps": next_steps,
         "supervised_only": True,
+        "clip_scene_analysis": clip_scene,
         "security_sanitization": {
             "untrusted_fields_sanitized": True,
             "prompt_injection_detected": bool(injection_fields),

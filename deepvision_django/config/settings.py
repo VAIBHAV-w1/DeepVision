@@ -322,6 +322,16 @@ YOLO_CONFIDENCE_THRESHOLD = float(os.environ.get('YOLO_CONFIDENCE_THRESHOLD', '0
 YOLO_INFERENCE_INTERVAL_MS = int(os.environ.get('YOLO_INFERENCE_INTERVAL_MS', '60'))
 YOLO_IMAGE_SIZE = int(os.environ.get('YOLO_IMAGE_SIZE', '640'))
 
+# Optional CLIP Scene Understanding Configuration (disabled by default on Render/Vercel)
+DEEPVISION_CLIP_ENABLED = os.environ.get(
+    'DEEPVISION_CLIP_ENABLED',
+    'False' if (os.getenv('RENDER') or os.getenv('VERCEL')) else '',
+)
+DEEPVISION_CLIP_BACKEND = os.environ.get('DEEPVISION_CLIP_BACKEND', 'auto')
+DEEPVISION_CLIP_MODEL = os.environ.get('DEEPVISION_CLIP_MODEL', 'openai/clip-vit-base-patch32')
+DEEPVISION_CLIP_INTERVAL_SEC = float(os.environ.get('DEEPVISION_CLIP_INTERVAL_SEC', '5.0') or 5.0)
+DEEPVISION_CLIP_COSINE_THRESHOLD = float(os.environ.get('DEEPVISION_CLIP_COSINE_THRESHOLD', '0.24') or 0.24)
+
 # Logging Configuration
 LOGGING = {
     'version': 1,

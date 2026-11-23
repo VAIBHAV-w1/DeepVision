@@ -1769,6 +1769,123 @@ def api_camera_rules(request, camera_id):
     return api_detection_settings(request)
 
 
+@never_cache
+@login_required
+@handle_db_errors
+def api_clip_settings(request):
+    """
+    Returns or updates configurable CLIP scene-understanding settings
+    (enabled, backend, model_name, interval, cosine_threshold, scene_descriptions).
+    """
+    from apps.surveillance.ai.clip_service import get_clip_analyzer
+
+    analyzer = get_clip_analyzer()
+    if request.method == "POST":
+        if getattr(request.user, "role", "") == "viewer" and not getattr(request.user, "is_superuser", False):
+            return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
+        is_staff = getattr(request.user, "role", "") in ("admin", "supervisor", "operator") or getattr(request.user, "is_superuser", False)
+        if not is_staff:
+            return JsonResponse({"success": False, "error": "Administrator or staff privileges required to modify CLIP configuration."}, status=403)
+
+        data = _parse_body(request)
+        try:
+            updated = analyzer.update_config(data)
+        except (ValueError, TypeError) as exc:
+            return JsonResponse({"success": False, "error": f"Invalid CLIP configuration: {exc}"}, status=400)
+
+        log_audit(
+            request,
+            action="CLIP_SETTINGS_UPDATED",
+            resource_type="clip_settings",
+            description=(
+                f"Updated CLIP enabled={updated.get('enabled')}, model={updated.get('model_name')}, "
+                f"interval={updated.get('analysis_interval_seconds')}s, cos_thr={updated.get('cosine_threshold')}."
+            ),
+        )
+        return JsonResponse({
+            "success": True,
+            "message": "CLIP scene understanding configuration saved.",
+            "config": updated,
+            "status": analyzer.get_status(),
+        })
+
+    return JsonResponse({
+        "success": True,
+        "config": analyzer.get_config(),
+        "status": analyzer.get_status(),
+    })
+
+
+@never_cache
+@login_required
+@handle_db_errors
+def api_camera_scene_status(request, camera_id):
+    """
+    GET: Returns latest CLIP scene understanding snapshot + recent scene events for this camera.
+    POST: Triggers a bounded on-demand CLIP analysis on the latest live worker frame (non-viewer).
+    """
+    from apps.surveillance.ai.clip_service import get_clip_analyzer, get_clip_scheduler, list_scene_events
+    from apps.surveillance.camera.registry import get_camera_registry
+
+    camera = get_user_camera_or_404(request.user, camera_id)
+    analyzer = get_clip_analyzer()
+    scheduler = get_clip_scheduler()
+
+    if request.method == "POST":
+        if getattr(request.user, "role", "") == "viewer" and not getattr(request.user, "is_superuser", False):
+            return JsonResponse({"success": False, "error": "Viewer accounts have read-only access."}, status=403)
+        worker = get_camera_registry().get_active_worker(camera.id)
+        if worker is None or worker.latest_frame is None:
+            return JsonResponse({
+                "success": False,
+                "error": "No live camera frame available right now for CLIP scene inspection.",
+                "clip_status": analyzer.get_status(),
+            }, status=409)
+        with worker.lock:
+            frame_copy = worker.latest_frame.copy()
+        res = analyzer.analyze_bgr_frame(frame_copy)
+        res["camera_id"] = camera.id
+        if res.get("analyzed"):
+            scheduler._latest_by_camera[camera.id] = res
+        return JsonResponse({
+            "success": bool(res.get("analyzed")),
+            "camera_id": camera.id,
+            "scene": res,
+            "clip_status": analyzer.get_status(),
+        }, status=200 if res.get("analyzed") else 503 if res.get("status") in ("unavailable", "disabled_by_config") else 422)
+
+    live_scene = scheduler.get_camera_scene(camera.id)
+    events = list_scene_events(user_id=request.user.id, camera_id=camera.id, limit=15)
+    return JsonResponse({
+        "success": True,
+        "camera_id": camera.id,
+        "scene": live_scene,
+        "events": events,
+        "clip_status": analyzer.get_status(),
+    })
+
+
+@never_cache
+@require_GET
+@login_required
+@handle_db_errors
+def api_clip_events(request):
+    """Returns strictly user-scoped recent CLIP scene-analysis events and runtime status."""
+    from apps.surveillance.ai.clip_service import get_clip_analyzer, list_scene_events
+
+    raw_cam = request.GET.get("camera_id", "").strip()
+    cam_id = int(raw_cam) if raw_cam.isdigit() else None
+    if cam_id is not None:
+        get_user_camera_or_404(request.user, cam_id)
+    limit = _parse_bounded_int(request.GET.get("limit"), 25, 1, 100)
+    analyzer = get_clip_analyzer()
+    return JsonResponse({
+        "success": True,
+        "status": analyzer.get_status(),
+        "events": list_scene_events(user_id=request.user.id, camera_id=cam_id, limit=limit),
+    })
+
+
 
 # =========================================================================
 # RECORDINGS APIS
