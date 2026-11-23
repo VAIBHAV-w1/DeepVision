@@ -762,6 +762,7 @@ def camera_ingest_frame_view(request, camera_id):
         "camera_status": live_info["status"],
         "live": live_info["live"],
         "signal_state": live_info["signal_state"],
+        "clip_scene": summary.get("clip_scene") if isinstance(summary, dict) else None,
     })
 
 
@@ -793,8 +794,10 @@ def camera_disconnect_view(request, camera_id):
         from apps.surveillance.ai.registry import get_inference_registry
         from apps.surveillance.ai.reid import registry as reid_registry
         from apps.surveillance.streaming.stream_service import clear_camera_telemetry
+        from apps.surveillance.ai.clip_service import get_clip_scheduler
         get_inference_registry().remove_worker(camera.id)
         reid_registry.clear_camera(camera.id)
+        get_clip_scheduler().clear_camera(camera.id)
         clear_camera_telemetry(camera.id)
     except Exception:
         pass

@@ -120,7 +120,10 @@ urlpatterns = [
     path('api/cameras/<int:camera_id>/zones/<int:zone_id>/delete/', api_views.api_camera_zone_delete, name='api_camera_zone_delete'),
     path('api/cameras/<int:camera_id>/zones/<int:zone_id>/toggle/', api_views.api_camera_zone_toggle, name='api_camera_zone_toggle'),
     path('api/cameras/<int:camera_id>/rules/', api_views.api_camera_rules, name='api_camera_rules'),
+    path('api/cameras/<int:camera_id>/scene/', api_views.api_camera_scene_status, name='api_camera_scene_status'),
     path('api/settings/detection/', api_views.api_detection_settings, name='api_detection_settings'),
+    path('api/settings/clip/', api_views.api_clip_settings, name='api_clip_settings'),
+    path('api/surveillance/clip/events/', api_views.api_clip_events, name='api_clip_events'),
 
     # Recordings REST APIs & HTTP 206 Partial Playback
     path('api/recordings/', api_views.api_recordings_list, name='api_recordings_list'),

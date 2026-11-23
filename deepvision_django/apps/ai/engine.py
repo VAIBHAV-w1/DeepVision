@@ -88,6 +88,12 @@ def get_engine_status() -> Dict[str, Any]:
         if hasattr(shared_m, "model_name")
         else "models/yolo11n.pt (native singleton)"
     )
+    clip_status = {}
+    try:
+        from apps.surveillance.ai.clip_service import get_clip_analyzer
+        clip_status = get_clip_analyzer().get_status()
+    except Exception:
+        clip_status = {"status": "unavailable", "enabled": False}
 
     return {
         "engine_url": "in-process (native Django)",
@@ -95,6 +101,7 @@ def get_engine_status() -> Dict[str, Any]:
         "mode": "native_django_surveillance",
         "yolo_model": model_desc,
         "tracker": "BoT-SORT+ReID (native pure-NumPy singleton)",
+        "clip_scene": clip_status,
         "camera_registry": f"native (active_cameras={len(cam_reg.workers)}, hardware_handles={unique_cam_workers}, active_inference={active_inference})",
         "django_yolo_loads": get_model_load_count(),
         "django_camera_handles": unique_cam_workers,
@@ -434,7 +441,26 @@ def get_camera_stats(camera_id: int, user_id: int) -> Dict[str, Any]:
         "signal_state": live_info["signal_state"],
         "worker_running": live_info["worker_running"],
         "is_recording": is_rec,
+        "clip_scene": summary.get("clip_scene") or _safe_camera_clip_scene(camera_id),
     }
+
+
+def _safe_camera_clip_scene(camera_id: int) -> Dict[str, Any]:
+    try:
+        from apps.surveillance.ai.clip_service import get_clip_scheduler, get_clip_analyzer
+        cached = get_clip_scheduler().get_camera_scene(camera_id)
+        if cached:
+            return cached
+        st = get_clip_analyzer().get_status()
+        return {
+            "available": st.get("available", False),
+            "analyzed": False,
+            "status": st.get("status", "disabled_by_config"),
+            "model_name": st.get("model_name"),
+            "device": st.get("device"),
+        }
+    except Exception:
+        return {"available": False, "analyzed": False, "status": "unavailable"}
 
 
 def warm_camera_capture_only(camera_id: int, user_id: int) -> bool:

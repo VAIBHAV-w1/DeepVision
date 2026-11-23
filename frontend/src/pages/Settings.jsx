@@ -81,6 +81,14 @@ export function Settings({ onNavigate }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [uptimeData, setUptimeData] = useState(null);
   const [probingUptime, setProbingUptime] = useState(false);
+  const [clipConfig, setClipConfig] = useState({
+    enabled: false,
+    analysis_interval_seconds: 5.0,
+    cosine_threshold: 0.24,
+    model_name: "openai/clip-vit-base-patch32",
+    promptsText: "",
+  });
+  const [clipStatus, setClipStatus] = useState(null);
   const isStaffUser = ['admin', 'supervisor', 'operator'].includes(String(user?.role || '').toLowerCase()) || Boolean(user?.is_superuser);
   const isAdminUser = String(user?.role || '').toLowerCase() === 'admin' || Boolean(user?.is_superuser);
 
@@ -189,9 +197,32 @@ export function Settings({ onNavigate }) {
       }
     };
 
+    const loadClipSettings = async () => {
+      try {
+        const res = await api.settings.getClip();
+        if (!mounted || !res) return;
+        if (res.status) setClipStatus(res.status);
+        if (res.config) {
+          const prompts = Array.isArray(res.config.scene_descriptions)
+            ? res.config.scene_descriptions.map((d) => d.prompt).filter(Boolean).join("\n")
+            : "";
+          setClipConfig({
+            enabled: Boolean(res.config.enabled),
+            analysis_interval_seconds: Number(res.config.analysis_interval_seconds || 5.0),
+            cosine_threshold: Number(res.config.cosine_threshold || 0.24),
+            model_name: String(res.config.model_name || "openai/clip-vit-base-patch32"),
+            promptsText: prompts,
+          });
+        }
+      } catch {
+        // non-blocking
+      }
+    };
+
     loadBackendSettings();
     loadNotificationSettings();
     loadEngineHealth();
+    loadClipSettings();
     return () => {
       mounted = false;
     };
@@ -236,14 +267,32 @@ export function Settings({ onNavigate }) {
     );
 
     try {
-      await Promise.all([
+      const saveTasks = [
         api.settings.saveDetection({
           confidence_threshold: confThreshold,
           ai_profile: aiProfile,
           rules: anomalyRules,
         }),
         api.notifications.savePreferences(emailPrefs),
-      ]);
+      ];
+      if (isStaffUser && clipConfig.promptsText !== undefined) {
+        const parsedPrompts = clipConfig.promptsText
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        saveTasks.push(
+          api.settings.saveClip({
+            enabled: clipConfig.enabled,
+            analysis_interval_seconds: clipConfig.analysis_interval_seconds,
+            cosine_threshold: clipConfig.cosine_threshold,
+            model_name: clipConfig.model_name,
+            ...(parsedPrompts.length > 0 ? { scene_descriptions: parsedPrompts } : {}),
+          }).then((res) => {
+            if (res?.status) setClipStatus(res.status);
+          })
+        );
+      }
+      await Promise.all(saveTasks);
       addToast(
         t(
           "settings.savedSuccess",
@@ -992,6 +1041,82 @@ export function Settings({ onNavigate }) {
                 <span>{rule.label}</span>
               </label>
             ))}
+          </div>
+
+          {/* Configurable CLIP Scene Understanding Controls */}
+          <div style={{ borderTop: "1px solid var(--border-color, #1A2436)", paddingTop: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--text-main, #F8FAFC)" }}>
+                CLIP Scene Understanding ({clipConfig.model_name})
+              </span>
+              <span style={{ fontSize: "0.7rem", fontFamily: "var(--font-mono)", color: clipStatus?.available ? "#10B981" : "var(--text-muted, #94A3B8)" }}>
+                {clipStatus ? `${String(clipStatus.status || "standby").replace(/_/g, " ")} · ${clipStatus.device || "cpu"}` : "checking"}
+              </span>
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: isStaffUser ? "pointer" : "not-allowed", fontSize: "0.8rem", color: "var(--text-secondary, #94A3B8)" }}>
+              <input
+                id="toggle-clip-enabled"
+                type="checkbox"
+                disabled={!isStaffUser}
+                checked={Boolean(clipConfig.enabled)}
+                onChange={(e) => setClipConfig((c) => ({ ...c, enabled: e.target.checked }))}
+                style={{ accentColor: "var(--dv-cyan-500, #00E5FF)" }}
+              />
+              <span>Enable background CLIP scene understanding</span>
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "0.72rem", color: "var(--text-muted, #94A3B8)", marginBottom: "2px" }}>
+                  Interval (sec): {clipConfig.analysis_interval_seconds}s
+                </label>
+                <input
+                  type="range"
+                  min="2"
+                  max="30"
+                  step="1"
+                  disabled={!isStaffUser}
+                  value={clipConfig.analysis_interval_seconds}
+                  onChange={(e) => setClipConfig((c) => ({ ...c, analysis_interval_seconds: parseFloat(e.target.value) }))}
+                  style={{ width: "100%", accentColor: "var(--dv-cyan-500, #00E5FF)" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "0.72rem", color: "var(--text-muted, #94A3B8)", marginBottom: "2px" }}>
+                  Cosine Threshold: {clipConfig.cosine_threshold}
+                </label>
+                <input
+                  type="range"
+                  min="0.15"
+                  max="0.45"
+                  step="0.01"
+                  disabled={!isStaffUser}
+                  value={clipConfig.cosine_threshold}
+                  onChange={(e) => setClipConfig((c) => ({ ...c, cosine_threshold: parseFloat(e.target.value) }))}
+                  style={{ width: "100%", accentColor: "var(--dv-cyan-500, #00E5FF)" }}
+                />
+              </div>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "0.72rem", color: "var(--text-muted, #94A3B8)", marginBottom: "4px" }}>
+                Scene Descriptions (one candidate prompt per line)
+              </label>
+              <textarea
+                rows={4}
+                disabled={!isStaffUser}
+                value={clipConfig.promptsText}
+                onChange={(e) => setClipConfig((c) => ({ ...c, promptsText: e.target.value }))}
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  borderRadius: "4px",
+                  background: "var(--bg-canvas, #101826)",
+                  border: "1px solid var(--border-color, #24324A)",
+                  color: "var(--text-main, #F8FAFC)",
+                  fontSize: "0.75rem",
+                  resize: "vertical",
+                }}
+              />
+            </div>
           </div>
         </div>
 

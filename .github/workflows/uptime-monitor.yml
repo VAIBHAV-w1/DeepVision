@@ -19,7 +19,7 @@ jobs:
       - name: Check Owned Production Endpoints with Bounded Backoff
         id: probe
         env:
-          UPTIME_INGEST_URL: ${{ secrets.UPTIME_INGEST_URL }}
+          UPTIME_INGEST_URL: ${{ vars.UPTIME_INGEST_URL || secrets.UPTIME_INGEST_URL || 'https://deepvision-6ie7.onrender.com/api/uptime/ingest/' }}
           UPTIME_INGEST_SECRET: ${{ secrets.UPTIME_INGEST_SECRET }}
         run: |
           python3 - <<'PY'
@@ -125,7 +125,9 @@ jobs:
 
           ingest_url = (os.getenv("UPTIME_INGEST_URL") or "").strip()
           ingest_secret = (os.getenv("UPTIME_INGEST_SECRET") or "").strip()
-          if ingest_url and ingest_secret:
+          if not ingest_secret:
+              print("WARNING: UPTIME_INGEST_SECRET is not configured in GitHub Actions secrets; signed uptime ingestion skipped.")
+          elif ingest_url:
               if not ingest_url.startswith("https://"):
                   print("Refusing non-HTTPS UPTIME_INGEST_URL")
                   sys.exit(1)
@@ -148,9 +150,15 @@ jobs:
               )
               try:
                   with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
-                      print("Uptime ingest status:", resp.status)
+                      body_text = resp.read(2048).decode("utf-8", errors="replace")
+                      print("Uptime ingest status:", resp.status, body_text)
+              except urllib.error.HTTPError as he:
+                  err_body = he.read(2048).decode("utf-8", errors="replace")
+                  print(f"Uptime ingest HTTP failure {he.code}: {err_body}")
+                  sys.exit(1)
               except Exception as err:
-                  print("Uptime ingest delivery warning:", err)
+                  print("Uptime ingest delivery failure:", err)
+                  sys.exit(1)
 
           if any_down:
               sys.exit(1)

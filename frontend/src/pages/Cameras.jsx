@@ -166,6 +166,8 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   const [activeIntrusions, setActiveIntrusions] = useState([]);
   const [detectorBackend, setDetectorBackend] = useState('unknown');
   const [trackerBackend, setTrackerBackend] = useState('unknown');
+  const [clipScene, setClipScene] = useState(null);
+  const [analyzingScene, setAnalyzingScene] = useState(false);
   const [streamError, setStreamError] = useState(false);
   const [streamLoaded, setStreamLoaded] = useState(false);
   const [useSnapshotFallback, setUseSnapshotFallback] = useState(false);
@@ -418,6 +420,9 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
         if (typeof stats.tracker_backend === 'string' && stats.tracker_backend) {
           setTrackerBackend(stats.tracker_backend);
         }
+        if (stats.clip_scene && typeof stats.clip_scene === 'object') {
+          setClipScene(stats.clip_scene);
+        }
         if (typeof stats.is_recording === 'boolean') {
           setIsRecording(stats.is_recording);
         }
@@ -624,6 +629,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
             if (Array.isArray(res.recent_zone_events)) setRecentZoneEvents(res.recent_zone_events);
             if (typeof res.detector_backend === 'string' && res.detector_backend) setDetectorBackend(res.detector_backend);
             if (typeof res.tracker_backend === 'string' && res.tracker_backend) setTrackerBackend(res.tracker_backend);
+            if (res.clip_scene && typeof res.clip_scene === 'object') setClipScene(res.clip_scene);
           }
         } catch {
           // Ignore single frame drop
@@ -751,6 +757,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     setActiveIntrusions([]);
     setDetectorBackend('unknown');
     setTrackerBackend('unknown');
+    setClipScene(null);
     setDraftPoints([]);
     setEditingZone(null);
     refreshCameraZonesAndAlerts(selectedCam.id);
@@ -2204,6 +2211,68 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
               </div>
 
               {/* Active Tracked Objects */}
+              <div
+                style={{
+                  padding: '14px',
+                  backgroundColor: 'var(--bg-surface, #0F172A)',
+                  border: '1px solid var(--border-color, #1E293B)',
+                  borderRadius: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                  <h4 style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-main, #F8FAFC)' }}>
+                    {t('cameras.clipSceneTitle', 'Scene Understanding (CLIP)')}
+                  </h4>
+                  <button
+                    type="button"
+                    disabled={analyzingScene || !isCameraLive}
+                    onClick={async () => {
+                      if (!selectedCam?.id) return;
+                      try {
+                        setAnalyzingScene(true);
+                        const res = await api.cameras.analyzeScene(selectedCam.id);
+                        if (res?.scene) setClipScene(res.scene);
+                        addToast(res?.scene?.top_description ? `CLIP: ${res.scene.top_description}` : 'CLIP scene check updated.', 'success');
+                      } catch (err) {
+                        addToast(err?.message || 'CLIP scene analysis unavailable.', 'warning');
+                      } finally {
+                        setAnalyzingScene(false);
+                      }
+                    }}
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: '0.68rem', padding: '3px 8px' }}
+                  >
+                    {analyzingScene ? 'Analyzing...' : 'Analyze Frame'}
+                  </button>
+                </div>
+                {!clipScene || !clipScene.analyzed ? (
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted, #94A3B8)' }}>
+                    {clipScene?.status === 'disabled_by_config'
+                      ? 'CLIP scene analysis is disabled by server configuration.'
+                      : clipScene?.status === 'unavailable_missing_runtime' || clipScene?.status === 'unavailable'
+                        ? 'CLIP runtime unavailable on this host.'
+                        : 'Awaiting next scheduled CLIP frame evaluation...'}
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                      <strong style={{ color: clipScene.matched ? '#38BDF8' : 'var(--text-main, #F8FAFC)' }}>
+                        {clipScene.matched_description || clipScene.top_description}
+                      </strong>
+                      <span style={{ fontFamily: 'var(--font-mono)', color: '#10B981' }}>
+                        cos {Number(clipScene.top_cosine_similarity ?? 0).toFixed(3)}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-muted, #94A3B8)', fontSize: '0.69rem' }}>
+                      {clipScene.model_name} · {clipScene.device} · {clipScene.inference_ms} ms (uncalibrated cosine similarity)
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div
                 style={{
                   padding: '14px',

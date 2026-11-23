@@ -312,6 +312,8 @@ export const api = {
     // Detection Rules, Presets & Security Zones
     getRules: (id) => request(`/api/cameras/${id}/rules/`),
     saveRules: (id, data) => request(`/api/cameras/${id}/rules/`, { method: 'POST', body: data }),
+    getScene: (id) => request(`/api/cameras/${id}/scene/`),
+    analyzeScene: (id) => request(`/api/cameras/${id}/scene/`, { method: 'POST' }),
     applyPreset: (id, presetKey) => request(`/api/cameras/${id}/rules/preset/`, { method: 'POST', body: { preset: presetKey } }),
     getPresets: () => request('/api/presets/'),
     getZones: (id) => request(`/api/cameras/${id}/zones/`),
@@ -410,6 +412,14 @@ export const api = {
   settings: {
     getDetection: () => request('/api/settings/detection/'),
     saveDetection: (data) => request('/api/settings/detection/', { method: 'POST', body: data }),
+    getClip: () => request('/api/settings/clip/'),
+    saveClip: (data) => request('/api/settings/clip/', { method: 'POST', body: data }),
+  },
+  clip: {
+    getEvents: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/api/surveillance/clip/events/${q ? '?' + q : ''}`);
+    },
   },
 
   // DeepVision Assistant

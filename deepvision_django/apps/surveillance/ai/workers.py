@@ -677,6 +677,18 @@ class InferenceWorker:
 
                 comp_mono = time.monotonic()
                 frame_age_after = round(max(0.0, (comp_mono - source_cap_mono) * 1000.0), 1) if source_cap_mono > 0 else 0.0
+
+                # Non-blocking background CLIP scene analysis submission (coarse interval; never stalls YOLO/capture)
+                try:
+                    from apps.surveillance.ai.clip_service import get_clip_scheduler
+                    get_clip_scheduler().submit_frame(
+                        self.camera_id,
+                        getattr(camera_worker, "user_id", None),
+                        frame,
+                    )
+                except Exception:
+                    pass
+
                 with self.lock:
                     self.inference_id += 1
                     self.source_frame_id = frame_id
@@ -892,7 +904,25 @@ class InferenceWorker:
             "motion_backend": str(motion_snapshot.get("backend", "mog2")),
             "inference_dropped_frames": dropped_inf,
             "session_started_at": self.session_started_at,
+            "clip_scene": self._get_clip_scene_snapshot(),
         }
+
+    def _get_clip_scene_snapshot(self):
+        try:
+            from apps.surveillance.ai.clip_service import get_clip_scheduler, get_clip_analyzer
+            cached = get_clip_scheduler().get_camera_scene(self.camera_id)
+            if cached:
+                return cached
+            st = get_clip_analyzer().get_status()
+            return {
+                "available": st.get("available", False),
+                "analyzed": False,
+                "status": st.get("status", "standby_lazy"),
+                "model_name": st.get("model_name"),
+                "device": st.get("device"),
+            }
+        except Exception:
+            return {"available": False, "analyzed": False, "status": "unavailable"}
 
     def get_cached_result(self):
         with self.lock:

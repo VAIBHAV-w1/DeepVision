@@ -11,6 +11,7 @@ export function IncidentAnalysis({ analysis, onOpenIncident }) {
   const supportingEvidence = Array.isArray(analysis.supporting_evidence) ? analysis.supporting_evidence : [];
   const nextSteps = Array.isArray(analysis.recommended_next_steps) ? analysis.recommended_next_steps : [];
   const slaPolicy = analysis.sla_policy || null;
+  const clipScene = analysis.clip_scene_analysis || null;
   const secSan = analysis.security_sanitization || {};
 
   const riskColor =
@@ -113,6 +114,41 @@ export function IncidentAnalysis({ analysis, onOpenIncident }) {
           lineHeight: 1.5,
         }}>
           <strong>Evidence-Linked Assessment:</strong> {analysis.explanation || analysis.message}
+        </div>
+      )}
+
+      {clipScene && (
+        <div style={{
+          background: 'var(--bg-surface-raised)',
+          border: '1px solid var(--border-color)',
+          padding: '0.65rem 0.9rem',
+          borderRadius: 'var(--radius-md)',
+          fontSize: '0.8rem',
+          color: 'var(--text-secondary)',
+          marginBottom: '1rem',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>
+              CLIP Scene Context {clipScene.model_name ? `(${clipScene.model_name})` : ''}
+            </strong>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.74rem', color: clipScene.analyzed ? '#10b981' : 'var(--text-muted)' }}>
+              {clipScene.analyzed
+                ? `cos=${Number(clipScene.cosine_similarity ?? 0).toFixed(4)} · ${clipScene.device || 'cpu'}`
+                : String(clipScene.status || 'unavailable').replace(/_/g, ' ')}
+            </span>
+          </div>
+          {clipScene.analyzed && clipScene.matched_description ? (
+            <div style={{ marginTop: '4px' }}>
+              Matched candidate: <strong>{clipScene.matched_description}</strong>{' '}
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>
+                ({clipScene.score_semantics || 'cosine similarity, not calibrated probability'})
+              </span>
+            </div>
+          ) : (
+            <div style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '0.74rem' }}>
+              No CLIP scene observation stored for this incident window.
+            </div>
+          )}
         </div>
       )}
 
