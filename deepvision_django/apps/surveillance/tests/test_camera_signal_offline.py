@@ -11,6 +11,7 @@ from django.test import TransactionTestCase
 
 from apps.accounts.models import User
 from apps.cameras.models import Camera
+from apps.core.models import AuditLog
 from apps.surveillance.ai.registry import get_inference_registry
 from apps.surveillance.camera.registry import get_camera_registry
 from apps.surveillance.camera.workers import CameraWorker
@@ -54,6 +55,7 @@ class CameraSignalOfflineRegressionTests(TransactionTestCase):
                             pass
 
     def setUp(self):
+        AuditLog.objects.all().delete()
         Camera.objects.all().delete()
         User.objects.all().delete()
         self.owner = User.objects.create(
@@ -109,6 +111,7 @@ class CameraSignalOfflineRegressionTests(TransactionTestCase):
             except Exception:
                 pass
         try:
+            AuditLog.objects.all().delete()
             Camera.objects.all().delete()
             User.objects.all().delete()
         except Exception:
@@ -296,4 +299,201 @@ class CameraSignalOfflineRegressionTests(TransactionTestCase):
         self.client.cookies.clear()
         unauth_stream = self.client.get(f"/api/cameras/{self.cam.id}/stream/?mode=tracking")
         self.assertEqual(unauth_stream.status_code, 401)
+
+    def test_disconnect_stops_shared_physical_worker_when_idle_siblings_not_streaming(self):
+        # Two webcam cameras share source '0'; listing cameras must NOT pin sibling into _workers
+        sibling = Camera.objects.create(
+            user=self.owner,
+            name="Sibling Webcam",
+            source_type="webcam",
+            source="0",
+            location="Gate-4",
+            status="online",
+            is_active=True,
+        )
+        cam_reg = get_camera_registry()
+        cw = CameraWorker(
+            camera_id=self.cam.id,
+            cap_source=0,
+            source_type="webcam",
+            user_id=self.owner.id,
+            physical_source_id="dshow://0",
+        )
+        cw.running = True
+        cw.last_valid_frame_time = time.time()
+        cam_reg._workers[self.cam.id] = cw
+        cam_reg._physical_map["dshow://0"] = cw
+
+        # Listing cameras calls get_active_worker(sibling.id), must NOT mutate _workers[sibling.id]
+        list_resp = self.client.get("/api/cameras/")
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertNotIn(sibling.id, cam_reg.workers)
+
+        # Disconnecting self.cam stops the worker cleanly
+        with patch.object(cw, "stop") as mock_stop:
+            disc_resp = self.client.post(f"/api/cameras/{self.cam.id}/disconnect/")
+            self.assertEqual(disc_resp.status_code, 200)
+            mock_stop.assert_called_once()
+        cw.running = False
+        cam_reg._physical_map.pop("dshow://0", None)
+
+    def test_cloud_environment_blocks_local_webcam_capture_without_device(self):
+        cam_reg = get_camera_registry()
+        with patch("apps.surveillance.camera.registry._has_local_capture_hardware", return_value=False), patch(
+            "apps.surveillance.camera.workers.safe_open_video_capture"
+        ) as mock_open:
+            with self.assertRaises(RuntimeError):
+                cam_reg.get_worker(self.cam.id, self.owner.id)
+            mock_open.assert_not_called()
+        self.cam.refresh_from_db()
+        self.assertEqual(self.cam.status, "offline")
+
+    def test_browser_ingest_monotonic_seq_webp_and_clean_disconnect_restart(self):
+        import cv2
+        rng = np.random.default_rng(42)
+        frame = rng.integers(20, 230, size=(240, 320, 3), dtype=np.uint8)
+        ok_webp, enc_webp = cv2.imencode(".webp", frame)
+        self.assertTrue(ok_webp)
+        webp_bytes = enc_webp.tobytes()
+        self.assertGreaterEqual(len(webp_bytes), 64)
+
+        with patch("apps.surveillance.ai.workers.InferenceWorker.start", lambda self, w: setattr(self, "running", True)):
+            resp_accept = self.client.post(
+                f"/api/cameras/{self.cam_browser_2.id}/ingest-frame/?seq=5",
+                data=webp_bytes,
+                content_type="image/webp",
+            )
+            self.assertEqual(resp_accept.status_code, 200)
+            d1 = resp_accept.json()
+            self.assertTrue(d1["success"])
+            self.assertTrue(d1["accepted"])
+            self.assertEqual(d1["seq"], 5)
+            self.assertTrue(bool(d1.get("received_at")))
+
+            # Out-of-order stale frame seq=3 must be ignored without overwriting latest_seq=5
+            resp_stale = self.client.post(
+                f"/api/cameras/{self.cam_browser_2.id}/ingest-frame/?seq=3",
+                data=webp_bytes,
+                content_type="image/webp",
+            )
+            self.assertEqual(resp_stale.status_code, 200)
+            d_stale = resp_stale.json()
+            self.assertFalse(d_stale["accepted"])
+            self.assertTrue(d_stale["stale_sequence"])
+            self.assertEqual(d_stale["latest_seq"], 5)
+
+        inf_reg = get_inference_registry()
+        iw = inf_reg.get_active_worker(self.cam_browser_2.id)
+        self.assertIsNotNone(iw)
+        # Simulate extra stream ref_count before disconnect
+        iw.ref_count = 2
+
+        disc_resp = self.client.post(f"/api/cameras/{self.cam_browser_2.id}/disconnect/")
+        self.assertEqual(disc_resp.status_code, 200)
+        self.assertIsNone(get_camera_registry().get_active_worker(self.cam_browser_2.id))
+        self.assertIsNone(inf_reg.get_active_worker(self.cam_browser_2.id))
+        self.assertFalse(iw.running)
+
+        # Reconnect with fresh sequence starting at 1 must succeed
+        with patch("apps.surveillance.ai.workers.InferenceWorker.start", lambda self, w: setattr(self, "running", True)):
+            resp_reconn = self.client.post(
+                f"/api/cameras/{self.cam_browser_2.id}/ingest-frame/?seq=1",
+                data=webp_bytes,
+                content_type="image/webp",
+            )
+            self.assertEqual(resp_reconn.status_code, 200)
+            self.assertTrue(resp_reconn.json()["accepted"])
+            self.assertEqual(resp_reconn.json()["seq"], 1)
+
+    def test_shared_physical_recording_and_partial_disconnect_preserves_sibling(self):
+        from apps.ai.engine import start_camera_recording
+        from apps.surveillance.recording import recording_service
+
+        sibling = Camera.objects.create(
+            user=self.owner,
+            name="Sibling Shared Cam",
+            source_type="webcam",
+            source="0",
+            location="Gate-5",
+            status="online",
+            is_active=True,
+        )
+        cam_reg = get_camera_registry()
+        cw = CameraWorker(
+            camera_id=self.cam.id,
+            cap_source=0,
+            source_type="webcam",
+            user_id=self.owner.id,
+            physical_source_id="dshow://0",
+        )
+        cw.running = True
+        cw.latest_frame = np.full((240, 320, 3), 110, dtype=np.uint8)
+        cw.last_valid_frame_time = time.time()
+        cam_reg._workers[self.cam.id] = cw
+        cam_reg._physical_map["dshow://0"] = cw
+
+        with patch("apps.surveillance.recording.recording_service.start_recording") as mock_start_rec, patch(
+            "apps.surveillance.recording.recording_service.write_frame"
+        ):
+            mock_start_rec.return_value = type("RecObj", (), {"id": 777})()
+            rec_res = start_camera_recording(sibling.id, self.owner.id)
+            self.assertEqual(rec_res["status"], "ok")
+
+        # Sibling must now be explicitly bound in _workers so frames write to sibling recording
+        self.assertIn(sibling.id, cam_reg.workers)
+
+        # Removing primary cam keeps shared worker alive and reassigns worker.camera_id to sibling
+        with patch.object(cw, "stop") as mock_stop:
+            cam_reg.remove_camera(self.cam.id)
+            mock_stop.assert_not_called()
+            self.assertEqual(cw.camera_id, sibling.id)
+
+            # Removing last sibling stops physical worker cleanly
+            cam_reg.remove_camera(sibling.id)
+            mock_stop.assert_called_once()
+        cw.running = False
+        cam_reg._physical_map.pop("dshow://0", None)
+
+    def test_recording_and_http_206_playback_lifecycle(self):
+        import os
+        import tempfile
+        from apps.ai.engine import start_camera_recording, stop_camera_recording
+        from apps.recordings.models import Recording
+
+        Recording.objects.all().delete()
+        try:
+            cam_reg = get_camera_registry()
+            cw = cam_reg.get_or_create_browser_worker(self.cam_browser_2.id, self.owner.id)
+            rng = np.random.default_rng(7)
+            frame = rng.integers(10, 240, size=(240, 320, 3), dtype=np.uint8)
+            cw.ingest_external_frame(frame)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                rec_dir = os.path.join(tmpdir, "recordings")
+                os.makedirs(rec_dir, exist_ok=True)
+                with patch("apps.surveillance.recording.recording_service._get_recordings_dir", return_value=rec_dir), patch(
+                    "apps.core.media_service.RECORDINGS_DIR", rec_dir
+                ):
+                    start_res = start_camera_recording(self.cam_browser_2.id, self.owner.id)
+                    self.assertEqual(start_res["status"], "ok")
+                    rec_id = start_res["recording_id"]
+
+                    for _ in range(15):
+                        cw.ingest_external_frame(frame)
+                        time.sleep(0.05)
+
+                    stop_res = stop_camera_recording(self.cam_browser_2.id, self.owner.id)
+                    self.assertEqual(stop_res["status"], "ok")
+
+                    rec_obj = Recording.objects.get(id=rec_id)
+                    self.assertEqual(rec_obj.status, "completed")
+                    self.assertGreater(rec_obj.file_size, 0)
+
+                    view_resp = self.client.get(
+                        f"/recordings/{rec_id}/view/",
+                        HTTP_RANGE="bytes=0-255",
+                    )
+                    self.assertIn(view_resp.status_code, (200, 206))
+        finally:
+            Recording.objects.all().delete()
 

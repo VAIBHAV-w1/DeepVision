@@ -113,7 +113,7 @@ def generate_raw_stream(camera_id: int, user_id: int) -> Generator[bytes, None, 
         last_new_frame_mono = time.monotonic()
         has_yielded_frame = False
         init_status = "online" if float(getattr(worker, "last_valid_frame_time", 0.0) or 0.0) > 0.0 else "connecting"
-        update_camera_health(camera_id, status=init_status, stream_active=True, detection_active=False, tracking_active=False)
+        update_camera_health(camera_id, status=init_status, stream_active=True, detection_active=False, tracking_active=False, ai_fps=0.0, inference_latency_ms=0.0)
         cond = getattr(worker, "frame_condition", None)
 
         while True:

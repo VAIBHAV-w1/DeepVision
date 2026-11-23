@@ -328,374 +328,381 @@ class InferenceWorker:
         last_zone_refresh = 0.0
 
         print(f"[INFERENCE_LOOP_ENTER] camera_id={self.camera_id}")
-        if hasattr(self.tracker, "ensure_model_loaded"):
-            try:
-                self.tracker.ensure_model_loaded()
-            except Exception as e:
-                logger.warning(f"[InferenceWorker] Lazy model initialization fallback camera {self.camera_id}: {e}")
-        cond = getattr(camera_worker, "frame_condition", None)
-        while True:
-            with self.lock:
-                if not self.running:
-                    break
-
-            now = time.time()
-            if now - self.last_inference_time < self.inference_interval:
-                time.sleep(0.002)
-                continue
-
-            source_cap_mono = 0.0
-            if cond is not None:
-                with cond:
-                    while camera_worker.running and camera_worker.frame_id == last_processed_frame_id:
-                        if not cond.wait(timeout=0.25):
-                            break
-                    if not camera_worker.running:
-                        break
-                    frame_id = camera_worker.frame_id
-                    frame = camera_worker.latest_frame
-                    source_cap_mono = getattr(camera_worker, "last_capture_monotonic", time.monotonic())
-            else:
-                with camera_worker.lock:
-                    frame_id = camera_worker.frame_id
-                    frame = camera_worker.latest_frame
-                    source_cap_mono = getattr(camera_worker, "last_capture_monotonic", time.monotonic())
-
-            if frame is None or frame_id == last_processed_frame_id:
-                time.sleep(0.004)
-                continue
-
-            if last_processed_frame_id >= 0 and frame_id > last_processed_frame_id + 1:
-                self.inference_dropped_frames += int(frame_id - last_processed_frame_id - 1)
-            last_processed_frame_id = frame_id
-            self.last_inference_time = now
-            handoff_ms = max(0.0, (time.monotonic() - source_cap_mono) * 1000.0) if source_cap_mono > 0 else 0.0
-
-            t0 = time.perf_counter()
-            motion_state = self.last_motion_state
-            try:
-                motion_state = self.motion_analyzer.analyze(frame)
-            except Exception:
-                pass
-            try:
-                results = self.tracker.track(frame)
-                raw_detections = getattr(self.tracker, "last_detections", None)
-                stage_timings = dict(getattr(self.tracker, "last_stage_timings", None) or {})
-            except Exception as e:
-                logger.error(f"[InferenceWorker] Inference error camera {self.camera_id}: {e}")
-                results = []
-                raw_detections = []
-                stage_timings = {}
-            t1 = time.perf_counter()
-            now_after = time.time()
-            stage_timings["motion_ms"] = motion_state.get("process_ms", 0.0)
-
-            latency = (t1 - t0) * 1000.0
-
-            # Latest-frame scheduling respects configured interval AND yields briefly after heavy CPU passes
-            # so WSGI HTTP request/stream threads remain responsive under constrained cloud CPU quotas.
-            base_interval = max(0.015, float(getattr(self, "inference_interval", 0.06)))
-            if latency > 180.0 and "gpu" not in str(getattr(self.tracker, "detector_backend", "")).lower():
-                adaptive_cooldown = min(0.08, max(0.02, (latency / 1000.0) * 0.04))
-                effective_interval = max(base_interval, (latency / 1000.0) + adaptive_cooldown)
-            else:
-                effective_interval = base_interval
-
-            if fps_frame_times and (now_after - fps_frame_times[-1] > 2.0):
-                fps_frame_times.clear()
-            fps_frame_times.append(now_after)
-            if len(fps_frame_times) > 10:
-                fps_frame_times.pop(0)
-            if len(fps_frame_times) >= 2:
-                elapsed = fps_frame_times[-1] - fps_frame_times[0]
-                ai_fps = round((len(fps_frame_times) - 1) / elapsed, 1) if elapsed > 0 else 0.0
-            elif latency > 0:
-                ai_fps = round(min(30.0, 1000.0 / latency), 1)
-            else:
-                ai_fps = 0.0
-
-            # Refresh restricted zones, extended polygon config & detection profiles periodically or on demand
-            if self.force_zone_refresh or (now - last_zone_refresh > 2.0):
-                self.force_zone_refresh = False
+        try:
+            if hasattr(self.tracker, "ensure_model_loaded"):
+                try:
+                    self.tracker.ensure_model_loaded()
+                except Exception as e:
+                    logger.warning(f"[InferenceWorker] Lazy model initialization fallback camera {self.camera_id}: {e}")
+            cond = getattr(camera_worker, "frame_condition", None)
+            while True:
                 with self.lock:
-                    target_cam_ids = sorted(self.bound_camera_ids)
+                    if not self.running:
+                        break
+
+                now = time.time()
+                if now - self.last_inference_time < self.inference_interval:
+                    time.sleep(0.002)
+                    continue
+
+                source_cap_mono = 0.0
+                if cond is not None:
+                    with cond:
+                        while camera_worker.running and camera_worker.frame_id == last_processed_frame_id:
+                            if not cond.wait(timeout=0.25):
+                                break
+                        if not camera_worker.running:
+                            break
+                        frame_id = camera_worker.frame_id
+                        frame = camera_worker.latest_frame
+                        source_cap_mono = getattr(camera_worker, "last_capture_monotonic", time.monotonic())
+                else:
+                    with camera_worker.lock:
+                        frame_id = camera_worker.frame_id
+                        frame = camera_worker.latest_frame
+                        source_cap_mono = getattr(camera_worker, "last_capture_monotonic", time.monotonic())
+
+                if frame is None or frame_id == last_processed_frame_id:
+                    time.sleep(0.004)
+                    continue
+
+                if last_processed_frame_id >= 0 and frame_id > last_processed_frame_id + 1:
+                    self.inference_dropped_frames += int(frame_id - last_processed_frame_id - 1)
+                last_processed_frame_id = frame_id
+                self.last_inference_time = now
+                handoff_ms = max(0.0, (time.monotonic() - source_cap_mono) * 1000.0) if source_cap_mono > 0 else 0.0
+
+                t0 = time.perf_counter()
+                motion_state = self.last_motion_state
                 try:
-                    raw_db_zones = list(RestrictedZone.objects.filter(camera_id__in=target_cam_ids, enabled=True).order_by("-id"))
-                except Exception:
-                    raw_db_zones = []
-
-                from apps.cameras.surveillance_config import (
-                    get_camera_surveillance_config,
-                    get_zone_metadata,
-                    is_schedule_active,
-                )
-                from apps.surveillance.ai.anomaly.zones import RestrictedZone as RuntimeRestrictedZone
-
-                has_any_zones = any(int(z.camera_id) == int(self.camera_id) for z in raw_db_zones)
-                cam_cfg = get_camera_surveillance_config(self.camera_id, has_enabled_zones=has_any_zones)
-                self.camera_surveillance_cfg = cam_cfg
-
-                # Deduplicate identical coordinates per camera (keep newest row first)
-                seen_cam_coords = set()
-                stream_zones = []
-                zones_by_cam = {cid: [] for cid in target_cam_ids}
-                for z in raw_db_zones:
-                    zmeta = get_zone_metadata(z.id)
-                    pts = zmeta.get("points") if isinstance(zmeta.get("points"), list) and len(zmeta.get("points")) >= 3 else None
-                    pts_sig = tuple((round(float(p["x"]), 4), round(float(p["y"]), 4)) for p in pts) if pts else None
-                    ckey = (z.camera_id, pts_sig) if pts_sig else (z.camera_id, int(z.x1), int(z.y1), int(z.x2), int(z.y2))
-                    if ckey in seen_cam_coords:
-                        continue
-                    seen_cam_coords.add(ckey)
-
-                    z_shape = zmeta.get("shape") or ("polygon" if pts else "rectangle")
-                    z_dir = zmeta.get("entry_direction") or cam_cfg.get("entry_direction", "enter")
-                    z_color = zmeta.get("color") or "#ef4444"
-                    z_cd = zmeta.get("cooldown_seconds")
-                    stream_zones.append(
-                        RuntimeRestrictedZone(
-                            zone_id=z.id,
-                            name=z.name,
-                            x1=z.x1,
-                            y1=z.y1,
-                            x2=z.x2,
-                            y2=z.y2,
-                            enabled=bool(z.enabled),
-                            ref_width=1280,
-                            ref_height=720,
-                            points=pts,
-                            entry_direction=z_dir,
-                            shape=z_shape,
-                            cooldown_seconds=z_cd,
-                            camera_id=z.camera_id,
-                            user_id=z.user_id,
-                        )
-                    )
-                    zones_by_cam.setdefault(z.camera_id, []).append({
-                        "id": z.id,
-                        "camera_id": z.camera_id,
-                        "name": z.name,
-                        "x1": float(z.x1),
-                        "y1": float(z.y1),
-                        "x2": float(z.x2),
-                        "y2": float(z.y2),
-                        "ref_width": 1280,
-                        "ref_height": 720,
-                        "shape": z_shape,
-                        "points": pts,
-                        "entry_direction": z_dir,
-                        "color": z_color,
-                        "enabled": bool(z.enabled),
-                    })
-
-                # Sync DetectionProfile thresholds from SQLite and preserve active runtime rule toggles
-                try:
-                    from apps.core.models import DetectionProfile
-                    from apps.surveillance.ai.registry import get_inference_registry
-                    prof = DetectionProfile.objects.filter(camera_id__in=target_cam_ids).order_by("-updated_at").first()
-                    if prof is not None:
-                        self.anomaly_detector.config.update({
-                            "STATIONARY_DISTANCE_THRESHOLD": float(prof.stationary_distance_threshold or 20.0),
-                            "STATIONARY_TIME_THRESHOLD": float(prof.stationary_time_threshold or 3.0),
-                            "LOITERING_RADIUS": float(prof.loitering_radius or 80.0),
-                            "LOITERING_TIME_THRESHOLD": float(prof.loitering_time_threshold or 10.0),
-                            "SPEED_FAST_THRESHOLD": float(prof.speed_fast_threshold or 150.0),
-                            "SPEED_SLOW_THRESHOLD": float(prof.speed_slow_threshold or 15.0),
-                            "ABANDONED_OBJECT_TIME_THRESHOLD": float(prof.abandoned_object_time_threshold or 10.0),
-                            "ABANDONED_OBJECT_DISTANCE_THRESHOLD": float(prof.abandoned_object_distance_threshold or 120.0),
-                            "PERSON_OBJECT_ASSOCIATION_DISTANCE": float(prof.person_object_association_distance or 140.0),
-                            "UNUSUAL_MOVEMENT_PERSISTENCE_SECONDS": float(prof.unusual_movement_persistence_seconds or 1.5),
-                            "ANOMALY_EVENT_COOLDOWN_SECONDS": float(prof.anomaly_event_cooldown_seconds or 30.0),
-                        })
-                    runtime_cfg = get_inference_registry().get_runtime_settings()
-                    if isinstance(runtime_cfg.get("rules"), dict):
-                        self.anomaly_detector.config.update(runtime_cfg["rules"])
+                    motion_state = self.motion_analyzer.analyze(frame)
                 except Exception:
                     pass
+                try:
+                    results = self.tracker.track(frame)
+                    raw_detections = getattr(self.tracker, "last_detections", None)
+                    stage_timings = dict(getattr(self.tracker, "last_stage_timings", None) or {})
+                except Exception as e:
+                    logger.error(f"[InferenceWorker] Inference error camera {self.camera_id}: {e}")
+                    results = []
+                    raw_detections = []
+                    stage_timings = {}
+                t1 = time.perf_counter()
+                now_after = time.time()
+                stage_timings["motion_ms"] = motion_state.get("process_ms", 0.0)
 
-                # Overlay per-camera restricted-entry policy
-                rule_restricted = bool(self.anomaly_detector.config.get("RESTRICTED_ENTRY_ENABLED", True))
-                cam_restricted = bool(cam_cfg.get("restricted_entry_enabled", False) or has_any_zones)
-                self.anomaly_detector.config.update({
-                    "RESTRICTED_ENTRY_ENABLED": rule_restricted and cam_restricted,
-                    "RESTRICTED_ENTRY_SCHEDULE_ACTIVE": is_schedule_active(cam_cfg.get("schedule")),
-                    "RESTRICTED_ENTRY_SEVERITY": cam_cfg.get("alert_severity", "high"),
-                    "RESTRICTED_ENTRY_DIRECTION": cam_cfg.get("entry_direction", "enter"),
-                    "CAMERA_PURPOSE": cam_cfg.get("purpose", "general"),
-                    "SUPPRESS_DUPLICATE_ALERTS": bool(cam_cfg.get("suppress_duplicates", True)),
-                    "RESTRICTED_ENTRY_DEBOUNCE_FRAMES": int(cam_cfg.get("debounce_frames", 2) or 2),
-                    "ANOMALY_EVENT_COOLDOWN_SECONDS": float(
-                        cam_cfg.get("cooldown_seconds") or self.anomaly_detector.config.get("ANOMALY_EVENT_COOLDOWN_SECONDS", 30.0)
-                    ),
-                })
+                latency = (t1 - t0) * 1000.0
 
-                last_zone_refresh = now
-                with self.lock:
-                    self.cached_zones_by_camera = zones_by_cam
-                    self.cached_zones = zones_by_cam.get(self.camera_id, [])
+                # Latest-frame scheduling respects configured interval AND yields briefly after heavy CPU passes
+                # so WSGI HTTP request/stream threads remain responsive under constrained cloud CPU quotas.
+                base_interval = max(0.015, float(getattr(self, "inference_interval", 0.06)))
+                if latency > 180.0 and "gpu" not in str(getattr(self.tracker, "detector_backend", "")).lower():
+                    adaptive_cooldown = min(0.08, max(0.02, (latency / 1000.0) * 0.04))
+                    effective_interval = max(base_interval, (latency / 1000.0) + adaptive_cooldown)
+                else:
+                    effective_interval = base_interval
 
-            active_persons = []
-            active_items = []
-            detection_list = []
+                if fps_frame_times and (now_after - fps_frame_times[-1] > 2.0):
+                    fps_frame_times.clear()
+                fps_frame_times.append(now_after)
+                if len(fps_frame_times) > 10:
+                    fps_frame_times.pop(0)
+                if len(fps_frame_times) >= 2:
+                    elapsed = fps_frame_times[-1] - fps_frame_times[0]
+                    ai_fps = round((len(fps_frame_times) - 1) / elapsed, 1) if elapsed > 0 else 0.0
+                elif latency > 0:
+                    ai_fps = round(min(30.0, 1000.0 / latency), 1)
+                else:
+                    ai_fps = 0.0
 
-            if raw_detections:
-                for det in raw_detections:
-                    detection_list.append({
-                        "x1": det["x1"], "y1": det["y1"], "x2": det["x2"], "y2": det["y2"],
-                        "class_name": det["class_name"], "confidence": det["confidence"]
-                    })
-            else:
-                for trk in results:
-                    detection_list.append({
-                        "x1": trk["x1"], "y1": trk["y1"], "x2": trk["x2"], "y2": trk["y2"],
-                        "class_name": trk["class_name"], "confidence": trk["confidence"]
-                    })
+                # Refresh restricted zones, extended polygon config & detection profiles periodically or on demand
+                if self.force_zone_refresh or (now - last_zone_refresh > 2.0):
+                    self.force_zone_refresh = False
+                    with self.lock:
+                        target_cam_ids = sorted(self.bound_camera_ids)
+                    try:
+                        raw_db_zones = list(RestrictedZone.objects.filter(camera_id__in=target_cam_ids, enabled=True).order_by("-id"))
+                    except Exception:
+                        raw_db_zones = []
 
-            try:
-                for trk in results:
-                    x1, y1, x2, y2 = trk["x1"], trk["y1"], trk["x2"], trk["y2"]
-                    tid = trk["track_id"]
-                    cls_name = trk["class_name"]
-                    conf = trk["confidence"]
-                    cx = (x1 + x2) / 2.0
-                    cy = (y1 + y2) / 2.0
+                    from apps.cameras.surveillance_config import (
+                        get_camera_surveillance_config,
+                        get_zone_metadata,
+                        is_schedule_active,
+                    )
+                    from apps.surveillance.ai.anomaly.zones import RestrictedZone as RuntimeRestrictedZone
 
-                    if cls_name == "person":
-                        cropped = frame[y1:y2, x1:x2] if (x2 > x1 and y2 > y1) else None
-                        global_id, reid_status, certainty = registry.resolve_person(self.camera_id, tid, cropped, now)
-                        active_persons.append({
-                            "track_id": tid, "global_id": global_id,
-                            "reid_status": reid_status, "certainty": certainty,
-                            "bbox": (x1, y1, x2, y2),
-                            "center": (cx, cy),
-                            "foot_point": (cx, float(y2)),
-                            "confidence": conf
+                    has_any_zones = any(int(z.camera_id) == int(self.camera_id) for z in raw_db_zones)
+                    cam_cfg = get_camera_surveillance_config(self.camera_id, has_enabled_zones=has_any_zones)
+                    self.camera_surveillance_cfg = cam_cfg
+
+                    # Deduplicate identical coordinates per camera (keep newest row first)
+                    seen_cam_coords = set()
+                    stream_zones = []
+                    zones_by_cam = {cid: [] for cid in target_cam_ids}
+                    for z in raw_db_zones:
+                        zmeta = get_zone_metadata(z.id)
+                        pts = zmeta.get("points") if isinstance(zmeta.get("points"), list) and len(zmeta.get("points")) >= 3 else None
+                        pts_sig = tuple((round(float(p["x"]), 4), round(float(p["y"]), 4)) for p in pts) if pts else None
+                        ckey = (z.camera_id, pts_sig) if pts_sig else (z.camera_id, int(z.x1), int(z.y1), int(z.x2), int(z.y2))
+                        if ckey in seen_cam_coords:
+                            continue
+                        seen_cam_coords.add(ckey)
+
+                        z_shape = zmeta.get("shape") or ("polygon" if pts else "rectangle")
+                        z_dir = zmeta.get("entry_direction") or cam_cfg.get("entry_direction", "enter")
+                        z_color = zmeta.get("color") or "#ef4444"
+                        z_cd = zmeta.get("cooldown_seconds")
+                        stream_zones.append(
+                            RuntimeRestrictedZone(
+                                zone_id=z.id,
+                                name=z.name,
+                                x1=z.x1,
+                                y1=z.y1,
+                                x2=z.x2,
+                                y2=z.y2,
+                                enabled=bool(z.enabled),
+                                ref_width=1280,
+                                ref_height=720,
+                                points=pts,
+                                entry_direction=z_dir,
+                                shape=z_shape,
+                                cooldown_seconds=z_cd,
+                                camera_id=z.camera_id,
+                                user_id=z.user_id,
+                            )
+                        )
+                        zones_by_cam.setdefault(z.camera_id, []).append({
+                            "id": z.id,
+                            "camera_id": z.camera_id,
+                            "name": z.name,
+                            "x1": float(z.x1),
+                            "y1": float(z.y1),
+                            "x2": float(z.x2),
+                            "y2": float(z.y2),
+                            "ref_width": 1280,
+                            "ref_height": 720,
+                            "shape": z_shape,
+                            "points": pts,
+                            "entry_direction": z_dir,
+                            "color": z_color,
+                            "enabled": bool(z.enabled),
                         })
-                    elif cls_name in ["backpack", "handbag", "suitcase", "bottle", "cup", "cell phone", "laptop"]:
-                        global_id, certainty = registry.resolve_item(self.camera_id, tid, cls_name, now)
-                        active_items.append({
-                            "track_id": tid, "global_id": global_id,
-                            "class_name": cls_name, "confidence": conf,
-                            "certainty": certainty, "bbox": (x1, y1, x2, y2),
-                            "center": (cx, cy)
+
+                    # Sync DetectionProfile thresholds from SQLite and preserve active runtime rule toggles
+                    try:
+                        from apps.core.models import DetectionProfile
+                        from apps.surveillance.ai.registry import get_inference_registry
+                        prof = DetectionProfile.objects.filter(camera_id__in=target_cam_ids).order_by("-updated_at").first()
+                        if prof is not None:
+                            self.anomaly_detector.config.update({
+                                "STATIONARY_DISTANCE_THRESHOLD": float(prof.stationary_distance_threshold or 20.0),
+                                "STATIONARY_TIME_THRESHOLD": float(prof.stationary_time_threshold or 3.0),
+                                "LOITERING_RADIUS": float(prof.loitering_radius or 80.0),
+                                "LOITERING_TIME_THRESHOLD": float(prof.loitering_time_threshold or 10.0),
+                                "SPEED_FAST_THRESHOLD": float(prof.speed_fast_threshold or 150.0),
+                                "SPEED_SLOW_THRESHOLD": float(prof.speed_slow_threshold or 15.0),
+                                "ABANDONED_OBJECT_TIME_THRESHOLD": float(prof.abandoned_object_time_threshold or 10.0),
+                                "ABANDONED_OBJECT_DISTANCE_THRESHOLD": float(prof.abandoned_object_distance_threshold or 120.0),
+                                "PERSON_OBJECT_ASSOCIATION_DISTANCE": float(prof.person_object_association_distance or 140.0),
+                                "UNUSUAL_MOVEMENT_PERSISTENCE_SECONDS": float(prof.unusual_movement_persistence_seconds or 1.5),
+                                "ANOMALY_EVENT_COOLDOWN_SECONDS": float(prof.anomaly_event_cooldown_seconds or 30.0),
+                            })
+                        runtime_cfg = get_inference_registry().get_runtime_settings()
+                        if isinstance(runtime_cfg.get("rules"), dict):
+                            self.anomaly_detector.config.update(runtime_cfg["rules"])
+                    except Exception:
+                        pass
+
+                    # Overlay per-camera restricted-entry policy
+                    rule_restricted = bool(self.anomaly_detector.config.get("RESTRICTED_ENTRY_ENABLED", True))
+                    cam_restricted = bool(cam_cfg.get("restricted_entry_enabled", False) or has_any_zones)
+                    self.anomaly_detector.config.update({
+                        "RESTRICTED_ENTRY_ENABLED": rule_restricted and cam_restricted,
+                        "RESTRICTED_ENTRY_SCHEDULE_ACTIVE": is_schedule_active(cam_cfg.get("schedule")),
+                        "RESTRICTED_ENTRY_SEVERITY": cam_cfg.get("alert_severity", "high"),
+                        "RESTRICTED_ENTRY_DIRECTION": cam_cfg.get("entry_direction", "enter"),
+                        "CAMERA_PURPOSE": cam_cfg.get("purpose", "general"),
+                        "SUPPRESS_DUPLICATE_ALERTS": bool(cam_cfg.get("suppress_duplicates", True)),
+                        "RESTRICTED_ENTRY_DEBOUNCE_FRAMES": int(cam_cfg.get("debounce_frames", 2) or 2),
+                        "ANOMALY_EVENT_COOLDOWN_SECONDS": float(
+                            cam_cfg.get("cooldown_seconds") or self.anomaly_detector.config.get("ANOMALY_EVENT_COOLDOWN_SECONDS", 30.0)
+                        ),
+                    })
+
+                    last_zone_refresh = now
+                    with self.lock:
+                        self.cached_zones_by_camera = zones_by_cam
+                        self.cached_zones = zones_by_cam.get(self.camera_id, [])
+
+                active_persons = []
+                active_items = []
+                detection_list = []
+
+                if raw_detections:
+                    for det in raw_detections:
+                        detection_list.append({
+                            "x1": det["x1"], "y1": det["y1"], "x2": det["x2"], "y2": det["y2"],
+                            "class_name": det["class_name"], "confidence": det["confidence"]
+                        })
+                else:
+                    for trk in results:
+                        detection_list.append({
+                            "x1": trk["x1"], "y1": trk["y1"], "x2": trk["x2"], "y2": trk["y2"],
+                            "class_name": trk["class_name"], "confidence": trk["confidence"]
                         })
 
-                    track_obs_key = (int(tid), str(cls_name))
-                    if track_obs_key not in self.observed_track_keys:
-                        self.observed_track_keys.add(track_obs_key)
-                        if len(self.observed_track_keys) > 2000:
-                            self.observed_track_keys.clear()
+                try:
+                    for trk in results:
+                        x1, y1, x2, y2 = trk["x1"], trk["y1"], trk["x2"], trk["y2"]
+                        tid = trk["track_id"]
+                        cls_name = trk["class_name"]
+                        conf = trk["confidence"]
+                        cx = (x1 + x2) / 2.0
+                        cy = (y1 + y2) / 2.0
+
+                        if cls_name == "person":
+                            cropped = frame[y1:y2, x1:x2] if (x2 > x1 and y2 > y1) else None
+                            global_id, reid_status, certainty = registry.resolve_person(self.camera_id, tid, cropped, now)
+                            active_persons.append({
+                                "track_id": tid, "global_id": global_id,
+                                "reid_status": reid_status, "certainty": certainty,
+                                "bbox": (x1, y1, x2, y2),
+                                "center": (cx, cy),
+                                "foot_point": (cx, float(y2)),
+                                "confidence": conf
+                            })
+                        elif cls_name in ["backpack", "handbag", "suitcase", "bottle", "cup", "cell phone", "laptop"]:
+                            global_id, certainty = registry.resolve_item(self.camera_id, tid, cls_name, now)
+                            active_items.append({
+                                "track_id": tid, "global_id": global_id,
+                                "class_name": cls_name, "confidence": conf,
+                                "certainty": certainty, "bbox": (x1, y1, x2, y2),
+                                "center": (cx, cy)
+                            })
+
+                        track_obs_key = (int(tid), str(cls_name))
+                        if track_obs_key not in self.observed_track_keys:
                             self.observed_track_keys.add(track_obs_key)
-                        self.total_detection_events += 1
-                        self.recent_detection_events.appendleft({
-                            "event_type": "object_detected",
-                            "event_class": "detection",
-                            "track_id": int(tid),
-                            "class_name": cls_name,
-                            "confidence": round(float(conf), 3),
-                            "timestamp": now,
-                            "explanation": f"New confirmed {cls_name} track #{tid} detected (conf {conf:.2f}).",
+                            if len(self.observed_track_keys) > 2000:
+                                self.observed_track_keys.clear()
+                                self.observed_track_keys.add(track_obs_key)
+                            self.total_detection_events += 1
+                            self.recent_detection_events.appendleft({
+                                "event_type": "object_detected",
+                                "event_class": "detection",
+                                "track_id": int(tid),
+                                "class_name": cls_name,
+                                "confidence": round(float(conf), 3),
+                                "timestamp": now,
+                                "explanation": f"New confirmed {cls_name} track #{tid} detected (conf {conf:.2f}).",
+                            })
+                        if cls_name == "person":
+                            self.session_unique_person_ids.add(int(tid))
+
+                    reid_track_ids = {
+                        int(trk["track_id"]) for trk in results
+                        if trk.get("class_name") == "person"
+                        or trk.get("class_name") in {"backpack", "handbag", "suitcase", "bottle", "cup", "cell phone", "laptop"}
+                    }
+                    registry.reconcile_camera_tracks(
+                        self.camera_id, reid_track_ids, self._global_track_last_seen, timestamp=now
+                    )
+
+                    self.lifecycle_manager.update_associations_and_lifecycles(
+                        active_persons, active_items, stream_zones, self.camera_id, now
+                    )
+
+                    # Real-time Anomaly Detection Evaluation
+                    cfg_anom = {
+                        "STATIONARY_DISTANCE_THRESHOLD": 20.0,
+                        "STATIONARY_TIME_THRESHOLD": 3.0,
+                        "LOITERING_RADIUS": 80.0,
+                        "LOITERING_TIME_THRESHOLD": 10.0,
+                        "SPEED_FAST_THRESHOLD": 150.0,
+                        "SPEED_SLOW_THRESHOLD": 15.0,
+                        "TRACK_TIMEOUT_SECONDS": 5,
+                        **self.anomaly_detector.config,
+                    }
+                    tracked_objects_for_anom = []
+                    for trk in results:
+                        t_id = trk["track_id"]
+                        c_name = trk["class_name"]
+                        c_conf = trk["confidence"]
+                        x1, y1, x2, y2 = trk["x1"], trk["y1"], trk["x2"], trk["y2"]
+                        cx = (x1 + x2) / 2.0
+                        cy = (y1 + y2) / 2.0
+                        hist = self.track_history.update(t_id, x1, y1, x2, y2, now, cfg_anom)
+                        beh = self.behavior_analyzer.analyze(hist, cfg_anom)
+                        trk["behavior"] = beh.get("behavior", "normal")
+                        trk["direction"] = beh.get("direction", "stationary")
+                        trk["speed"] = round(float(beh.get("speed", 0.0) or 0.0), 1)
+                        tracked_objects_for_anom.append({
+                            "track_id": t_id,
+                            "class_name": c_name,
+                            "confidence": c_conf,
+                            "bbox": (x1, y1, x2, y2),
+                            "center_x": cx,
+                            "center_y": cy,
+                            "foot_x": cx,
+                            "foot_y": float(y2),
+                            "behavior": beh.get("behavior", "normal"),
+                            "direction": beh.get("direction", "stationary"),
+                            "speed": beh.get("speed", 0.0),
+                            "window_speed": beh.get("window_speed", beh.get("speed", 0.0)),
+                            "window_displacement": beh.get("window_displacement", 0.0),
+                            "direction_reversals": beh.get("direction_reversals", 0),
+                            "stationary_duration": beh.get("stationary_duration", 0.0)
                         })
-                    if cls_name == "person":
-                        self.session_unique_person_ids.add(int(tid))
+                    self.track_history.clean_stale_tracks(now, cfg_anom)
 
-                reid_track_ids = {
-                    int(trk["track_id"]) for trk in results
-                    if trk.get("class_name") == "person"
-                    or trk.get("class_name") in {"backpack", "handbag", "suitcase", "bottle", "cup", "cell phone", "laptop"}
-                }
-                registry.reconcile_camera_tracks(
-                    self.camera_id, reid_track_ids, self._global_track_last_seen, timestamp=now
-                )
+                    fh_cur, fw_cur = frame.shape[:2]
+                    events = self.anomaly_detector.detect(
+                        tracked_objects_for_anom, now, zones=stream_zones, frame_size=(fw_cur, fh_cur)
+                    )
+                    if events:
+                        self.cached_anomalies = events
+                        pre_buf = camera_worker.get_recent_buffer(60)
+                        m_frame = frame.copy() if frame is not None else None
+                        for ev in events:
+                            ev_type = str(ev.get("event_type", "")).lower()
+                            if ev_type in ("restricted_area_entry", "restricted_area_exit", "intrusion"):
+                                self.recent_zone_events.appendleft(dict(ev))
+                            self._trigger_alert_async(ev, camera_worker, pre_buf, m_frame)
+                except Exception as e:
+                    logger.warning(f"[InferenceWorker] Tracking / Anomaly warning camera {self.camera_id}: {e}")
 
-                self.lifecycle_manager.update_associations_and_lifecycles(
-                    active_persons, active_items, stream_zones, self.camera_id, now
-                )
+                comp_mono = time.monotonic()
+                frame_age_after = round(max(0.0, (comp_mono - source_cap_mono) * 1000.0), 1) if source_cap_mono > 0 else 0.0
+                with self.lock:
+                    self.inference_id += 1
+                    self.source_frame_id = frame_id
+                    self.source_frame_capture_monotonic = source_cap_mono
+                    self.last_inference_completion_time = comp_mono
+                    self.last_frame_age_ms = frame_age_after
+                    self.last_handoff_ms = round(handoff_ms, 2)
+                    self.last_stage_timings = stage_timings
+                    self.last_motion_state = motion_state
+                    self.cached_detections = detection_list
+                    self.cached_tracks = results
+                    self.latency_ms = round(latency, 1)
+                    self.latency_samples.append(self.latency_ms)
+                    self.ai_fps = ai_fps
+                    self.active_persons = active_persons
+                    self.active_items = active_items
 
-                # Real-time Anomaly Detection Evaluation
-                cfg_anom = {
-                    "STATIONARY_DISTANCE_THRESHOLD": 20.0,
-                    "STATIONARY_TIME_THRESHOLD": 3.0,
-                    "LOITERING_RADIUS": 80.0,
-                    "LOITERING_TIME_THRESHOLD": 10.0,
-                    "SPEED_FAST_THRESHOLD": 150.0,
-                    "SPEED_SLOW_THRESHOLD": 15.0,
-                    "TRACK_TIMEOUT_SECONDS": 5,
-                    **self.anomaly_detector.config,
-                }
-                tracked_objects_for_anom = []
-                for trk in results:
-                    t_id = trk["track_id"]
-                    c_name = trk["class_name"]
-                    c_conf = trk["confidence"]
-                    x1, y1, x2, y2 = trk["x1"], trk["y1"], trk["x2"], trk["y2"]
-                    cx = (x1 + x2) / 2.0
-                    cy = (y1 + y2) / 2.0
-                    hist = self.track_history.update(t_id, x1, y1, x2, y2, now, cfg_anom)
-                    beh = self.behavior_analyzer.analyze(hist, cfg_anom)
-                    trk["behavior"] = beh.get("behavior", "normal")
-                    trk["direction"] = beh.get("direction", "stationary")
-                    trk["speed"] = round(float(beh.get("speed", 0.0) or 0.0), 1)
-                    tracked_objects_for_anom.append({
-                        "track_id": t_id,
-                        "class_name": c_name,
-                        "confidence": c_conf,
-                        "bbox": (x1, y1, x2, y2),
-                        "center_x": cx,
-                        "center_y": cy,
-                        "foot_x": cx,
-                        "foot_y": float(y2),
-                        "behavior": beh.get("behavior", "normal"),
-                        "direction": beh.get("direction", "stationary"),
-                        "speed": beh.get("speed", 0.0),
-                        "window_speed": beh.get("window_speed", beh.get("speed", 0.0)),
-                        "window_displacement": beh.get("window_displacement", 0.0),
-                        "direction_reversals": beh.get("direction_reversals", 0),
-                        "stationary_duration": beh.get("stationary_duration", 0.0)
-                    })
-                self.track_history.clean_stale_tracks(now, cfg_anom)
-
-                fh_cur, fw_cur = frame.shape[:2]
-                events = self.anomaly_detector.detect(
-                    tracked_objects_for_anom, now, zones=stream_zones, frame_size=(fw_cur, fh_cur)
-                )
-                if events:
-                    self.cached_anomalies = events
-                    pre_buf = camera_worker.get_recent_buffer(60)
-                    m_frame = frame.copy() if frame is not None else None
-                    for ev in events:
-                        ev_type = str(ev.get("event_type", "")).lower()
-                        if ev_type in ("restricted_area_entry", "restricted_area_exit", "intrusion"):
-                            self.recent_zone_events.appendleft(dict(ev))
-                        self._trigger_alert_async(ev, camera_worker, pre_buf, m_frame)
-            except Exception as e:
-                logger.warning(f"[InferenceWorker] Tracking / Anomaly warning camera {self.camera_id}: {e}")
-
-            comp_mono = time.monotonic()
-            frame_age_after = round(max(0.0, (comp_mono - source_cap_mono) * 1000.0), 1) if source_cap_mono > 0 else 0.0
+                # Yield briefly after heavy CPU passes so web/stream threads stay responsive
+                sleep_for = max(0.0, effective_interval - (time.time() - now))
+                if sleep_for > 0.005:
+                    time.sleep(min(sleep_for, 0.06))
+        finally:
             with self.lock:
-                self.inference_id += 1
-                self.source_frame_id = frame_id
-                self.source_frame_capture_monotonic = source_cap_mono
-                self.last_inference_completion_time = comp_mono
-                self.last_frame_age_ms = frame_age_after
-                self.last_handoff_ms = round(handoff_ms, 2)
-                self.last_stage_timings = stage_timings
-                self.last_motion_state = motion_state
-                self.cached_detections = detection_list
-                self.cached_tracks = results
-                self.latency_ms = round(latency, 1)
-                self.latency_samples.append(self.latency_ms)
-                self.ai_fps = ai_fps
-                self.active_persons = active_persons
-                self.active_items = active_items
-
-            # Yield briefly after heavy CPU passes so web/stream threads stay responsive
-            sleep_for = max(0.0, effective_interval - (time.time() - now))
-            if sleep_for > 0.005:
-                time.sleep(min(sleep_for, 0.06))
-
-        print(f"[INFERENCE_LOOP_EXIT] camera_id={self.camera_id}")
+                self.running = False
+            try:
+                connection.close()
+            except Exception:
+                pass
+            print(f"[INFERENCE_LOOP_EXIT] camera_id={self.camera_id}")
 
     def _trigger_alert_async(self, event, camera_worker, pre_event_frames, moment_frame):
         """Dispatches alert persistence, deduplicated notifications, email delivery & evidence recording."""

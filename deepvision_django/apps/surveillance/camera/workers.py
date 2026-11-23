@@ -53,6 +53,7 @@ class CameraWorker:
         self.is_browser_pushed = False
         self._browser_fps_window_start = time.time()
         self._browser_frames_pushed = 0
+        self.last_ingest_seq = -1
 
     def start_browser_mode(self):
         """Activates worker in passive browser-pushed mode (navigator.mediaDevices.getUserMedia bridge)."""
@@ -62,17 +63,23 @@ class CameraWorker:
             self.is_starting = False
             self.start_error = None
             self.last_error = None
+            self.last_ingest_seq = -1
             if self.state in ("OFFLINE", "ERROR"):
                 self.state = "CONNECTING"
             self.start_event.set()
 
-    def ingest_external_frame(self, frame):
+    def ingest_external_frame(self, frame, seq=None):
         """Injects a decoded BGR numpy frame from an authenticated browser/mobile push client."""
         if frame is None or getattr(frame, "size", 0) == 0:
             return False
         now = time.time()
         now_mono = time.monotonic()
         with self.frame_condition:
+            if seq is not None and int(seq) < self.last_ingest_seq:
+                return False
+            if seq is not None:
+                self.last_ingest_seq = int(seq)
+            prev_mono = self.last_capture_monotonic
             self.is_browser_pushed = True
             self.running = True
             self.latest_frame = frame
@@ -91,7 +98,10 @@ class CameraWorker:
                 if self._browser_frames_pushed >= 6 or dt >= 1.5:
                     self._browser_frames_pushed = 0
                     self._browser_fps_window_start = now
-            self.last_acquisition_ms = round(max(0.1, (now_mono - self.last_capture_monotonic) * 1000.0), 3) if self.last_capture_monotonic else 0.5
+            if prev_mono and now_mono > prev_mono:
+                self.last_acquisition_ms = round(min(1000.0, (now_mono - prev_mono) * 1000.0), 3)
+            else:
+                self.last_acquisition_ms = 0.5
             self.frame_condition.notify_all()
 
         try:

@@ -40,8 +40,14 @@ async function request(endpoint, options = {}) {
   };
 
   let bodyToSend = options.body;
-  // If sending JSON body, set Content-Type
-  if (bodyToSend && typeof bodyToSend === 'object' && !(bodyToSend instanceof FormData)) {
+  const isBinaryOrFormBody = (
+    (typeof FormData !== 'undefined' && bodyToSend instanceof FormData) ||
+    (typeof Blob !== 'undefined' && bodyToSend instanceof Blob) ||
+    (typeof ArrayBuffer !== 'undefined' && bodyToSend instanceof ArrayBuffer) ||
+    (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(bodyToSend))
+  );
+  // If sending plain JS object body, serialize as JSON and set Content-Type
+  if (bodyToSend && typeof bodyToSend === 'object' && !isBinaryOrFormBody) {
     headers['Content-Type'] = 'application/json';
     bodyToSend = JSON.stringify(bodyToSend);
   }
@@ -295,7 +301,8 @@ export const api = {
       });
     },
     disconnect: (id) => request(`/api/cameras/${id}/disconnect/`, { method: 'POST' }),
-    warm: (id) => request(`/api/cameras/${id}/warm/`),
+    warm: (id, captureOnly = false) =>
+      request(`/api/cameras/${id}/warm/${captureOnly ? '?capture_only=1' : ''}`, { method: 'POST' }),
     getStreamUrl: (id, mode = 'tracking') => `${API_BASE_URL}/api/cameras/${id}/stream/?mode=${mode}`,
     getOriginalStreamUrl: (id) => `${API_BASE_URL}/api/cameras/${id}/stream/original/`,
     getTrackingStreamUrl: (id) => `${API_BASE_URL}/api/cameras/${id}/stream/tracking/`,

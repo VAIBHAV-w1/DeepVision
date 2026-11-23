@@ -159,7 +159,7 @@ class AsyncRecordingWriter(threading.Thread):
         except queue.Full:
             pass
 
-    def stop_and_join(self, timeout=3.0):
+    def stop_and_join(self, timeout=8.0):
         self.running = False
         try:
             self.frame_queue.put_nowait(None)
@@ -245,7 +245,7 @@ def stop_recording(recording_id, user_id=None):
             writer_thread = rec_data.get('writer_thread')
             if writer_thread:
                 try:
-                    writer_thread.stop_and_join(timeout=3.0)
+                    writer_thread.stop_and_join(timeout=8.0)
                 except Exception as e:
                     logger.warning(f"[RECORDING_WRITER_RELEASE_WARN] {e}")
 

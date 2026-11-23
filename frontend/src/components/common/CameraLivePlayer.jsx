@@ -30,12 +30,6 @@ export function CameraLivePlayer(props) {
   const cameraId = camera?.id || propCameraId || 4;
   const cameraName = camera?.name || propCameraName || `Camera 0${cameraId}`;
   const cameraLocation = camera?.location || 'Primary Sector';
-  const liveStatus = liveStats?.status;
-  const isCameraOnline = Boolean(
-    !isError &&
-      liveStatus !== 'offline' &&
-      (liveStatus === 'online' || isLoaded)
-  );
 
   // Mode: 'raw' (RAW STREAM) | 'tracking' (DETECTION & TRACKING)
   const effectiveModeProp = activeModeProp || modeProp || 'tracking';
@@ -47,6 +41,14 @@ export function CameraLivePlayer(props) {
   const [liveStats, setLiveStats] = useState(stats || {});
   const [localRecording, setLocalRecording] = useState(isRecording);
   const [recLoading, setRecLoading] = useState(false);
+
+  const liveStatus = liveStats?.status;
+  const isCameraOnline = Boolean(
+    !isError &&
+      liveStatus !== 'offline' &&
+      liveStatus !== 'stale' &&
+      (liveStatus === 'online' || liveStats?.live || isLoaded)
+  );
 
   // Restricted Zone Interactive Editor (Phase 4)
   const [isZoneEditorOpen, setIsZoneEditorOpen] = useState(false);
