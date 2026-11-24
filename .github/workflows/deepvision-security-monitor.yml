@@ -201,7 +201,7 @@ jobs:
 
       - name: Upload OWASP ZAP Baseline Reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: owasp-zap-baseline-reports
           path: zap_reports/
