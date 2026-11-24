@@ -210,7 +210,7 @@ def api_me(request):
 
 
 @require_POST
-@ratelimit(scope="login", limit=10, window=60)
+@ratelimit(scope="login", limit=10, window=60, key_field="email")
 @handle_db_errors
 def api_login(request):
     """
@@ -297,7 +297,7 @@ def api_login(request):
 
 
 @require_POST
-@ratelimit(scope="verify_login_otp", limit=10, window=60)
+@ratelimit(scope="verify_login_otp", limit=10, window=60, key_field="email")
 @handle_db_errors
 def api_verify_login_otp(request):
     """
@@ -345,7 +345,7 @@ def api_verify_login_otp(request):
 
 
 @require_POST
-@ratelimit(scope="resend_login_otp", limit=4, window=120)
+@ratelimit(scope="resend_login_otp", limit=4, window=120, key_field="email")
 @handle_db_errors
 def api_resend_login_otp(request):
     """Resends single-use 6-digit Login OTP for pending login session."""
@@ -405,7 +405,7 @@ def api_demo_session(request):
 
 
 @require_POST
-@ratelimit(scope="signup", limit=6, window=60)
+@ratelimit(scope="signup", limit=6, window=60, key_field="email")
 @handle_db_errors
 def api_signup(request):
     """Creates user in pending/unverified state and sends 6-digit Signup OTP."""
@@ -460,7 +460,7 @@ def api_signup(request):
 
 
 @require_POST
-@ratelimit(scope="verify_otp", limit=10, window=60)
+@ratelimit(scope="verify_otp", limit=10, window=60, key_field="email")
 @handle_db_errors
 def api_verify_otp(request):
     """
@@ -502,7 +502,7 @@ def api_verify_otp(request):
 
 
 @require_POST
-@ratelimit(scope="resend_otp", limit=4, window=120)
+@ratelimit(scope="resend_otp", limit=4, window=120, key_field="email")
 @handle_db_errors
 def api_resend_otp(request):
     """Resends email verification OTP for signup."""
@@ -558,7 +558,7 @@ def api_resend_otp(request):
 
 
 @require_POST
-@ratelimit(scope="forgot_password", limit=5, window=120)
+@ratelimit(scope="forgot_password", limit=5, window=120, key_field="email")
 @handle_db_errors
 def api_forgot_password(request):
     """Initiates password reset flow."""
@@ -603,7 +603,7 @@ def api_forgot_password(request):
 
 
 @require_POST
-@ratelimit(scope="verify_reset_otp", limit=10, window=60)
+@ratelimit(scope="verify_reset_otp", limit=10, window=60, key_field="email")
 @handle_db_errors
 def api_verify_reset_otp(request):
     """
@@ -630,7 +630,7 @@ def api_verify_reset_otp(request):
 
 
 @require_POST
-@ratelimit(scope="reset_password", limit=6, window=60)
+@ratelimit(scope="reset_password", limit=6, window=60, key_field="email")
 @handle_db_errors
 def api_reset_password(request):
     """Verifies OTP and resets password using PBKDF2."""

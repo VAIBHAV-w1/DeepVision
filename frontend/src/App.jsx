@@ -20,7 +20,7 @@ function BackendStatusBanner({ onRecovered }) {
       try {
         probingRef.current = true;
         setProbing(true);
-        await api.system.health({ timeout: 8000, maxRetries: 0 });
+        await api.system.live({ timeout: 8000, maxRetries: 0 });
         if (active) {
           setStatus(null);
           if (pollTimer) {
@@ -51,7 +51,7 @@ function BackendStatusBanner({ onRecovered }) {
           retrying: Boolean(ev.detail.retrying),
         });
         if (!pollTimer) {
-          pollTimer = setInterval(verifyHealth, 5000);
+          pollTimer = setInterval(verifyHealth, 10000);
         }
       }
     };
@@ -98,7 +98,7 @@ function BackendStatusBanner({ onRecovered }) {
         onClick={async () => {
           try {
             setProbing(true);
-            await api.system.health({ timeout: 8000, maxRetries: 0 });
+            await api.system.live({ timeout: 8000, maxRetries: 0 });
             setStatus(null);
             if (onRecovered) onRecovered();
           } catch {
@@ -396,7 +396,10 @@ function MainApp() {
         return <Notifications onNavigate={navigate} pageParams={pageParams} />;
 
       case 'settings':
-        return <Settings onNavigate={navigate} />;
+        return <Settings onNavigate={navigate} initialSection={pageParams.section || ''} />;
+
+      case 'profile':
+        return <Settings onNavigate={navigate} initialSection="account" />;
 
       case 'help':
       case 'support':

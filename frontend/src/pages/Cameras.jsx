@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { api } from '../services/api';
+import { api, API_BASE_URL } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../components/common/Toast';
 import { Modal } from '../components/common/Modal';
@@ -324,7 +324,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       try {
         const csrfMatch = document.cookie.match(/(?:^|;\s*)deepvision_django_csrftoken=([^;]+)/);
         const csrfVal = csrfMatch ? decodeURIComponent(csrfMatch[1]) : '';
-        fetch(`/api/cameras/${camId}/disconnect/`, {
+        fetch(`${API_BASE_URL}/api/cameras/${camId}/disconnect/`, {
           method: 'POST',
           credentials: 'include',
           keepalive: true,

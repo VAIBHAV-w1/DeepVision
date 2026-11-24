@@ -13,7 +13,7 @@ import ThemeToggle from '../components/common/ThemeToggle';
  */
 export function Login({ onNavigate, onNeedsVerification }) {
   const { t } = useTranslation();
-  const { checkAuth } = useAuth();
+  const { checkAuth, loading: authLoading } = useAuth();
   const { addToast } = useToast();
 
   const [step, setStep] = useState('credentials'); // 'credentials' | 'otp'
@@ -23,6 +23,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
   const [remember, setRemember] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [rateLimitWait, setRateLimitWait] = useState(0);
 
   // 6-Digit OTP State
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
@@ -30,19 +31,28 @@ export function Login({ onNavigate, onNeedsVerification }) {
   const inputRefs = useRef([]);
 
   useEffect(() => {
-    if (!getCsrfToken()) {
+    if (!authLoading && !getCsrfToken()) {
       fetchCsrfToken();
     }
     const handleBackendStatus = (ev) => {
       if (ev?.detail?.available === true) {
+        setRateLimitWait(0);
         setError((prev) => (
-          prev && /waking up|unreachable|unavailable|timed out/i.test(prev) ? null : prev
+          prev && /waking up|unreachable|unavailable|timed out|hibernation/i.test(prev) ? null : prev
         ));
       }
     };
     window.addEventListener('backend:status', handleBackendStatus);
     return () => window.removeEventListener('backend:status', handleBackendStatus);
-  }, []);
+  }, [authLoading]);
+
+  useEffect(() => {
+    if (rateLimitWait <= 0) return undefined;
+    const timer = setInterval(() => {
+      setRateLimitWait((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [rateLimitWait]);
 
   useEffect(() => {
     if (step === 'otp') {
@@ -74,7 +84,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
 
   const handleCredentialsSubmit = async (e) => {
     e.preventDefault();
-    if (loading) return;
+    if (loading || rateLimitWait > 0) return;
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
       setError(t('auth.emailRequired', 'Email is required.'));
@@ -88,9 +98,13 @@ export function Login({ onNavigate, onNeedsVerification }) {
     try {
       setLoading(true);
       setError(null);
+      if (!getCsrfToken()) {
+        await fetchCsrfToken();
+      }
       const res = await api.auth.login(trimmedEmail, password);
 
       if (res && res.requires_otp) {
+        setRateLimitWait(0);
         setStep('otp');
         setCooldown(60);
         addToast(t('auth.otpDispatched', 'Verification code dispatched to your email.'), 'info');
@@ -106,9 +120,13 @@ export function Login({ onNavigate, onNeedsVerification }) {
         addToast(errorMsg, 'error');
       }
     } catch (err) {
+      if (err?.status === 429) {
+        const waitSec = Math.min(120, Math.max(3, Number(err?.retryAfter || err?.data?.retry_after || 5)));
+        setRateLimitWait(waitSec);
+      }
       const errorMsg = err?.data?.error || err?.message || t('auth.serviceUnavailable', 'Unable to reach authentication service. Please check your credentials or network status.');
       setError(errorMsg);
-      addToast(errorMsg, 'error');
+      addToast(errorMsg, err?.isHibernateRateLimited ? 'warning' : 'error');
     } finally {
       setLoading(false);
     }
@@ -116,6 +134,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
 
   const handleOtpSubmit = async (e) => {
     e.preventDefault();
+    if (loading || rateLimitWait > 0) return;
     const otpCode = digits.join('');
     if (otpCode.length !== 6) {
       setError(t('auth.incompleteOtp', 'Please enter the complete 6-digit code.'));
@@ -135,6 +154,10 @@ export function Login({ onNavigate, onNeedsVerification }) {
         addToast(errorMsg, 'error');
       }
     } catch (err) {
+      if (err?.status === 429) {
+        const waitSec = Math.min(120, Math.max(3, Number(err?.retryAfter || err?.data?.retry_after || 5)));
+        setRateLimitWait(waitSec);
+      }
       const errorMsg = err?.data?.error || err.message || t('auth.otpFailed', 'OTP verification failed.');
       setError(errorMsg);
       addToast(errorMsg, 'error');
@@ -454,17 +477,23 @@ export function Login({ onNavigate, onNeedsVerification }) {
 
           {error && (
             <div
+              role="alert"
               style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                border: '1px solid rgba(239, 68, 68, 0.35)',
+                backgroundColor: rateLimitWait > 0 ? 'rgba(245, 158, 11, 0.14)' : 'rgba(239, 68, 68, 0.15)',
+                border: rateLimitWait > 0 ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid rgba(239, 68, 68, 0.35)',
                 borderRadius: '8px',
                 padding: '10px 14px',
                 fontSize: '0.84rem',
-                color: '#FCA5A5',
+                color: rateLimitWait > 0 ? '#FDE68A' : '#FCA5A5',
                 marginBottom: '1.25rem',
               }}
             >
-              {error}
+              <div>{error}</div>
+              {rateLimitWait > 0 && (
+                <div style={{ marginTop: '4px', fontSize: '0.78rem', opacity: 0.9 }}>
+                  {t('auth.retryCountdown', 'Retry available in')} {rateLimitWait}s
+                </div>
+              )}
             </div>
           )}
 
@@ -594,7 +623,7 @@ export function Login({ onNavigate, onNeedsVerification }) {
               <button
                 type="submit"
                 id="btn-sign-in"
-                disabled={loading}
+                disabled={loading || rateLimitWait > 0}
                 style={{
                   marginTop: '0.5rem',
                   display: 'flex',
@@ -608,18 +637,25 @@ export function Login({ onNavigate, onNeedsVerification }) {
                   padding: '12px 20px',
                   fontSize: '0.92rem',
                   fontWeight: 700,
-                  cursor: loading ? 'not-allowed' : 'pointer',
+                  cursor: (loading || rateLimitWait > 0) ? 'not-allowed' : 'pointer',
+                  opacity: rateLimitWait > 0 ? 0.72 : 1,
                   boxShadow: '0 4px 14px rgba(37, 99, 235, 0.45)',
                   transition: 'background-color 0.15s',
                 }}
                 onMouseEnter={(e) => {
-                  if (!loading) e.currentTarget.style.backgroundColor = '#1D4ED8';
+                  if (!loading && rateLimitWait <= 0) e.currentTarget.style.backgroundColor = '#1D4ED8';
                 }}
                 onMouseLeave={(e) => {
-                  if (!loading) e.currentTarget.style.backgroundColor = '#2563EB';
+                  if (!loading && rateLimitWait <= 0) e.currentTarget.style.backgroundColor = '#2563EB';
                 }}
               >
-                <span>{loading ? t('auth.signingIn', 'Signing In...') : t('auth.signIn', 'Sign In')}</span>
+                <span>
+                  {loading
+                    ? t('auth.signingIn', 'Signing In...')
+                    : rateLimitWait > 0
+                      ? `${t('auth.waitRetry', 'Wait')} (${rateLimitWait}s)`
+                      : t('auth.signIn', 'Sign In')}
+                </span>
                 <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>→</span>
               </button>
 

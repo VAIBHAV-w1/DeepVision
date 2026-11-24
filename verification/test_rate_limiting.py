@@ -64,6 +64,47 @@ class RateLimitingTests(unittest.TestCase):
         self.assertIn("Retry-After", resp4.headers)
         self.assertGreater(int(resp4.headers["Retry-After"]), 0)
 
+    def test_04_account_scoped_rate_limit_isolates_users_behind_shared_proxy_ip(self):
+        @ratelimit(scope="test_shared_ip_login", limit=2, window=60, key_field="email")
+        def login_view(request):
+            return JsonResponse({"success": True})
+
+        import json
+        for _ in range(2):
+            r_alice = self.factory.post(
+                "/api/auth/login/",
+                data=json.dumps({"email": "alice@example.com"}),
+                content_type="application/json",
+                REMOTE_ADDR=self.test_ip,
+            )
+            self.assertEqual(login_view(r_alice).status_code, 200)
+
+        # 3rd Alice attempt must be blocked even though Bob shares the same CDN IP
+        r_alice_blocked = self.factory.post(
+            "/api/auth/login/",
+            data=json.dumps({"email": "alice@example.com"}),
+            content_type="application/json",
+            REMOTE_ADDR=self.test_ip,
+        )
+        self.assertEqual(login_view(r_alice_blocked).status_code, 429)
+
+        # Bob on the exact same shared CDN IP must NOT be locked out by Alice's failures
+        r_bob = self.factory.post(
+            "/api/auth/login/",
+            data=json.dumps({"email": "bob@example.com"}),
+            content_type="application/json",
+            REMOTE_ADDR=self.test_ip,
+        )
+        self.assertEqual(login_view(r_bob).status_code, 200)
+
+    def test_05_public_remote_addr_ignores_spoofed_x_real_ip(self):
+        req = self.factory.get(
+            "/",
+            REMOTE_ADDR="198.51.100.88",
+            HTTP_X_REAL_IP="203.0.113.5",
+        )
+        self.assertEqual(get_client_ip(req), "198.51.100.88")
+
 
 if __name__ == "__main__":
     unittest.main()

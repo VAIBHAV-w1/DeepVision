@@ -9,7 +9,51 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || import.meta.en
 
 const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504]);
 const inFlightMutations = new Map();
+const inFlightReads = new Map();
 let isBackendUnavailable = false;
+
+function parseRetryAfterSeconds(response) {
+  const raw = response?.headers?.get?.('Retry-After');
+  if (!raw) return 0;
+  const asSec = Number(raw);
+  if (Number.isFinite(asSec) && asSec > 0) {
+    return Math.min(120, Math.max(1, Math.ceil(asSec)));
+  }
+  const asDate = Date.parse(raw);
+  if (Number.isFinite(asDate)) {
+    const delta = Math.ceil((asDate - Date.now()) / 1000);
+    if (delta > 0) {
+      return Math.min(120, Math.max(1, delta));
+    }
+  }
+  return 0;
+}
+
+function isRenderHibernateResponse(response, parsedData = null) {
+  if (!response || response.status !== 429) return false;
+  const renderRouting = (response.headers?.get?.('X-Render-Routing') || '').toLowerCase();
+  if (renderRouting.includes('hibernate') || renderRouting.includes('rate-limit')) {
+    return true;
+  }
+  // Render cold-start 429 responds with plain-text "Too Many Requests" and never emits Django JSON rate-limit fields
+  if (
+    parsedData !== null &&
+    typeof parsedData !== 'object'
+  ) {
+    return true;
+  }
+  if (
+    parsedData &&
+    typeof parsedData === 'object' &&
+    !parsedData.scope &&
+    !parsedData.retry_after &&
+    !parsedData.cooldown &&
+    !parsedData.code
+  ) {
+    return true;
+  }
+  return false;
+}
 
 function emitBackendStatus(detail) {
   if (detail && detail.available === false) {
@@ -58,9 +102,15 @@ async function request(endpoint, options = {}) {
   const dedupKey = (isMutation && !skipDedup)
     ? `${method}:${url}:${typeof bodyToSend === 'string' ? bodyToSend : ''}`
     : null;
+  const readDedupKey = (isIdempotentRead && !options.signal && !options.skipDedup)
+    ? `${method}:${url}`
+    : null;
 
   if (dedupKey && inFlightMutations.has(dedupKey)) {
     return inFlightMutations.get(dedupKey);
+  }
+  if (readDedupKey && inFlightReads.has(readDedupKey)) {
+    return inFlightReads.get(readDedupKey);
   }
 
   const executeAttempt = async () => {
@@ -75,9 +125,11 @@ async function request(endpoint, options = {}) {
       }
     }
 
+    let hibernatePostRetries = 0;
+
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
-        const backoffMs = Math.min(8000, 1000 * (2 ** (attempt - 1)));
+        const backoffMs = Math.min(8000, 1200 * (2 ** (attempt - 1)));
         emitBackendStatus({
           available: false,
           waking: true,
@@ -112,6 +164,7 @@ async function request(endpoint, options = {}) {
         };
         delete fetchOptions.timeout;
         delete fetchOptions.maxRetries;
+        delete fetchOptions.skipDedup;
 
         const response = await fetch(url, fetchOptions);
         clearTimeout(timeoutId);
@@ -120,22 +173,7 @@ async function request(endpoint, options = {}) {
           continue;
         }
 
-        // Backend answered cleanly if not a gateway/availability failure
-        if (!TRANSIENT_GATEWAY_STATUSES.has(response.status)) {
-          emitBackendStatus({ available: true, waking: false, retrying: false, status: response.status });
-        }
-
-        // Handle unauthenticated response
-        if (response.status === 401 && !url.includes('/api/auth/me')) {
-          window.dispatchEvent(new CustomEvent('auth:unauthorized'));
-        }
-
-        // Special clean handling for auth/me unauthenticated state
-        if (response.status === 401 && url.includes('/api/auth/me')) {
-          return { authenticated: false, user: null };
-        }
-
-        // Parse JSON response
+        // Parse JSON or text payload before handling 429/error formatting
         let data = null;
         const contentType = response.headers.get('content-type') || '';
         if (contentType.includes('application/json')) {
@@ -151,10 +189,65 @@ async function request(endpoint, options = {}) {
           data = await response.text();
         }
 
+        const isHibernate429 = isRenderHibernateResponse(response, data);
+        const retryAfterSec = parseRetryAfterSeconds(response) || Number(data?.retry_after || data?.cooldown || 0);
+
+        if (response.status === 429 && isHibernate429) {
+          const waitMs = Math.min(8000, Math.max(2500, (retryAfterSec || 3) * 1000));
+          if (isIdempotentRead && attempt < maxRetries) {
+            emitBackendStatus({
+              available: false,
+              waking: true,
+              retrying: true,
+              status: 429,
+              message: 'Backend server is waking from idle hibernation (rate limit cooldown). Retrying automatically...',
+            });
+            await new Promise((r) => setTimeout(r, waitMs));
+            continue;
+          }
+          if (isMutation && !skipDedup && hibernatePostRetries < 1) {
+            hibernatePostRetries += 1;
+            emitBackendStatus({
+              available: false,
+              waking: true,
+              retrying: true,
+              status: 429,
+              message: 'Backend server is waking from idle hibernation. Completing sign-in...',
+            });
+            await new Promise((r) => setTimeout(r, waitMs));
+            attempt -= 1;
+            continue;
+          }
+        }
+
+        // Backend answered cleanly if not a gateway/hibernate availability failure
+        if (!TRANSIENT_GATEWAY_STATUSES.has(response.status) && !isHibernate429) {
+          emitBackendStatus({ available: true, waking: false, retrying: false, status: response.status });
+        }
+
+        // Handle unauthenticated response
+        if (response.status === 401 && !url.includes('/api/auth/me')) {
+          window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+        }
+
+        // Special clean handling for auth/me unauthenticated state
+        if (response.status === 401 && url.includes('/api/auth/me')) {
+          return { authenticated: false, user: null };
+        }
+
         if (!response.ok) {
           let errorMsg;
           if (data && typeof data === 'object' && (data.error || data.message || data.detail)) {
             errorMsg = data.error || data.message || data.detail;
+          } else if (response.status === 429) {
+            if (isHibernate429) {
+              errorMsg = 'Backend server is waking up from idle hibernation (hosting proxy rate limit). Please wait a few seconds and try again.';
+              emitBackendStatus({ available: false, waking: true, retrying: false, status: 429, message: errorMsg });
+            } else {
+              errorMsg = retryAfterSec
+                ? `Too many requests. Please wait ${retryAfterSec} seconds before trying again.`
+                : 'Too many requests. Please wait a few seconds before trying again.';
+            }
           } else if (response.status === 502 || response.status === 504) {
             errorMsg = 'Backend server is waking up or temporarily unreachable (HTTP ' + response.status + '). Please retry in a few seconds.';
             emitBackendStatus({ available: false, waking: true, retrying: false, status: response.status, message: errorMsg });
@@ -172,7 +265,11 @@ async function request(endpoint, options = {}) {
           const error = new Error(errorMsg);
           error.status = response.status;
           error.data = data;
-          error.isTransientUnavailable = TRANSIENT_GATEWAY_STATUSES.has(response.status);
+          if (response.status === 429) {
+            error.retryAfter = retryAfterSec || (isHibernate429 ? 5 : 15);
+            error.isHibernateRateLimited = isHibernate429;
+          }
+          error.isTransientUnavailable = TRANSIENT_GATEWAY_STATUSES.has(response.status) || isHibernate429;
           throw error;
         }
 
@@ -215,6 +312,13 @@ async function request(endpoint, options = {}) {
         inFlightMutations.delete(dedupKey);
       }
     });
+  } else if (readDedupKey) {
+    inFlightReads.set(readDedupKey, promise);
+    promise.finally(() => {
+      if (inFlightReads.get(readDedupKey) === promise) {
+        inFlightReads.delete(readDedupKey);
+      }
+    });
   }
   return promise;
 }
@@ -227,7 +331,7 @@ export const api = {
 
   // Authentication
   auth: {
-    me: (options = {}) => request('/api/auth/me/', { timeout: 12000, maxRetries: 3, ...options }),
+    me: (options = {}) => request('/api/auth/me/', { timeout: 22000, maxRetries: 2, ...options }),
     csrf: () => request('/api/auth/csrf/'),
     login: (email, password) => request('/api/auth/login/', { method: 'POST', body: { email, password } }),
     verifyLoginOtp: (email, otp) => request('/api/auth/verify-login-otp/', { method: 'POST', body: { email, otp } }),
