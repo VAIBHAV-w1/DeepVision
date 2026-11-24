@@ -255,29 +255,39 @@ export function installWindowsWasiPathShim() {
   if (callableProto) {
     const origResolveId = callableProto.resolveId;
     if (typeof origResolveId === 'function') {
-      callableProto.resolveId = async function (ctx, id, importer, opts, ...rest) {
-        const res = await origResolveId.call(
+      callableProto.resolveId = async function (id, importer, opts, ...rest) {
+        const cleanRawId = typeof id === 'string' ? id.replace(/\\/g, '/') : id;
+        const feNorm = frontendDir.replace(/\\/g, '/');
+        const idForWasi = (typeof cleanRawId === 'string' && cleanRawId.toLowerCase().startsWith((feNorm + '/').toLowerCase()))
+          ? cleanRawId.slice(feNorm.length)
+          : toWasiPath(id);
+        let res = await origResolveId.call(
           this,
-          ctx,
-          toWasiPath(id),
+          idForWasi,
           toWasiPath(importer),
           mapStringsDeep(opts, toWasiPath),
           ...rest
         );
+        if (!res && typeof cleanRawId === 'string' && /^[A-Za-z]:\//.test(cleanRawId) && !/\.html(?:$|\?)/i.test(cleanRawId)) {
+          const [baseFile, ...qParts] = cleanRawId.split('?');
+          if (fs.existsSync(baseFile) && fs.statSync(baseFile).isFile()) {
+            res = { id: qParts.length ? `${baseFile}?${qParts.join('?')}` : baseFile };
+          }
+        }
         return mapStringsDeep(res, fromWasiPath);
       };
     }
     const origLoad = callableProto.load;
     if (typeof origLoad === 'function') {
-      callableProto.load = async function (ctx, id, ...rest) {
-        const res = await origLoad.call(this, ctx, toWasiPath(id), ...rest);
+      callableProto.load = async function (id, ...rest) {
+        const res = await origLoad.call(this, toWasiPath(id), ...rest);
         return mapStringsDeep(res, fromWasiPath);
       };
     }
     const origTransform = callableProto.transform;
     if (typeof origTransform === 'function') {
-      callableProto.transform = async function (ctx, code, id, ...rest) {
-        const res = await origTransform.call(this, ctx, code, toWasiPath(id), ...rest);
+      callableProto.transform = async function (code, id, ...rest) {
+        const res = await origTransform.call(this, code, toWasiPath(id), ...rest);
         return mapStringsDeep(res, fromWasiPath);
       };
     }
