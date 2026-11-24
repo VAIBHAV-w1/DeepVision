@@ -153,7 +153,11 @@ export function ForgotPassword({ onNavigate }) {
       setStep(2);
       setCooldown(60);
     } catch (err) {
-      setError(err.message || 'Failed to request password reset');
+      if (err?.status === 429) {
+        const waitSec = Math.min(120, Math.max(3, Number(err?.retryAfter || err?.data?.retry_after || 5)));
+        setCooldown(waitSec);
+      }
+      setError(err?.data?.error || err.message || 'Failed to request password reset');
     } finally {
       setLoading(false);
     }
@@ -187,7 +191,11 @@ export function ForgotPassword({ onNavigate }) {
         setError(res?.error || 'Invalid verification code.');
       }
     } catch (err) {
-      setError(err.message || 'Invalid verification code.');
+      if (err?.status === 429) {
+        const waitSec = Math.min(120, Math.max(3, Number(err?.retryAfter || err?.data?.retry_after || 5)));
+        setCooldown(waitSec);
+      }
+      setError(err?.data?.error || err.message || 'Invalid verification code.');
     } finally {
       setLoading(false);
     }

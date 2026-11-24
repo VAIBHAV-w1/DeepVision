@@ -49,8 +49,8 @@ export function Settings({ onNavigate, initialSection = "" }) {
   const [confThreshold, setConfThreshold] = useState(() => {
     return Number(localStorage.getItem("deepvision_conf_threshold")) || 0.35;
   });
-  const [aiProfile, setAiProfile] = useState("balanced");
-  const [activeBackendDetail, setActiveBackendDetail] = useState("YOLO26s ONNX + BoT-SORT Re-ID");
+  const [aiProfile, setAiProfile] = useState("lightweight");
+  const [activeBackendDetail, setActiveBackendDetail] = useState("YOLO26n ONNX + BoT-SORT Re-ID");
   const [anomalyRules, setAnomalyRules] = useState(() => {
     const saved = localStorage.getItem("deepvision_anomaly_rules");
     if (saved) {
@@ -1001,13 +1001,13 @@ export function Settings({ onNavigate, initialSection = "" }) {
                 fontSize: "0.82rem",
               }}
             >
-              <option value="balanced">YOLO26s — Balanced Accuracy (Default)</option>
-              <option value="lightweight">YOLO26n — High-Speed CPU (~3.3x Faster)</option>
+              <option value="lightweight">YOLO26n — Real-Time 30 FPS / Fast CPU (Default)</option>
+              <option value="balanced">YOLO26s — High Accuracy (Explicit)</option>
             </select>
             <div style={{ fontSize: "0.73rem", color: "var(--text-muted, #64748B)", marginTop: "4px" }}>
               {aiProfile === "lightweight"
-                ? "Optimized for low-vCPU cloud containers with lower latency and slightly reduced small-object recall."
-                : "Higher detection recall on small or distant subjects; heavier on single-vCPU cloud hosts."}
+                ? "Prioritizes real-time ~30 FPS live inference on Intel Iris Xe iGPU and ~3.3x faster CPU throughput."
+                : "Higher detection recall on small or distant subjects (~18 FPS on iGPU; heavier on CPU-only cloud hosts)."}
             </div>
           </div>
 

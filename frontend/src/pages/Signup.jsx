@@ -13,6 +13,15 @@ export function Signup({ onNavigate, onSignedUp }) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [rateLimitWait, setRateLimitWait] = useState(0);
+
+  React.useEffect(() => {
+    if (rateLimitWait <= 0) return undefined;
+    const timer = setInterval(() => {
+      setRateLimitWait((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [rateLimitWait]);
 
   // Password strength calculation matching original signup.html
   const getStrength = (pw) => {
@@ -47,6 +56,7 @@ export function Signup({ onNavigate, onSignedUp }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading || rateLimitWait > 0) return;
     if (password !== confirmPassword) {
       setError(t("auth.passwordsDoNotMatch", "Passwords do not match."));
       return;
@@ -68,7 +78,11 @@ export function Signup({ onNavigate, onSignedUp }) {
         setError(res?.error || t("auth.signInFailed", "Registration failed."));
       }
     } catch (err) {
-      setError(err.message || t("auth.signInFailed", "Registration failed."));
+      if (err?.status === 429) {
+        const waitSec = Math.min(120, Math.max(3, Number(err?.retryAfter || err?.data?.retry_after || 5)));
+        setRateLimitWait(waitSec);
+      }
+      setError(err?.data?.error || err.message || t("auth.signInFailed", "Registration failed."));
     } finally {
       setLoading(false);
     }
@@ -314,13 +328,15 @@ export function Signup({ onNavigate, onSignedUp }) {
         {/* Submit */}
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || rateLimitWait > 0}
           className="btn btn-primary btn-lg"
           style={{ width: "100%" }}
         >
           {loading
             ? t("auth.signingUp", "Creating Account...")
-            : t("auth.createAccount", "Create Account")}
+            : rateLimitWait > 0
+              ? `${t("auth.waitRetry", "Wait")} (${rateLimitWait}s)`
+              : t("auth.createAccount", "Create Account")}
         </button>
 
         <div className="auth-footer-text">

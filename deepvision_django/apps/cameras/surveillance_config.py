@@ -29,7 +29,7 @@ VIDEO_QUALITY_PROFILES = {
         "max_height": 480,
         "stream_jpeg_quality": 78,
         "browser_jpeg_quality": 0.78,
-        "browser_max_fps": 20,
+        "browser_max_fps": 24,
     },
     "high": {
         "id": "high",
@@ -38,7 +38,7 @@ VIDEO_QUALITY_PROFILES = {
         "max_height": 720,
         "stream_jpeg_quality": 86,
         "browser_jpeg_quality": 0.85,
-        "browser_max_fps": 24,
+        "browser_max_fps": 30,
     },
     "full": {
         "id": "full",
@@ -47,7 +47,7 @@ VIDEO_QUALITY_PROFILES = {
         "max_height": 1080,
         "stream_jpeg_quality": 92,
         "browser_jpeg_quality": 0.91,
-        "browser_max_fps": 25,
+        "browser_max_fps": 30,
     },
 }
 

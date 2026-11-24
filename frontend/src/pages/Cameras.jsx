@@ -34,9 +34,9 @@ const DEFAULT_CAMERA_FORM = {
 };
 
 const QUALITY_SETTINGS_MAP = {
-  standard: { id: 'standard', label: 'Standard (480p)', maxWidth: 640, maxHeight: 480, jpegQuality: 0.78, intervalMs: 50 },
-  high: { id: 'high', label: 'High HD (720p)', maxWidth: 1280, maxHeight: 720, jpegQuality: 0.85, intervalMs: 42 },
-  full: { id: 'full', label: 'Full Source (1080p)', maxWidth: 1920, maxHeight: 1080, jpegQuality: 0.91, intervalMs: 40 },
+  standard: { id: 'standard', label: 'Standard (480p)', maxWidth: 640, maxHeight: 480, jpegQuality: 0.78, intervalMs: 42 },
+  high: { id: 'high', label: 'High HD (720p)', maxWidth: 1280, maxHeight: 720, jpegQuality: 0.85, intervalMs: 33 },
+  full: { id: 'full', label: 'Full Source (1080p)', maxWidth: 1920, maxHeight: 1080, jpegQuality: 0.91, intervalMs: 33 },
 };
 
 function formatBackendLabel(detectorBackend, trackerBackend, t) {
@@ -146,12 +146,14 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isRecordingBusy, setIsRecordingBusy] = useState(false);
   const [measuredFps, setMeasuredFps] = useState(0);
+  const [displayFps, setDisplayFps] = useState(0);
   const [measuredAiFps, setMeasuredAiFps] = useState(0);
   const [latencyMs, setLatencyMs] = useState(0);
   const [p50LatencyMs, setP50LatencyMs] = useState(0);
   const [p95LatencyMs, setP95LatencyMs] = useState(0);
   const [frameAgeMs, setFrameAgeMs] = useState(0);
-  const [aiProfile, setAiProfile] = useState('balanced');
+  const [aiProfile, setAiProfile] = useState('lightweight');
+  const [browserVideoDims, setBrowserVideoDims] = useState({ w: 1280, h: 720 });
   const [switchingProfile, setSwitchingProfile] = useState(false);
   const [liveResolution, setLiveResolution] = useState('');
   const [liveFourcc, setLiveFourcc] = useState('');
@@ -363,7 +365,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       (streamLoaded ||
         Boolean(snapshotUrl) ||
         (selectedCam.status === 'online' && measuredFps > 0) ||
-        (browserBridgeActive && measuredFps > 0))
+        (browserBridgeActive && (displayFps > 0 || measuredFps > 0 || browserStreamRef.current)))
   );
 
   // Poll live telemetry when viewing Live Monitor (paused or browser-push skips redundant polling; ingest already returns fresh telemetry)
@@ -463,7 +465,8 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       camId &&
         isPlaying &&
         workspaceView === 'live' &&
-        !(selectedCam?.source_type === 'browser' && !browserBridgeActive && selectedCam?.status !== 'online')
+        !browserBridgeActive &&
+        !(selectedCam?.source_type === 'browser' && selectedCam?.status !== 'online')
     );
     if (!canStream || streamLoaded) {
       if (snapshotUrlRef.current) {
@@ -561,23 +564,92 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
     };
   }, [selectedCam?.id, selectedCam?.status, isPlaying, workspaceView, browserBridgeActive, streamLoaded, streamError, useSnapshotFallback, viewMode]);
 
-  // Browser Webcam Ingest Loop: binary JPEG Blob upload + bounded concurrency (max 2 in-flight, latest-seq ordering)
+  // Browser Webcam Display FPS Meter (measures true decoded <video> paint cadence independently of AI/upload)
+  useEffect(() => {
+    if (!browserBridgeActive || !isPlaying || workspaceView !== 'live') {
+      setDisplayFps(0);
+      return undefined;
+    }
+    const videoEl = browserVideoRef.current;
+    if (!videoEl) return undefined;
+
+    let active = true;
+    let rvfcId = null;
+    let rafId = null;
+    let count = 0;
+    let winStart = performance.now();
+    let lastVideoTime = -1;
+
+    const recordFrame = (now) => {
+      count += 1;
+      const elapsed = now - winStart;
+      if (elapsed >= 800) {
+        if (active) setDisplayFps(Math.round(((count * 1000) / elapsed) * 10) / 10);
+        count = 0;
+        winStart = now;
+      }
+      if (videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+        setBrowserVideoDims((prev) =>
+          prev.w === videoEl.videoWidth && prev.h === videoEl.videoHeight
+            ? prev
+            : { w: videoEl.videoWidth, h: videoEl.videoHeight }
+        );
+      }
+    };
+
+    if (typeof videoEl.requestVideoFrameCallback === 'function') {
+      const onVideoFrame = (now) => {
+        if (!active) return;
+        recordFrame(now);
+        rvfcId = videoEl.requestVideoFrameCallback(onVideoFrame);
+      };
+      rvfcId = videoEl.requestVideoFrameCallback(onVideoFrame);
+      return () => {
+        active = false;
+        if (rvfcId !== null && typeof videoEl.cancelVideoFrameCallback === 'function') {
+          try { videoEl.cancelVideoFrameCallback(rvfcId); } catch {}
+        }
+      };
+    }
+
+    const onRaf = (now) => {
+      if (!active) return;
+      if (videoEl.readyState >= 2 && videoEl.currentTime !== lastVideoTime) {
+        lastVideoTime = videoEl.currentTime;
+        recordFrame(now);
+      }
+      rafId = requestAnimationFrame(onRaf);
+    };
+    rafId = requestAnimationFrame(onRaf);
+    return () => {
+      active = false;
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, [browserBridgeActive, isPlaying, workspaceView, selectedCam?.id]);
+
+  // Browser Webcam Ingest Loop: synchronous video-frame-paced JPEG Blob upload + bounded concurrency (max 2 in-flight, latest-seq ordering)
   useEffect(() => {
     if (!browserBridgeActive || !selectedCam?.id || !isPlaying) return undefined;
     let active = true;
     let inFlightCount = 0;
     let seqCounter = 0;
     let latestAppliedSeq = 0;
+    let lastUploadAt = 0;
+    let rvfcHandle = null;
     const targetCamId = selectedCam.id;
 
     const qualityCfg = QUALITY_SETTINGS_MAP[selectedCam?.video_quality] || QUALITY_SETTINGS_MAP.high;
+    const minIntervalMs = Math.max(25, (qualityCfg.intervalMs || 33) - 4);
 
     const pushFrame = () => {
       if (!active || inFlightCount >= 2) return;
       if (typeof document !== 'undefined' && document.hidden) return;
+      const nowPerf = performance.now();
+      if (nowPerf - lastUploadAt < minIntervalMs) return;
       const videoEl = browserVideoRef.current;
       if (!videoEl || videoEl.readyState < 2 || !videoEl.videoWidth) return;
 
+      lastUploadAt = nowPerf;
       let canvas = browserCanvasRef.current;
       if (!canvas) {
         canvas = document.createElement('canvas');
@@ -619,8 +691,12 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
             if (typeof res.p95_latency_ms === 'number') setP95LatencyMs(res.p95_latency_ms);
             if (typeof res.frame_age_ms === 'number') setFrameAgeMs(res.frame_age_ms);
             if (typeof res.ai_profile === 'string' && res.ai_profile) setAiProfile(res.ai_profile);
-            if (res.frame_width && res.frame_height) setLiveResolution(`${res.frame_width}x${res.frame_height}`);
-            if (Array.isArray(res.tracks_list)) setActiveTracksList(res.tracks_list);
+            if (res.frame_width && res.frame_height) {
+              setLiveResolution(`${res.frame_width}x${res.frame_height}`);
+              setBrowserVideoDims({ w: Number(res.frame_width), h: Number(res.frame_height) });
+            }
+            const nextTracks = Array.isArray(res.tracks_list) ? res.tracks_list : (Array.isArray(res.tracks) ? res.tracks : null);
+            if (nextTracks) setActiveTracksList(nextTracks);
             if (typeof res.currently_visible_persons === 'number') setVisiblePersonsCount(res.currently_visible_persons);
             if (typeof res.active_tracks === 'number') setActiveTracksCount(res.active_tracks);
             if (typeof res.unique_persons_observed === 'number') setUniquePersonsObserved(res.unique_persons_observed);
@@ -651,12 +727,25 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       }
     };
 
+    const videoEl = browserVideoRef.current;
+    if (videoEl && typeof videoEl.requestVideoFrameCallback === 'function') {
+      const onFrame = () => {
+        if (!active) return;
+        pushFrame();
+        rvfcHandle = videoEl.requestVideoFrameCallback(onFrame);
+      };
+      rvfcHandle = videoEl.requestVideoFrameCallback(onFrame);
+    }
+
     const initialTimer = setTimeout(pushFrame, 20);
     const interval = setInterval(pushFrame, qualityCfg.intervalMs);
     return () => {
       active = false;
       clearTimeout(initialTimer);
       clearInterval(interval);
+      if (rvfcHandle !== null && videoEl && typeof videoEl.cancelVideoFrameCallback === 'function') {
+        try { videoEl.cancelVideoFrameCallback(rvfcHandle); } catch {}
+      }
     };
   }, [browserBridgeActive, selectedCam?.id, selectedCam?.video_quality, isPlaying]);
 
@@ -1504,10 +1593,11 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
       !browserBridgeActive &&
       selectedCam?.status !== 'online'
   );
-  const streamImgSrc = selectedCam && !isBrowserStandby
+  const showDirectBrowserVideo = Boolean(selectedCam && browserBridgeActive && isPlaying);
+  const streamImgSrc = selectedCam && !isBrowserStandby && !showDirectBrowserVideo
     ? `${api.cameras.getStreamUrl(selectedCam.id, viewMode)}&t=${streamTimestamp}`
     : '';
-  const displayViewportSrc = snapshotUrl || streamImgSrc;
+  const displayViewportSrc = showDirectBrowserVideo ? '' : (snapshotUrl || streamImgSrc);
   const showOverlays = viewMode === 'tracking';
 
   const renderLiveMonitor = () => (
@@ -1681,8 +1771,8 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
                 cursor: switchingProfile ? 'wait' : 'pointer',
               }}
             >
-              <option value="balanced">YOLO26s (Balanced)</option>
-              <option value="lightweight">YOLO26n (Fast CPU)</option>
+              <option value="lightweight">YOLO26n (Real-Time 30 FPS)</option>
+              <option value="balanced">YOLO26s (High Accuracy)</option>
             </select>
           )}
         </div>
@@ -1723,48 +1813,124 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
               overflow: 'hidden',
             }}
           >
-            {/* Hidden video element captures browser camera frames cleanly for backend ingest */}
+            {/* Direct 30 FPS local browser video element when Browser Webcam Bridge is active (~0ms local display latency); hidden 1x1 otherwise */}
             <video
               ref={browserVideoRef}
               muted
               playsInline
-              style={{
-                position: 'absolute',
-                width: '1px',
-                height: '1px',
-                opacity: 0,
-                pointerEvents: 'none',
-              }}
+              style={
+                showDirectBrowserVideo
+                  ? {
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'contain',
+                      display: 'block',
+                      backgroundColor: '#020617',
+                    }
+                  : {
+                      position: 'absolute',
+                      width: '1px',
+                      height: '1px',
+                      opacity: 0,
+                      pointerEvents: 'none',
+                    }
+              }
             />
 
-            {selectedCam ? (
-              <img
-                ref={liveStreamImgRef}
-                key={`${selectedCam.id}-${viewMode}-${streamTimestamp}`}
-                src={isPlaying && displayViewportSrc ? displayViewportSrc : undefined}
-                alt={`${selectedCam.name} ${viewMode}`}
-                onLoad={() => {
-                  if (!snapshotUrl) {
-                    mjpegFailCountRef.current = 0;
-                    setStreamLoaded(true);
-                  }
-                  setStreamError(false);
-                }}
-                onError={() => {
-                  if (!snapshotUrl && displayViewportSrc) {
-                    mjpegFailCountRef.current += 1;
-                    setStreamLoaded(false);
-                    setStreamError(true);
-                  }
-                }}
+            {/* Synchronized Real-Time SVG Tracking HUD when viewing local Browser Video in Detection & Tracking mode */}
+            {showDirectBrowserVideo && showOverlays && (
+              <svg
+                viewBox={`0 0 ${Math.max(320, browserVideoDims.w || 1280)} ${Math.max(180, browserVideoDims.h || 720)}`}
+                preserveAspectRatio="xMidYMid meet"
                 style={{
+                  position: 'absolute',
+                  inset: 0,
                   width: '100%',
                   height: '100%',
-                  objectFit: 'contain',
-                  display: displayViewportSrc ? 'block' : 'none',
-                  backgroundColor: '#020617',
+                  pointerEvents: 'none',
+                  zIndex: 4,
                 }}
-              />
+              >
+                {activeTracksList.map((trk, idx) => {
+                  const box = Array.isArray(trk.bbox) ? trk.bbox : null;
+                  if (!box || box.length < 4) return null;
+                  const [x1, y1, x2, y2] = box.map((v) => Number(v) || 0);
+                  const w = Math.max(8, x2 - x1);
+                  const h = Math.max(8, y2 - y1);
+                  const clsLower = String(trk.class_name || '').toLowerCase();
+                  const isAlertBehav = trk.behavior && trk.behavior !== 'normal' && trk.behavior !== 'walking' && trk.behavior !== 'standing';
+                  const color = isAlertBehav ? '#EF4444' : (clsLower === 'person' ? '#10B981' : '#38BDF8');
+                  const confPct = typeof trk.confidence === 'number' ? ` ${Math.round(trk.confidence * 100)}%` : '';
+                  const label = `${trk.class_name || 'Obj'} ${trk.track_id || ''}${confPct}`.trim();
+                  const labelW = Math.max(70, label.length * 8 + 14);
+                  const labelY = Math.max(18, y1 - 4);
+                  return (
+                    <g key={`${trk.track_id || idx}`}>
+                      <rect
+                        x={x1}
+                        y={y1}
+                        width={w}
+                        height={h}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth={2.5}
+                        rx={3}
+                      />
+                      <rect
+                        x={x1}
+                        y={Math.max(0, labelY - 18)}
+                        width={labelW}
+                        height={20}
+                        fill={color}
+                        fillOpacity={0.85}
+                        rx={3}
+                      />
+                      <text
+                        x={x1 + 6}
+                        y={Math.max(14, labelY - 4)}
+                        fill="#FFFFFF"
+                        fontSize={12}
+                        fontWeight={700}
+                        fontFamily="system-ui, -apple-system, sans-serif"
+                      >
+                        {label}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            )}
+
+            {selectedCam ? (
+              !showDirectBrowserVideo && (
+                <img
+                  ref={liveStreamImgRef}
+                  key={`${selectedCam.id}-${viewMode}-${streamTimestamp}`}
+                  src={isPlaying && displayViewportSrc ? displayViewportSrc : undefined}
+                  alt={`${selectedCam.name} ${viewMode}`}
+                  onLoad={() => {
+                    if (!snapshotUrl) {
+                      mjpegFailCountRef.current = 0;
+                      setStreamLoaded(true);
+                    }
+                    setStreamError(false);
+                  }}
+                  onError={() => {
+                    if (!snapshotUrl && displayViewportSrc) {
+                      mjpegFailCountRef.current += 1;
+                      setStreamLoaded(false);
+                      setStreamError(true);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'contain',
+                    display: displayViewportSrc ? 'block' : 'none',
+                    backgroundColor: '#020617',
+                  }}
+                />
+              )
             ) : (
               <div style={{ color: '#94A3B8' }}>{t('cameras.noCameraSelected', 'Select or register a camera')}</div>
             )}
@@ -1780,7 +1946,7 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
                 draftPoints={draftPoints}
                 setDraftPoints={setDraftPoints}
                 onEditZoneVertices={handleEditZoneVertices}
-                showZones={zoneEditorOpen}
+                showZones={zoneEditorOpen || showDirectBrowserVideo}
               />
             )}
 
@@ -1955,7 +2121,12 @@ export function Cameras({ onNavigate, pageParams, initialCameraId }) {
                   <option value="full">Quality: Full Source (Up to 1080p)</option>
                 </select>
               )}
-              <span>{t('cameras.fpsShort', 'FPS')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{measuredFps || 0}</strong></span>
+              {showDirectBrowserVideo && (
+                <span title="Measured local <video> paint cadence">
+                  Disp: <strong style={{ color: '#10B981' }}>{displayFps || 0} FPS</strong>
+                </span>
+              )}
+              <span>{t('cameras.fpsShort', 'Cap FPS')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{measuredFps || 0}</strong></span>
               {viewMode === 'tracking' && (
                 <>
                   <span>{t('cameras.aiFpsShort', 'AI FPS')}: <strong style={{ color: 'var(--text-main, #F8FAFC)' }}>{measuredAiFps || 0}</strong></span>

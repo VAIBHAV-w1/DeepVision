@@ -71,11 +71,12 @@ class PerformancePipelineUnitTests(SimpleTestCase):
             with patch("apps.surveillance.ai.model_loader.reload_shared_yolo_model") as mock_reload, patch.object(
                 reg, "_persist_settings", return_value=None
             ):
-                reg.apply_runtime_settings(ai_profile="lightweight")
-                mock_reload.assert_called_once_with("lightweight")
-                self.assertEqual(reg.get_runtime_settings()["ai_profile"], "lightweight")
                 reg.apply_runtime_settings(ai_profile="balanced")
-                self.assertEqual(mock_reload.call_count, 2)
+                mock_reload.assert_called_with("balanced")
+                self.assertEqual(reg.get_runtime_settings()["ai_profile"], "balanced")
+                reg.apply_runtime_settings(ai_profile="lightweight")
+                mock_reload.assert_called_with("lightweight")
+                self.assertEqual(reg.get_runtime_settings()["ai_profile"], "lightweight")
 
 
 class BinaryIngestAndDashboardTests(TransactionTestCase):
@@ -184,6 +185,15 @@ class BinaryIngestAndDashboardTests(TransactionTestCase):
         with patch("apps.surveillance.ai.model_loader.reload_shared_yolo_model") as mock_reload, patch(
             "apps.surveillance.ai.registry.InferenceRegistry._persist_settings", return_value=None
         ), patch.dict(os.environ, {}, clear=False):
+            bal_resp = self.client.post(
+                "/api/settings/detection/",
+                data=json.dumps({"ai_profile": "balanced", "confidence_threshold": 0.35}),
+                content_type="application/json",
+            )
+            self.assertEqual(bal_resp.status_code, 200)
+            self.assertEqual(bal_resp.json()["ai_profile"], "balanced")
+            mock_reload.assert_called_with("balanced")
+
             post_resp = self.client.post(
                 "/api/settings/detection/",
                 data=json.dumps({"ai_profile": "lightweight", "confidence_threshold": 0.4}),
@@ -193,12 +203,4 @@ class BinaryIngestAndDashboardTests(TransactionTestCase):
             post_data = post_resp.json()
             self.assertEqual(post_data["ai_profile"], "lightweight")
             mock_reload.assert_called_with("lightweight")
-
-            restore_resp = self.client.post(
-                "/api/settings/detection/",
-                data=json.dumps({"ai_profile": "balanced", "confidence_threshold": 0.35}),
-                content_type="application/json",
-            )
-            self.assertEqual(restore_resp.status_code, 200)
-            self.assertEqual(restore_resp.json()["ai_profile"], "balanced")
 

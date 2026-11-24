@@ -529,7 +529,7 @@ def start_camera_recording(camera_id: int, user_id: int) -> Dict[str, Any]:
         if worker is None or not worker.running:
             worker = cam_reg.get_worker(camera_id, user_id)
 
-        measured_fps = worker.fps if (worker and getattr(worker, "fps", 0.0) > 0) else 15.0
+        measured_fps = worker.fps if (worker and getattr(worker, "fps", 0.0) >= 5.0) else 25.0
         rec = recording_service.start_recording(user_id, camera_id, fps=measured_fps)
 
         # Immediately seed initial frame if available so short clips always contain valid video frames

@@ -151,12 +151,13 @@ def _collect_and_save_evidence(alert_id, camera_id, user_id, camera_worker, pre_
                 vid_name = f"alert_{alert_id}_clip.mp4"
                 vid_path = os.path.join(folder, vid_name)
                 orig_h, orig_w = all_frames[0].shape[:2]
-                target_w = min(orig_w, 640)
+                target_w = min(orig_w, 1280)
                 target_h = int(orig_h * (target_w / orig_w)) if orig_w > 0 else orig_h
                 # Ensure even dimensions for h264
                 target_w = target_w - (target_w % 2)
                 target_h = target_h - (target_h % 2)
-                fps = 15.0
+                raw_fps = float(getattr(camera_worker, "fps", 0.0) or 0.0) if camera_worker is not None else 0.0
+                fps = round(max(10.0, min(30.0, raw_fps if raw_fps >= 5.0 else 25.0)), 1)
                 writer = create_browser_compatible_video_writer(vid_path, fps, target_w, target_h)
                 if writer:
                     for frm in all_frames:
@@ -231,6 +232,10 @@ class InferenceWorker:
         self.camera_id = camera_id
         self.tracker = tracker
         self.inference_interval = inference_interval_ms / 1000.0
+        self._effective_sleep_interval = self.inference_interval
+        self._cached_telemetry_summary = None
+        self._telemetry_summary_inf_id = -1
+        self._telemetry_summary_ts = 0.0
 
         self.thread = None
         self.running = False
@@ -341,7 +346,7 @@ class InferenceWorker:
                         break
 
                 now = time.time()
-                if now - self.last_inference_time < self.inference_interval:
+                if now - self.last_inference_time < self._effective_sleep_interval:
                     time.sleep(0.002)
                     continue
 
@@ -398,12 +403,13 @@ class InferenceWorker:
                 base_interval = max(0.015, float(getattr(self, "inference_interval", 0.033)))
                 is_gpu_backend = "gpu" in str(getattr(self.tracker, "detector_backend", "")).lower()
                 if is_gpu_backend:
-                    effective_interval = min(base_interval, 0.033)
+                    effective_interval = min(base_interval, 0.032)
                 elif latency > 180.0:
                     adaptive_cooldown = min(0.08, max(0.02, (latency / 1000.0) * 0.04))
                     effective_interval = max(base_interval, (latency / 1000.0) + adaptive_cooldown)
                 else:
                     effective_interval = base_interval
+                self._effective_sleep_interval = effective_interval
 
                 if fps_frame_times and (now_after - fps_frame_times[-1] > 2.0):
                     fps_frame_times.clear()
@@ -866,7 +872,14 @@ class InferenceWorker:
         threading.Thread(target=_runner, daemon=True).start()
 
     def get_telemetry_summary(self):
+        now_mono = time.monotonic()
         with self.lock:
+            if (
+                self._cached_telemetry_summary is not None
+                and self._telemetry_summary_inf_id == self.inference_id
+                and (now_mono - self._telemetry_summary_ts) < 0.25
+            ):
+                return dict(self._cached_telemetry_summary)
             visible_persons = len(self.active_persons)
             active_tracks_count = len(self.cached_tracks)
             unique_observed = len(self.session_unique_person_ids)
@@ -883,7 +896,8 @@ class InferenceWorker:
             p95_lat = samples[min(len(samples) - 1, int(0.95 * len(samples)))] if samples else round(float(self.latency_ms or 0.0), 1)
             frame_age_ms = round(float(self.last_frame_age_ms or 0.0), 1)
             ai_profile = "lightweight" if "yolo26n" in str(det_backend).lower() else "balanced"
-        return {
+            inf_id_snap = self.inference_id
+        summary = {
             "currently_visible_persons": visible_persons,
             "active_tracks": active_tracks_count,
             "unique_persons_observed": unique_observed,
@@ -906,6 +920,11 @@ class InferenceWorker:
             "session_started_at": self.session_started_at,
             "clip_scene": self._get_clip_scene_snapshot(),
         }
+        with self.lock:
+            self._cached_telemetry_summary = summary
+            self._telemetry_summary_inf_id = inf_id_snap
+            self._telemetry_summary_ts = now_mono
+        return dict(summary)
 
     def _get_clip_scene_snapshot(self):
         try:
