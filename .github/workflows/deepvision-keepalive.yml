@@ -1,0 +1,192 @@
+name: DeepVision Backend Keep-Alive
+
+on:
+  schedule:
+    # Approximate every 10 minutes (subject to GitHub Actions cron jitter)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: deepvision-keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  keepalive:
+    name: Lightweight Backend Liveness Keep-Alive
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Send Bounded Keep-Alive Probe to /api/health/live/
+        env:
+          TARGET_URL: https://deepvision-6ie7.onrender.com/api/health/live/
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          import socket
+          import ssl
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          url = os.environ["TARGET_URL"]
+          ctx = ssl.create_default_context()
+          max_attempts = 3
+          attempts = []
+          final_ok = False
+          final_category = "unknown_error"
+          final_status = 0
+          final_body = ""
+          final_latency_ms = 0.0
+
+          def classify_http_failure(code, headers_lower, body_text):
+              render_route = headers_lower.get("x-render-routing", "").lower()
+              low_body = (body_text or "").lower()
+              if code == 429:
+                  if "hibernate" in render_route or "too many requests" in low_body or "wake" in low_body:
+                      return "render_hibernation_429"
+                  return "rate_limit_429"
+              if 500 <= code <= 599:
+                  return f"upstream_{code}_5xx"
+              return f"http_{code}"
+
+          for idx in range(max_attempts):
+              ts_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+              t0 = time.perf_counter()
+              try:
+                  req = urllib.request.Request(
+                      url,
+                      method="GET",
+                      headers={"User-Agent": "DeepVision-KeepAlive/1.0 (+https://github.com/VAIBHAV-w1/DeepVision)"},
+                  )
+                  with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+                      code = int(getattr(resp, "status", 200))
+                      body = resp.read(4096).decode("utf-8", errors="replace")
+                      lat = round((time.perf_counter() - t0) * 1000.0, 1)
+                      data = json.loads(body)
+                      ok_payload = (code == 200 and str(data.get("status", "")).lower() == "alive")
+                      final_status = code
+                      final_body = body[:240]
+                      final_latency_ms = lat
+                      if ok_payload:
+                          final_ok = True
+                          final_category = "healthy"
+                          attempts.append({"attempt": idx + 1, "timestamp": ts_utc, "http_status": code, "latency_ms": lat, "category": "healthy"})
+                          break
+                      final_category = "unexpected_payload"
+                      attempts.append({"attempt": idx + 1, "timestamp": ts_utc, "http_status": code, "latency_ms": lat, "category": final_category, "body": body[:160]})
+              except urllib.error.HTTPError as he:
+                  lat = round((time.perf_counter() - t0) * 1000.0, 1)
+                  headers_lower = {k.lower(): v for k, v in (he.headers.items() if he.headers else [])}
+                  body = he.read(2048).decode("utf-8", errors="replace")
+                  final_status = int(he.code)
+                  final_body = body[:240]
+                  final_latency_ms = lat
+                  final_category = classify_http_failure(final_status, headers_lower, body)
+                  retry_after = headers_lower.get("retry-after", "")
+                  attempts.append({
+                      "attempt": idx + 1,
+                      "timestamp": ts_utc,
+                      "http_status": final_status,
+                      "latency_ms": lat,
+                      "category": final_category,
+                      "retry_after": retry_after,
+                  })
+                  # Bounded exponential backoff; honor Retry-After up to 15s cap without hammering
+                  if idx < max_attempts - 1 and final_status in (429, 502, 503, 504):
+                      ra = int(retry_after) if retry_after.isdigit() else 0
+                      wait_sec = min(15, max(4 * (2 ** idx), ra))
+                      time.sleep(wait_sec)
+                      continue
+                  break
+              except socket.timeout:
+                  lat = round((time.perf_counter() - t0) * 1000.0, 1)
+                  final_latency_ms = lat
+                  final_category = "timeout"
+                  attempts.append({"attempt": idx + 1, "timestamp": ts_utc, "http_status": 0, "latency_ms": lat, "category": "timeout"})
+              except urllib.error.URLError as ue:
+                  lat = round((time.perf_counter() - t0) * 1000.0, 1)
+                  final_latency_ms = lat
+                  reason = ue.reason
+                  if isinstance(reason, socket.gaierror):
+                      final_category = "dns_failure"
+                  elif isinstance(reason, TimeoutError) or "timed out" in str(reason).lower():
+                      final_category = "timeout"
+                  elif isinstance(reason, ssl.SSLError):
+                      final_category = "ssl_error"
+                  else:
+                      final_category = "network_error"
+                  attempts.append({"attempt": idx + 1, "timestamp": ts_utc, "http_status": 0, "latency_ms": lat, "category": final_category, "detail": str(reason)[:140]})
+              except Exception as exc:
+                  lat = round((time.perf_counter() - t0) * 1000.0, 1)
+                  final_latency_ms = lat
+                  final_category = "unexpected_error"
+                  attempts.append({"attempt": idx + 1, "timestamp": ts_utc, "http_status": 0, "latency_ms": lat, "category": final_category, "detail": str(exc)[:140]})
+
+              if idx < max_attempts - 1:
+                  time.sleep(4 * (2 ** idx))
+
+          # Detect recovery from the immediately preceding completed workflow run
+          recovered_from_failure = False
+          prev_conclusion = "unknown"
+          gh_token = os.getenv("GH_TOKEN", "").strip()
+          repo = os.getenv("GITHUB_REPOSITORY", "").strip()
+          if gh_token and repo:
+              try:
+                  api_url = f"https://api.github.com/repos/{repo}/actions/workflows/deepvision-keepalive.yml/runs?status=completed&per_page=1"
+                  greq = urllib.request.Request(
+                      api_url,
+                      headers={"Authorization": f"Bearer {gh_token}", "Accept": "application/vnd.github+json", "User-Agent": "DeepVision-KeepAlive/1.0"},
+                  )
+                  with urllib.request.urlopen(greq, timeout=8, context=ctx) as gresp:
+                      runs = json.loads(gresp.read().decode("utf-8")).get("workflow_runs", [])
+                      if runs:
+                          prev_conclusion = str(runs[0].get("conclusion") or "unknown")
+                          if final_ok and prev_conclusion == "failure":
+                              recovered_from_failure = True
+              except Exception:
+                  pass
+
+          summary_payload = {
+              "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "target": url,
+              "healthy": final_ok,
+              "classification": final_category,
+              "http_status": final_status,
+              "latency_ms": final_latency_ms,
+              "recovered_from_previous_failure": recovered_from_failure,
+              "previous_run_conclusion": prev_conclusion,
+              "response_snippet": final_body,
+              "attempts": attempts,
+              "note": "Reduces idle hibernation by periodic lightweight health requests; does not guarantee zero Render Free cold starts.",
+          }
+          print(json.dumps(summary_payload, indent=2))
+
+          summary_path = os.getenv("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as fh:
+                  fh.write("## DeepVision Backend Keep-Alive Probe\n\n")
+                  if recovered_from_failure:
+                      fh.write("> **RECOVERY RECORDED:** Previous keep-alive run failed; backend is now responding **HEALTHY (`HTTP 200`)**.\n\n")
+                  fh.write(f"- **Timestamp (UTC):** `{summary_payload['timestamp']}`\n")
+                  fh.write(f"- **Endpoint:** `{url}`\n")
+                  fh.write(f"- **Status:** `{'HEALTHY' if final_ok else 'FAILED'}` (`{final_category}`)\n")
+                  fh.write(f"- **HTTP Code:** `{final_status}` | **Latency:** `{final_latency_ms} ms`\n")
+                  fh.write(f"- **Response:** `{final_body}`\n\n")
+                  fh.write("| Attempt | UTC Timestamp | HTTP | Latency (ms) | Classification |\n|---|---|---|---|---|\n")
+                  for a in attempts:
+                      fh.write(f"| {a['attempt']} | {a['timestamp']} | {a['http_status']} | {a['latency_ms']} | {a['category']} |\n")
+
+          if not final_ok:
+              print(f"::error::Keep-alive failed ({final_category}, HTTP {final_status}). Render backend was not restarted; failure notification triggered.")
+              sys.exit(1)
+          PY

@@ -1,0 +1,170 @@
+name: DeepVision Backend Monitor
+
+on:
+  schedule:
+    # Deep readiness + PostgreSQL + CSRF check every 30 minutes
+    - cron: '13,43 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: deepvision-backend-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  backend-health:
+    name: Monitor Render Backend Readiness, PostgreSQL & SSL
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Probe Readiness (/api/health/), CSRF (/api/auth/csrf/), & SSL Certificate
+        env:
+          BACKEND_BASE: https://deepvision-6ie7.onrender.com
+          BACKEND_HOST: deepvision-6ie7.onrender.com
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          import socket
+          import ssl
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          base = os.environ["BACKEND_BASE"]
+          host = os.environ["BACKEND_HOST"]
+          ctx = ssl.create_default_context()
+
+          def inspect_tls(hostname):
+              with socket.create_connection((hostname, 443), timeout=10) as sock:
+                  with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                      cert = ssock.getpeercert()
+              not_after = cert.get("notAfter", "")
+              dt_exp = datetime.datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=datetime.timezone.utc)
+              days_left = round((dt_exp - datetime.datetime.now(datetime.timezone.utc)).total_seconds() / 86400.0, 1)
+              return {"expires_utc": dt_exp.isoformat(), "days_remaining": days_left}
+
+          def probe_json(endpoint):
+              full_url = f"{base}{endpoint}"
+              last = {"endpoint": endpoint, "ok": False, "http_status": 0, "latency_ms": 0.0, "category": "unknown", "data": None}
+              for attempt in range(3):
+                  t0 = time.perf_counter()
+                  try:
+                      req = urllib.request.Request(full_url, headers={"User-Agent": "DeepVision-BackendMonitor/1.0"})
+                      with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
+                          code = int(getattr(resp, "status", 200))
+                          lat = round((time.perf_counter() - t0) * 1000.0, 1)
+                          raw = resp.read(32768).decode("utf-8", errors="replace")
+                          data = json.loads(raw)
+                          return {"endpoint": endpoint, "ok": code == 200, "http_status": code, "latency_ms": lat, "category": "healthy", "data": data}
+                  except urllib.error.HTTPError as he:
+                      lat = round((time.perf_counter() - t0) * 1000.0, 1)
+                      hdrs = {k.lower(): v for k, v in (he.headers.items() if he.headers else [])}
+                      body = he.read(2048).decode("utf-8", errors="replace")
+                      code = int(he.code)
+                      cat = (
+                          "render_hibernation_429"
+                          if (code == 429 and ("hibernate" in hdrs.get("x-render-routing", "").lower() or "too many requests" in body.lower()))
+                          else ("rate_limit_429" if code == 429 else (f"upstream_{code}_5xx" if 500 <= code <= 599 else f"http_{code}"))
+                      )
+                      last = {"endpoint": endpoint, "ok": False, "http_status": code, "latency_ms": lat, "category": cat, "body": body[:200]}
+                      if attempt < 2 and code in (429, 502, 503, 504):
+                          ra = int(hdrs["retry-after"]) if hdrs.get("retry-after", "").isdigit() else 0
+                          time.sleep(min(15, max(5 * (2 ** attempt), ra)))
+                          continue
+                      break
+                  except socket.timeout:
+                      last = {"endpoint": endpoint, "ok": False, "http_status": 0, "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1), "category": "timeout"}
+                  except urllib.error.URLError as ue:
+                      cat = "dns_failure" if isinstance(ue.reason, socket.gaierror) else "network_error"
+                      last = {"endpoint": endpoint, "ok": False, "http_status": 0, "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1), "category": cat, "detail": str(ue.reason)[:140]}
+                  except Exception as exc:
+                      last = {"endpoint": endpoint, "ok": False, "http_status": 0, "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1), "category": "error", "detail": str(exc)[:140]}
+                  if attempt < 2:
+                      time.sleep(5 * (2 ** attempt))
+              return last
+
+          tls_info = {}
+          tls_err = None
+          try:
+              tls_info = inspect_tls(host)
+          except Exception as exc:
+              tls_err = str(exc)[:160]
+
+          health_res = probe_json("/api/health/")
+          csrf_res = probe_json("/api/auth/csrf/")
+
+          h_data = health_res.get("data") or {}
+          db_ok = (
+              health_res.get("ok")
+              and str(h_data.get("status", "")).lower() == "healthy"
+              and str(h_data.get("database", "")).lower() == "connected"
+              and bool(h_data.get("schema_ready"))
+              and int(h_data.get("tables_count") or 0) == 18
+          )
+          csrf_ok = bool(csrf_res.get("ok") and (csrf_res.get("data") or {}).get("csrfToken"))
+          tls_ok = (tls_err is None and tls_info.get("days_remaining", 0) >= 14)
+          overall_ok = bool(db_ok and csrf_ok and tls_ok)
+
+          recovered = False
+          gh_token = os.getenv("GH_TOKEN", "").strip()
+          repo = os.getenv("GITHUB_REPOSITORY", "").strip()
+          if overall_ok and gh_token and repo:
+              try:
+                  greq = urllib.request.Request(
+                      f"https://api.github.com/repos/{repo}/actions/workflows/deepvision-backend-monitor.yml/runs?status=completed&per_page=1",
+                      headers={"Authorization": f"Bearer {gh_token}", "Accept": "application/vnd.github+json", "User-Agent": "DeepVision-BackendMonitor/1.0"},
+                  )
+                  with urllib.request.urlopen(greq, timeout=8, context=ctx) as gresp:
+                      runs = json.loads(gresp.read().decode("utf-8")).get("workflow_runs", [])
+                      if runs and runs[0].get("conclusion") == "failure":
+                          recovered = True
+              except Exception:
+                  pass
+
+          summary = {
+              "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "overall_healthy": overall_ok,
+              "recovered_from_previous_failure": recovered,
+              "health": {
+                  "http_status": health_res.get("http_status"),
+                  "latency_ms": health_res.get("latency_ms"),
+                  "category": health_res.get("category"),
+                  "status": h_data.get("status"),
+                  "database": h_data.get("database"),
+                  "database_backend": h_data.get("database_backend"),
+                  "tables_count": h_data.get("tables_count"),
+                  "schema_ready": h_data.get("schema_ready"),
+              },
+              "csrf": {
+                  "http_status": csrf_res.get("http_status"),
+                  "latency_ms": csrf_res.get("latency_ms"),
+                  "token_issued": csrf_ok,
+              },
+              "tls": tls_info or {"error": tls_err},
+          }
+          print(json.dumps(summary, indent=2))
+
+          summary_path = os.getenv("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as fh:
+                  fh.write("## DeepVision Backend Readiness & PostgreSQL Monitor\n\n")
+                  if recovered:
+                      fh.write("> **RECOVERY RECORDED:** Backend readiness and PostgreSQL connectivity recovered.\n\n")
+                  fh.write(f"- **Health Endpoint:** `{base}/api/health/` -> `HTTP {health_res.get('http_status')}` (`{health_res.get('latency_ms')} ms`)\n")
+                  fh.write(f"- **PostgreSQL:** `backend={h_data.get('database_backend')}`, `database={h_data.get('database')}`, `tables={h_data.get('tables_count')}`, `schema_ready={h_data.get('schema_ready')}`\n")
+                  fh.write(f"- **CSRF Endpoint:** `HTTP {csrf_res.get('http_status')}` (`token_issued={csrf_ok}`)\n")
+                  fh.write(f"- **SSL Certificate:** `{tls_info.get('days_remaining', 'err')} days remaining` (`{tls_info.get('expires_utc', tls_err)}`)\n")
+
+          if not overall_ok:
+              print("::error::Backend readiness/DB/TLS monitor failed. No automatic redeploy triggered.")
+              sys.exit(1)
+          PY

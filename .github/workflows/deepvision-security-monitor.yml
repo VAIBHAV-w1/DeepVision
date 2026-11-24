@@ -1,0 +1,208 @@
+name: DeepVision Security Monitor
+
+on:
+  schedule:
+    # Weekly non-destructive security audit every Monday 03:23 UTC
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: deepvision-security-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  codeql-analysis:
+    name: CodeQL SAST (Python & JavaScript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['python', 'javascript-typescript']
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  semgrep-and-dependency-audits:
+    name: Semgrep, pip-audit, npm audit & Security Invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 & Node.js 20
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Run Python Dependency Audit (pip-audit)
+        id: pip_audit
+        continue-on-error: true
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir pip-audit semgrep
+          pip-audit -r requirements.txt --format json -o pip_audit.json || true
+          python3 - <<'PY'
+          import json, os
+          data = json.load(open("pip_audit.json", encoding="utf-8"))
+          deps = data.get("dependencies", [])
+          vulns = [(d["name"], d["version"], v["id"], v.get("fix_versions", [])) for d in deps for v in d.get("vulns", [])]
+          print(f"pip-audit scanned {len(deps)} packages; vulnerabilities found: {len(vulns)}")
+          for v in vulns:
+              print("VULN:", v)
+          sp = os.getenv("GITHUB_STEP_SUMMARY")
+          if sp:
+              with open(sp, "a", encoding="utf-8") as fh:
+                  fh.write(f"### Python Dependency Audit (`pip-audit`)\n- Packages scanned: `{len(deps)}` | Vulnerabilities: `{len(vulns)}`\n")
+                  for name, ver, vid, fixes in vulns[:20]:
+                      fh.write(f"  - `{name}=={ver}` -> `{vid}` (fix: `{fixes}`)\n")
+          PY
+
+      - name: Run npm Dependency Audit
+        run: |
+          npm --prefix frontend ci || npm --prefix frontend install
+          npm --prefix frontend audit --audit-level=high
+          npm --prefix frontend audit --audit-level=moderate --json > npm_audit.json || true
+          python3 - <<'PY'
+          import json, os
+          rep = json.load(open("npm_audit.json", encoding="utf-8"))
+          meta = rep.get("metadata", {}).get("vulnerabilities", {})
+          print("npm audit summary:", meta)
+          sp = os.getenv("GITHUB_STEP_SUMMARY")
+          if sp:
+              with open(sp, "a", encoding="utf-8") as fh:
+                  fh.write(f"### Frontend Dependency Audit (`npm audit`)\n- Summary: `{json.dumps(meta)}`\n")
+          PY
+
+      - name: Run Semgrep Security Audit (Local Rulesets)
+        run: |
+          semgrep scan --config p/owasp-top-ten --config p/python --config p/javascript --config p/django --config p/react --metrics=off --json -o semgrep.json deepvision_django frontend/src .github/workflows || true
+          python3 - <<'PY'
+          import json, os
+          rep = json.load(open("semgrep.json", encoding="utf-8"))
+          results = rep.get("results", [])
+          errors = [r for r in results if str(r.get("extra", {}).get("severity", "")).upper() in ("ERROR", "HIGH", "CRITICAL")]
+          print(f"Semgrep total findings: {len(results)}, high/error: {len(errors)}")
+          for r in errors[:20]:
+              print(r.get("path"), r.get("start", {}).get("line"), r.get("check_id"))
+          sp = os.getenv("GITHUB_STEP_SUMMARY")
+          if sp:
+              with open(sp, "a", encoding="utf-8") as fh:
+                  fh.write(f"### Semgrep SAST Summary\n- Total findings: `{len(results)}` | High/Error: `{len(errors)}`\n")
+          PY
+
+      - name: Verify Repository Secrets, Dependabot & App Security Invariants
+        run: |
+          python3 - <<'PY'
+          import json, os, re, ssl, subprocess, sys, urllib.request
+
+          # 1. Dependabot config check
+          assert os.path.isfile(".github/dependabot.yml"), ".github/dependabot.yml is missing"
+
+          # 2. Verify auth POST no-auto-retry invariant in frontend/src/services/api.js
+          api_js = open("frontend/src/services/api.js", encoding="utf-8").read()
+          assert "isAuthMutation" in api_js, "Missing explicit auth POST non-retry guard in api.js"
+
+          # 3. Secret hygiene scan on tracked source files
+          sensitive = [
+              re.compile(r'-----BEGIN (?:RSA |EC )?PRIVATE KEY-----'),
+              re.compile(r'postgres(?:ql)?://[^:]+:[^@]+@'),
+              re.compile(r'UPTIME_INGEST_SECRET\s*=\s*[\'"][^\'"]{12,}[\'"]'),
+          ]
+          files = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
+          leaks = []
+          for f in files:
+              if f.startswith("reports/") or "test_e2e_full_system.py" in f or f.endswith(".yml"):
+                  continue
+              if f.endswith((".py", ".js", ".jsx", ".json", ".html", ".md")):
+                  txt = open(f, encoding="utf-8", errors="ignore").read()
+                  for pat in sensitive:
+                      if pat.search(txt):
+                          leaks.append((f, pat.pattern))
+          if leaks:
+              print("SECRET LEAKS:", leaks)
+              sys.exit(1)
+
+          # 4. Non-destructive HTTP security header verification on production endpoints
+          ctx = ssl.create_default_context()
+          hdr_report = {}
+          for target in ("https://vsw-deepvision.vercel.app/", "https://deepvision-6ie7.onrender.com/api/health/live/"):
+              req = urllib.request.Request(target, headers={"User-Agent": "DeepVision-SecurityMonitor/1.0"})
+              with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
+                  h = {k.lower(): v for k, v in r.headers.items()}
+                  hdr_report[target] = {
+                      "status": r.status,
+                      "x_frame_options": h.get("x-frame-options", ""),
+                      "x_content_type_options": h.get("x-content-type-options", ""),
+                      "csp": bool(h.get("content-security-policy")),
+                      "hsts": h.get("strict-transport-security", ""),
+                  }
+          print(json.dumps(hdr_report, indent=2))
+          PY
+
+  safe-owasp-zap-baseline:
+    name: Safe Read-Only OWASP ZAP Passive Baseline Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Run Non-Destructive OWASP ZAP Baseline Scan (Frontend SPA)
+        run: |
+          mkdir -p zap_reports
+          chmod 777 zap_reports
+          docker run --rm -v "$PWD/zap_reports:/zap/wrk/:rw" -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t https://vsw-deepvision.vercel.app/ -m 1 -I -r zap_frontend.html -w zap_frontend.md || rc=$?
+          echo "ZAP exit code (passive baseline, -I ignores WARN): ${rc:-0}"
+          if [ -f zap_reports/zap_frontend.md ]; then
+            cat zap_reports/zap_frontend.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "${rc:-0}" -eq 1 ]; then
+            echo "::error::OWASP ZAP detected a FAIL-level security issue."
+            exit 1
+          fi
+
+      - name: Run Non-Destructive OWASP ZAP Passive Check (Backend Liveness Endpoint Only)
+        run: |
+          docker run --rm -v "$PWD/zap_reports:/zap/wrk/:rw" -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t https://deepvision-6ie7.onrender.com/api/health/live/ -m 1 -I -w zap_backend_live.md || rc=$?
+          echo "ZAP backend live check exit code: ${rc:-0}"
+          if [ -f zap_reports/zap_backend_live.md ]; then
+            cat zap_reports/zap_backend_live.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "${rc:-0}" -eq 1 ]; then
+            echo "::error::OWASP ZAP detected a FAIL-level backend issue."
+            exit 1
+          fi
+
+      - name: Upload OWASP ZAP Baseline Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-zap-baseline-reports
+          path: zap_reports/
+          retention-days: 14
