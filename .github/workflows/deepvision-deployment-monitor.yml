@@ -1,0 +1,119 @@
+name: DeepVision Deployment Monitor
+
+on:
+  schedule:
+    # Verify cross-service deployment parity, DNS, SSL, & CI workflow health every 2 hours
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: deepvision-deployment-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deployment-health:
+    name: Monitor Deployment Parity, Domain DNS, SSL & CI Runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify Deployment Health, Vercel-to-Render Proxy, DNS & Recent CI Status
+        env:
+          VERCEL_URL: https://vsw-deepvision.vercel.app
+          RENDER_URL: https://deepvision-6ie7.onrender.com
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          import socket
+          import ssl
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          vercel = os.environ["VERCEL_URL"]
+          render = os.environ["RENDER_URL"]
+          ctx = ssl.create_default_context()
+
+          def check_dns_and_tls(host):
+              addrs = sorted({info[4][0] for info in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM) if info[4]})
+              with socket.create_connection((host, 443), timeout=10) as sock:
+                  with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                      cert = ssock.getpeercert()
+              exp = datetime.datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z").replace(tzinfo=datetime.timezone.utc)
+              days_left = round((exp - datetime.datetime.now(datetime.timezone.utc)).total_seconds() / 86400.0, 1)
+              return {"ips": addrs[:4], "tls_expires_utc": exp.isoformat(), "days_remaining": days_left}
+
+          def get_json(url, timeout=20):
+              t0 = time.perf_counter()
+              req = urllib.request.Request(url, headers={"User-Agent": "DeepVision-DeploymentMonitor/1.0"})
+              with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                  return int(resp.status), round((time.perf_counter() - t0) * 1000.0, 1), json.loads(resp.read(32768).decode("utf-8"))
+
+          v_net = check_dns_and_tls("vsw-deepvision.vercel.app")
+          r_net = check_dns_and_tls("deepvision-6ie7.onrender.com")
+
+          proxy_st, proxy_ms, proxy_data = get_json(f"{vercel}/api/health/")
+          direct_st, direct_ms, direct_data = get_json(f"{render}/api/health/")
+
+          ci_runs = []
+          gh_token = os.getenv("GH_TOKEN", "").strip()
+          repo = os.getenv("GITHUB_REPOSITORY", "").strip()
+          if gh_token and repo:
+              req = urllib.request.Request(
+                  f"https://api.github.com/repos/{repo}/actions/workflows/ci.yml/runs?branch=main&per_page=3",
+                  headers={"Authorization": f"Bearer {gh_token}", "Accept": "application/vnd.github+json", "User-Agent": "DeepVision-DeploymentMonitor/1.0"},
+              )
+              with urllib.request.urlopen(req, timeout=10, context=ctx) as r:
+                  for run in json.loads(r.read().decode("utf-8")).get("workflow_runs", []):
+                      ci_runs.append({
+                          "id": run.get("id"),
+                          "sha": (run.get("head_sha") or "")[:8],
+                          "status": run.get("status"),
+                          "conclusion": run.get("conclusion"),
+                          "created_at": run.get("created_at"),
+                      })
+
+          parity_ok = (
+              proxy_st == 200
+              and direct_st == 200
+              and proxy_data.get("tables_count") == direct_data.get("tables_count") == 18
+              and proxy_data.get("status") == "healthy"
+              and direct_data.get("status") == "healthy"
+              and v_net["days_remaining"] >= 14
+              and r_net["days_remaining"] >= 14
+          )
+          out = {
+              "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "parity_ok": parity_ok,
+              "vercel_network": v_net,
+              "render_network": r_net,
+              "vercel_proxy_health": {"http_status": proxy_st, "latency_ms": proxy_ms, "status": proxy_data.get("status"), "tables": proxy_data.get("tables_count")},
+              "render_direct_health": {"http_status": direct_st, "latency_ms": direct_ms, "status": direct_data.get("status"), "tables": direct_data.get("tables_count")},
+              "recent_main_ci_runs": ci_runs,
+          }
+          print(json.dumps(out, indent=2))
+
+          sp = os.getenv("GITHUB_STEP_SUMMARY")
+          if sp:
+              with open(sp, "a", encoding="utf-8") as fh:
+                  fh.write("## DeepVision Deployment & Domain Monitor\n\n")
+                  fh.write(f"- **Parity Status:** `{'HEALTHY' if parity_ok else 'FAILED'}`\n")
+                  fh.write(f"- **Vercel Proxy (`/api/health/`):** `HTTP {proxy_st}` (`{proxy_ms} ms`, TLS `{v_net['days_remaining']}d` left)\n")
+                  fh.write(f"- **Render Direct (`/api/health/`):** `HTTP {direct_st}` (`{direct_ms} ms`, TLS `{r_net['days_remaining']}d` left)\n")
+                  if ci_runs:
+                      fh.write("\n| Main CI Run | Commit | Status | Conclusion |\n|---|---|---|---|\n")
+                      for run in ci_runs:
+                          fh.write(f"| {run['id']} | `{run['sha']}` | {run['status']} | {run['conclusion']} |\n")
+
+          if not parity_ok:
+              sys.exit(1)
+          PY

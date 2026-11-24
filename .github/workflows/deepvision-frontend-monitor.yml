@@ -1,0 +1,159 @@
+name: DeepVision Frontend Monitor
+
+on:
+  schedule:
+    # Every 20 minutes offset cleanly from keepalive and uptime-monitor
+    - cron: '7,27,47 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: deepvision-frontend-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  frontend-health:
+    name: Monitor Vercel Frontend & TLS Certificate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check Vercel Frontend, Assets, Security Headers & TLS Expiry
+        env:
+          FRONTEND_URL: https://vsw-deepvision.vercel.app/
+          FRONTEND_HOST: vsw-deepvision.vercel.app
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          import re
+          import socket
+          import ssl
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          url = os.environ["FRONTEND_URL"]
+          host = os.environ["FRONTEND_HOST"]
+          ctx = ssl.create_default_context()
+
+          def inspect_tls(hostname):
+              with socket.create_connection((hostname, 443), timeout=10) as sock:
+                  with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                      cert = ssock.getpeercert()
+              not_after = cert.get("notAfter", "")
+              dt_exp = datetime.datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=datetime.timezone.utc)
+              days_left = round((dt_exp - datetime.datetime.now(datetime.timezone.utc)).total_seconds() / 86400.0, 1)
+              return {"expires_utc": dt_exp.isoformat(), "days_remaining": days_left}
+
+          tls_info = {}
+          tls_error = None
+          try:
+              tls_info = inspect_tls(host)
+          except Exception as exc:
+              tls_error = str(exc)[:160]
+
+          ok = False
+          status_code = 0
+          latency_ms = 0.0
+          category = "unknown_error"
+          entry_js = ""
+          entry_js_status = 0
+          sec_headers = {}
+
+          for attempt in range(3):
+              t0 = time.perf_counter()
+              try:
+                  req = urllib.request.Request(url, headers={"User-Agent": "DeepVision-FrontendMonitor/1.0"})
+                  with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+                      status_code = int(getattr(resp, "status", 200))
+                      latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+                      hdrs = {k.lower(): v for k, v in resp.headers.items()}
+                      body = resp.read(262144).decode("utf-8", errors="replace")
+                  sec_headers = {
+                      "csp": bool(hdrs.get("content-security-policy")),
+                      "x_frame_options": hdrs.get("x-frame-options", ""),
+                      "x_content_type_options": hdrs.get("x-content-type-options", ""),
+                      "referrer_policy": hdrs.get("referrer-policy", ""),
+                  }
+                  m = re.search(r'/assets/(index-[A-Za-z0-9_-]+\.js)', body)
+                  entry_js = m.group(1) if m else ""
+                  if entry_js:
+                      jreq = urllib.request.Request(f"{url}assets/{entry_js}", headers={"User-Agent": "DeepVision-FrontendMonitor/1.0"})
+                      with urllib.request.urlopen(jreq, timeout=15, context=ctx) as jresp:
+                          entry_js_status = int(getattr(jresp, "status", 200))
+                          _ = jresp.read(4096)
+                  ok = (status_code == 200 and "<html" in body.lower() and bool(entry_js) and entry_js_status == 200)
+                  category = "healthy" if ok else "degraded_asset_or_html"
+                  if ok:
+                      break
+              except urllib.error.HTTPError as he:
+                  status_code = int(he.code)
+                  latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+                  category = f"http_{status_code}"
+              except socket.timeout:
+                  latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+                  category = "timeout"
+              except urllib.error.URLError as ue:
+                  latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+                  category = "dns_failure" if isinstance(ue.reason, socket.gaierror) else "network_error"
+              if attempt < 2:
+                  time.sleep(3 * (2 ** attempt))
+
+          if tls_error or (tls_info.get("days_remaining", 99) < 14):
+              ok = False
+              category = category if category != "healthy" else "tls_expiry_or_error"
+
+          recovered = False
+          gh_token = os.getenv("GH_TOKEN", "").strip()
+          repo = os.getenv("GITHUB_REPOSITORY", "").strip()
+          if ok and gh_token and repo:
+              try:
+                  greq = urllib.request.Request(
+                      f"https://api.github.com/repos/{repo}/actions/workflows/deepvision-frontend-monitor.yml/runs?status=completed&per_page=1",
+                      headers={"Authorization": f"Bearer {gh_token}", "Accept": "application/vnd.github+json", "User-Agent": "DeepVision-FrontendMonitor/1.0"},
+                  )
+                  with urllib.request.urlopen(greq, timeout=8, context=ctx) as gresp:
+                      runs = json.loads(gresp.read().decode("utf-8")).get("workflow_runs", [])
+                      if runs and runs[0].get("conclusion") == "failure":
+                          recovered = True
+              except Exception:
+                  pass
+
+          report = {
+              "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "url": url,
+              "healthy": ok,
+              "classification": category,
+              "http_status": status_code,
+              "latency_ms": latency_ms,
+              "entry_bundle": entry_js,
+              "entry_bundle_status": entry_js_status,
+              "security_headers": sec_headers,
+              "tls": tls_info or {"error": tls_error},
+              "recovered_from_previous_failure": recovered,
+          }
+          print(json.dumps(report, indent=2))
+
+          summary_path = os.getenv("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as fh:
+                  fh.write("## DeepVision Frontend & TLS Monitor\n\n")
+                  if recovered:
+                      fh.write("> **RECOVERY RECORDED:** Frontend returned to **HEALTHY** after prior failure.\n\n")
+                  fh.write(f"- **URL:** `{url}` | **HTTP:** `{status_code}` | **Latency:** `{latency_ms} ms`\n")
+                  fh.write(f"- **Entry Bundle:** `{entry_js}` (`HTTP {entry_js_status}`)\n")
+                  fh.write(f"- **TLS Certificate:** `{tls_info.get('days_remaining', 'err')} days remaining` (expires `{tls_info.get('expires_utc', tls_error)}`)\n")
+                  fh.write(f"- **Security Headers:** CSP=`{sec_headers.get('csp')}`, XFO=`{sec_headers.get('x_frame_options')}`, XCTO=`{sec_headers.get('x_content_type_options')}`\n")
+
+          if not ok:
+              print(f"::error::Frontend monitor failed ({category}, HTTP {status_code}).")
+              sys.exit(1)
+          PY
