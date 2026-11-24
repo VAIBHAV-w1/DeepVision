@@ -15,7 +15,7 @@ pymysql>=1.1.0
 psycopg2-binary>=2.9.9
 cryptography>=42.0.0
 gunicorn>=21.2.0
-numpy>=2.0.0,<2.6.0
+numpy>=2.5.5,<2.6.0
 onnxruntime==1.32.0
 openvino==2026.4.1
 opencv-python>=5.0.0
