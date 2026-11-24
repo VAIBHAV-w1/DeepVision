@@ -350,73 +350,89 @@ def safe_open_video_capture(capture_source, timeout=None, target_width=None, tar
     if isinstance(capture_source, int):
         with _hardware_webcam_lock:
             if os.name == "nt" or sys.platform.startswith("win"):
-                try:
-                    mjpg = cv2.VideoWriter_fourcc(*'MJPG')
+                win_pref = (os.getenv("DEEPVISION_WIN_CAPTURE_BACKEND") or "msmf").strip().lower()
+                backend_order = (
+                    [(cv2.CAP_DSHOW, "DirectShow"), (cv2.CAP_MSMF, "MSMF")]
+                    if win_pref in ("dshow", "directshow")
+                    else [(cv2.CAP_MSMF, "MSMF"), (cv2.CAP_DSHOW, "DirectShow")]
+                )
+                last_err = "Windows camera capture failed to open camera index"
+                mjpg = cv2.VideoWriter_fourcc(*'MJPG')
+                for api_flag, api_label in backend_order:
+                    cap = None
                     try:
-                        cap = cv2.VideoCapture(
-                            capture_source,
-                            cv2.CAP_DSHOW,
-                            [
-                                cv2.CAP_PROP_FOURCC, mjpg,
-                                cv2.CAP_PROP_FRAME_WIDTH, req_w,
-                                cv2.CAP_PROP_FRAME_HEIGHT, req_h,
-                                cv2.CAP_PROP_FPS, 30,
-                            ],
-                        )
-                    except TypeError:
-                        cap = cv2.VideoCapture(capture_source, cv2.CAP_DSHOW)
-                        if cap.isOpened():
+                        if api_flag == cv2.CAP_DSHOW:
                             try:
-                                cap.set(cv2.CAP_PROP_FOURCC, mjpg)
+                                cap = cv2.VideoCapture(
+                                    capture_source,
+                                    api_flag,
+                                    [
+                                        cv2.CAP_PROP_FOURCC, mjpg,
+                                        cv2.CAP_PROP_FRAME_WIDTH, req_w,
+                                        cv2.CAP_PROP_FRAME_HEIGHT, req_h,
+                                        cv2.CAP_PROP_FPS, 30,
+                                    ],
+                                )
+                            except TypeError:
+                                cap = cv2.VideoCapture(capture_source, api_flag)
+                        else:
+                            cap = cv2.VideoCapture(capture_source, api_flag)
+
+                        if cap is not None and cap.isOpened():
+                            try:
                                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, req_w)
                                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, req_h)
+                                if api_flag == cv2.CAP_DSHOW:
+                                    cap.set(cv2.CAP_PROP_FOURCC, mjpg)
                                 cap.set(cv2.CAP_PROP_FPS, 30)
+                                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                             except Exception:
                                 pass
 
-                    if cap.isOpened():
-                        # Freshness-first: prevent stale DirectShow queue buffering
-                        try:
-                            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                        except Exception:
-                            pass
-
-                        # Warm up auto-exposure and discard initial blank DirectShow buffers (up to 10 reads / 0.45s)
-                        ret, frame = False, None
-                        t_warm = time.monotonic()
-                        for _ in range(10):
-                            r, f = cap.read()
-                            if r and f is not None and getattr(f, "size", 0) > 0:
-                                ret, frame = r, f
-                                sample = f[::16, ::16]
-                                if float(sample.mean()) >= 2.0 or float(sample.std()) >= 1.0:
+                            # Warm up auto-exposure and discard initial blank buffers (up to 10 reads / 0.55s)
+                            ret, frame = False, None
+                            t_warm = time.monotonic()
+                            for _ in range(10):
+                                r, f = cap.read()
+                                if r and f is not None and getattr(f, "size", 0) > 0:
+                                    ret, frame = r, f
+                                    sample = f[::16, ::16]
+                                    if float(sample.mean()) >= 2.0 or float(sample.std()) >= 1.0:
+                                        break
+                                if time.monotonic() - t_warm > 0.55:
                                     break
-                            if time.monotonic() - t_warm > 0.45:
-                                break
 
-                        if ret and frame is not None and getattr(frame, "size", 0) > 0:
-                            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or frame.shape[1]
-                            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or frame.shape[0]
+                            if ret and frame is not None and getattr(frame, "size", 0) > 0:
+                                actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or frame.shape[1]
+                                actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or frame.shape[0]
+                                try:
+                                    fcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
+                                    fcc_raw = "".join(chr((fcc_int >> (8 * i)) & 0xFF) for i in range(4))
+                                    fcc_str = fcc_raw.strip("\x00 ") if all(32 <= ord(c) < 127 for c in fcc_raw) else ""
+                                    if not fcc_str:
+                                        fcc_str = api_label.upper()
+                                    setattr(cap, "_probed_frame", frame)
+                                    setattr(cap, "_negotiated_fourcc", fcc_str)
+                                except Exception:
+                                    pass
+                                print(f"[CAPTURE] {api_label} camera {capture_source} opened: {actual_w}x{actual_h} (luma={float(frame[::16, ::16].mean()):.1f}).")
+                                return cap
+                            last_err = f"{api_label} frame read failed"
+                            print(f"[DEBUG] {api_label} opened index {capture_source} but read() failed.")
+                        else:
+                            last_err = f"{api_label} failed to open camera index"
+                            print(f"[DEBUG] {api_label} failed to open index {capture_source}.")
+                        if cap is not None:
+                            cap.release()
+                    except Exception as e:
+                        last_err = str(e)
+                        print(f"[DEBUG] Exception on {api_label} index {capture_source}: {e}")
+                        if cap is not None:
                             try:
-                                fcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
-                                fcc_str = "".join(chr((fcc_int >> (8 * i)) & 0xFF) for i in range(4)).strip("\x00 ") or "MJPG"
-                                setattr(cap, "_probed_frame", frame)
-                                setattr(cap, "_negotiated_fourcc", fcc_str)
+                                cap.release()
                             except Exception:
                                 pass
-                            print(f"[CAPTURE] DirectShow camera {capture_source} opened: {actual_w}x{actual_h} (luma={float(frame[::16, ::16].mean()):.1f}).")
-                            return cap
-                        else:
-                            print(f"[DEBUG] DirectShow opened index {capture_source} but read() failed.")
-                            cap.release()
-                            return DummyVideoCapture(last_error="DirectShow frame read failed")
-                    else:
-                        print(f"[DEBUG] DirectShow failed to open index {capture_source}.")
-                        cap.release()
-                        return DummyVideoCapture(last_error="DirectShow failed to open camera index")
-                except Exception as e:
-                    print(f"[DEBUG] Exception on DirectShow index {capture_source}: {e}")
-                    return DummyVideoCapture(last_error=str(e))
+                return DummyVideoCapture(last_error=last_err)
             else:
                 try:
                     cap = cv2.VideoCapture(capture_source)

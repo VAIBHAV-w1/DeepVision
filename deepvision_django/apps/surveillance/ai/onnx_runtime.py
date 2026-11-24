@@ -138,22 +138,13 @@ def get_effective_cpu_count() -> int:
 
 
 def resolve_default_profile() -> str:
-    """Resolves the safest fast default profile for the current hardware without hiding model identity."""
+    """Defaults to real-time YOLO26n (OpenVINO GPU ~32 FPS / CPU ~3.3x faster) unless balanced YOLO26s is requested."""
     explicit_profile = (os.getenv("DEEPVISION_AI_PROFILE") or "").strip().lower()
     if explicit_profile:
-        if explicit_profile in ("lightweight", "nano", "low_resource", "cpu_lite", "fast", "fast_cpu"):
-            return "lightweight"
-        return "balanced"
-    has_gpu = False
-    try:
-        import openvino as ov
-        avail = ov.Core().available_devices
-        has_gpu = any(str(d).upper().startswith("GPU") for d in avail)
-    except Exception:
-        has_gpu = False
-    if not has_gpu and get_effective_cpu_count() <= 2:
+        if explicit_profile in ("balanced", "yolo26s", "standard", "high_accuracy"):
+            return "balanced"
         return "lightweight"
-    return "balanced"
+    return "lightweight"
 
 
 def resolve_selected_model_name(profile_override: Optional[str] = None) -> str:
@@ -171,16 +162,16 @@ def get_model_profile_catalog() -> List[Dict[str, str]]:
     """Returns explicit accuracy/performance profiles without hiding model identity."""
     return [
         {
-            "id": "balanced",
-            "model_name": "yolo26s.onnx",
-            "label": "YOLO26s — Balanced Accuracy",
-            "tradeoff": "Higher small/distant object recall; heavier on single-vCPU cloud hosts.",
-        },
-        {
             "id": "lightweight",
             "model_name": "yolo26n.onnx",
-            "label": "YOLO26n — High-Speed CPU",
-            "tradeoff": "~3.3x faster CPU inference and lower latency with slightly lower small-object recall.",
+            "label": "YOLO26n — Real-Time 30 FPS (Default)",
+            "tradeoff": "~30ms on Iris Xe iGPU (~32 FPS) and ~3.3x faster on CPU; ideal for live surveillance.",
+        },
+        {
+            "id": "balanced",
+            "model_name": "yolo26s.onnx",
+            "label": "YOLO26s — High Accuracy (Explicit)",
+            "tradeoff": "Higher small/distant object recall (~53ms on Iris Xe iGPU, heavier on CPU).",
         },
     ]
 

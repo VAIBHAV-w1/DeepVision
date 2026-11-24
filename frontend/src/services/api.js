@@ -98,6 +98,7 @@ async function request(endpoint, options = {}) {
 
   // Prevent duplicate concurrent non-idempotent mutations (excluding high-frequency ingest frames and FormData uploads)
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  const isAuthMutation = isMutation && endpoint.includes('/api/auth/');
   const skipDedup = endpoint.includes('/ingest-frame') || bodyToSend instanceof FormData;
   const dedupKey = (isMutation && !skipDedup)
     ? `${method}:${url}:${typeof bodyToSend === 'string' ? bodyToSend : ''}`
@@ -205,14 +206,14 @@ async function request(endpoint, options = {}) {
             await new Promise((r) => setTimeout(r, waitMs));
             continue;
           }
-          if (isMutation && !skipDedup && hibernatePostRetries < 1) {
+          if (isMutation && !isAuthMutation && !skipDedup && hibernatePostRetries < 1) {
             hibernatePostRetries += 1;
             emitBackendStatus({
               available: false,
               waking: true,
               retrying: true,
               status: 429,
-              message: 'Backend server is waking from idle hibernation. Completing sign-in...',
+              message: 'Backend server is waking from idle hibernation. Retrying request...',
             });
             await new Promise((r) => setTimeout(r, waitMs));
             attempt -= 1;
@@ -241,7 +242,9 @@ async function request(endpoint, options = {}) {
             errorMsg = data.error || data.message || data.detail;
           } else if (response.status === 429) {
             if (isHibernate429) {
-              errorMsg = 'Backend server is waking up from idle hibernation (hosting proxy rate limit). Please wait a few seconds and try again.';
+              errorMsg = retryAfterSec
+                ? `Backend server is waking up from idle hibernation (hosting rate limit). Please retry in ${retryAfterSec} seconds.`
+                : 'Backend server is waking up from idle hibernation (hosting proxy rate limit). Please wait a few seconds and try again.';
               emitBackendStatus({ available: false, waking: true, retrying: false, status: 429, message: errorMsg });
             } else {
               errorMsg = retryAfterSec

@@ -541,17 +541,14 @@ def camera_test_view(request, camera_id):
 
 
 import collections
+import threading
 import time
 
 _INGEST_RATE_BUCKETS = {}  # (user_id, camera_id) -> deque of monotonic timestamps
-_INGEST_RATE_LOCK = None
+_INGEST_RATE_LOCK = threading.Lock()
 
 
 def _check_ingest_rate_limit(user_id, camera_id, max_fps=15, window_sec=1.0):
-    global _INGEST_RATE_LOCK
-    if _INGEST_RATE_LOCK is None:
-        import threading
-        _INGEST_RATE_LOCK = threading.Lock()
     now = time.monotonic()
     key = (int(user_id), int(camera_id))
     with _INGEST_RATE_LOCK:
@@ -592,9 +589,9 @@ def camera_ingest_frame_view(request, camera_id):
     if err_resp is not None:
         return err_resp
 
-    if _check_ingest_rate_limit(request.user.id, camera.id, max_fps=30, window_sec=1.0):
+    if _check_ingest_rate_limit(request.user.id, camera.id, max_fps=36, window_sec=1.0):
         resp = JsonResponse(
-            {"success": False, "error": "Frame ingestion rate limit exceeded (max 30 FPS per camera)."},
+            {"success": False, "error": "Frame ingestion rate limit exceeded (max 36 FPS per camera)."},
             status=429,
         )
         resp["Retry-After"] = "1"
