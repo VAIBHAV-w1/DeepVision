@@ -17,9 +17,10 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
   useEffect(() => {
     let mounted = true;
     const checkHealth = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       try {
-        const health = await api.system.health();
-        if (mounted) setSystemHealth(health?.status === 'healthy' ? 'online' : 'degraded');
+        const health = await api.system.live({ timeout: 8000, maxRetries: 0 });
+        if (mounted) setSystemHealth(health?.status === 'alive' || health?.status === 'healthy' ? 'online' : 'degraded');
       } catch {
         if (mounted) setSystemHealth('offline');
       }
@@ -34,7 +35,7 @@ export function Navbar({ activePage, setActivePage, unreadNotifCount = 0 }) {
     };
     window.addEventListener('backend:status', onBackendStatus);
     checkHealth();
-    const timer = setInterval(checkHealth, 15000);
+    const timer = setInterval(checkHealth, 30000);
     return () => {
       mounted = false;
       clearInterval(timer);

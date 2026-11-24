@@ -4,6 +4,7 @@ Shared, backend-enforced rate limiter supporting serverless Vercel (Supabase Pos
 and containerized edge deployments (SQLite) without extra paid third-party infrastructure.
 """
 
+import hashlib
 import ipaddress
 import random
 import logging
@@ -53,7 +54,7 @@ def get_client_ip(request) -> str:
     """
     Extracts validated client IP from verified proxy infrastructure while
     rejecting spoofable non-authoritative client headers (`True-Client-IP`,
-    unverified `X-Real-IP`, and left-most `X-Forwarded-For` entries).
+    public `X-Real-IP`, and left-most `X-Forwarded-For` entries).
     """
     import os
 
@@ -81,40 +82,84 @@ def get_client_ip(request) -> str:
             return valid_hops[-1]
 
     remote = _normalize_valid_ip(request.META.get("REMOTE_ADDR"))
+    if not remote or _is_internal_proxy_ip(ipaddress.ip_address(remote)):
+        # Only honor X-Real-IP when originating behind an internal proxy / loopback socket
+        x_real_ip = _normalize_valid_ip(request.META.get("HTTP_X_REAL_IP"))
+        if x_real_ip:
+            return x_real_ip
     return remote or "127.0.0.1"
 
 
-def check_rate_limit(request, scope: str, limit: int, window_seconds: int) -> Tuple[bool, int]:
+def _scope_resource_key(scope: str, account_key: Optional[str] = None) -> str:
+    cleaned = str(account_key or "").strip().lower()
+    if not cleaned:
+        return scope
+    digest = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()[:16]
+    return f"{scope}:{digest}"
+
+
+def check_rate_limit(
+    request,
+    scope: str,
+    limit: int,
+    window_seconds: int,
+    account_key: Optional[str] = None,
+) -> Tuple[bool, int]:
     """
     Checks if client has exceeded the request threshold within the time window.
+    When ``account_key`` is supplied (e.g. login/OTP email), buckets per ``(ip, account_hash)``
+    with a generous shared-proxy ceiling so users behind a shared CDN PoP (Vercel -> Render)
+    never falsely lock each other out, while preserving strict per-account and IP ceilings.
     Returns (is_limited, retry_after_seconds).
     """
     ip = get_client_ip(request)
     now = timezone.now()
     window_start = now - datetime.timedelta(seconds=window_seconds)
     action_key = f"rate_limit:{scope}"
+    resource_key = _scope_resource_key(scope, account_key)
 
     try:
         # Query existing attempts in current window with a single bounded query
-        recent_timestamps = list(
-            AuditLog.objects.filter(
-                action=action_key,
-                ip_address=ip,
-                created_at__gte=window_start,
-            )
-            .order_by("created_at")
-            .values_list("created_at", flat=True)[:limit]
+        scoped_qs = AuditLog.objects.filter(
+            action=action_key,
+            ip_address=ip,
+            created_at__gte=window_start,
         )
+        if resource_key != scope:
+            recent_timestamps = list(
+                scoped_qs.filter(resource_id=resource_key)
+                .order_by("created_at")
+                .values_list("created_at", flat=True)[:limit]
+            )
+            ip_ceiling = max(limit * 5, 50)
+            if len(recent_timestamps) < limit:
+                ip_timestamps = list(
+                    scoped_qs.order_by("created_at").values_list("created_at", flat=True)[:ip_ceiling]
+                )
+                if len(ip_timestamps) >= ip_ceiling:
+                    recent_timestamps = ip_timestamps
+                    limit_hit_ceiling = ip_ceiling
+                else:
+                    limit_hit_ceiling = limit
+            else:
+                limit_hit_ceiling = limit
+        else:
+            recent_timestamps = list(
+                scoped_qs.filter(resource_id=scope)
+                .order_by("created_at")
+                .values_list("created_at", flat=True)[:limit]
+            )
+            limit_hit_ceiling = limit
 
         count = len(recent_timestamps)
-        if count >= limit:
+        if count >= limit_hit_ceiling:
             oldest_created_at = recent_timestamps[0]
             if oldest_created_at:
                 elapsed = (now - oldest_created_at).total_seconds()
                 retry_after = max(1, int(window_seconds - elapsed))
             else:
                 retry_after = window_seconds
-            logger.warning(f"[RATE_LIMIT_BLOCKED] scope={scope} ip={ip} attempts={count}/{limit} retry_after={retry_after}s")
+            logger.warning(f"[RATE_LIMIT_BLOCKED] scope={scope} ip={ip} attempts={count}/{limit_hit_ceiling} retry_after={retry_after}s")
             return True, retry_after
 
         # Record this attempt
@@ -128,7 +173,7 @@ def check_rate_limit(request, scope: str, limit: int, window_seconds: int) -> Tu
             user_id=user_id,
             action=action_key,
             resource_type="rate_limit",
-            resource_id=scope,
+            resource_id=resource_key,
             description=f"Rate limit counter for {scope}",
             ip_address=ip,
             user_agent=request.META.get("HTTP_USER_AGENT", "")[:250],
@@ -140,7 +185,27 @@ def check_rate_limit(request, scope: str, limit: int, window_seconds: int) -> Tu
         return False, 0
 
 
-def ratelimit(scope: str, limit: int = 10, window: int = 60):
+def _extract_request_account_key(request, key_field: Optional[str]) -> Optional[str]:
+    if not key_field:
+        return None
+    try:
+        if hasattr(request, "POST") and request.POST.get(key_field):
+            return str(request.POST.get(key_field)).strip().lower()
+        body = getattr(request, "body", b"") or b""
+        if body and len(body) <= 16384:
+            import json
+            parsed = json.loads(body.decode("utf-8", errors="ignore"))
+            if isinstance(parsed, dict) and parsed.get(key_field):
+                return str(parsed.get(key_field)).strip().lower()
+        session = getattr(request, "session", None)
+        if session and session.get("pending_login_email"):
+            return str(session.get("pending_login_email")).strip().lower()
+    except Exception:
+        pass
+    return None
+
+
+def ratelimit(scope: str, limit: int = 10, window: int = 60, key_field: Optional[str] = None):
     """
     Decorator enforcing rate limits on Django API endpoints.
     Returns HTTP 429 Too Many Requests with Retry-After header when exceeded.
@@ -148,10 +213,14 @@ def ratelimit(scope: str, limit: int = 10, window: int = 60):
     def decorator(view_func):
         @wraps(view_func)
         def _wrapped_view(request, *args, **kwargs):
-            is_limited, retry_after = check_rate_limit(request, scope, limit, window)
+            account_key = _extract_request_account_key(request, key_field)
+            is_limited, retry_after = check_rate_limit(
+                request, scope, limit, window, account_key=account_key
+            )
             if is_limited:
                 resp = JsonResponse({
                     "success": False,
+                    "code": "RATE_LIMITED",
                     "error": f"Too many requests for {scope}. Please wait {retry_after} seconds before trying again.",
                     "retry_after": retry_after,
                     "scope": scope,

@@ -92,8 +92,10 @@ jobs:
                       http_code = int(he.code)
                       latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
                       detail = f"HTTP {he.code}"
-                      if http_code < 500 or attempt == 2:
+                      if http_code not in (429, 502, 503, 504) or attempt == 2:
                           break
+                      time.sleep(5 * (attempt + 1))
+                      continue
                   except Exception as exc:
                       latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
                       detail = str(exc)[:160]

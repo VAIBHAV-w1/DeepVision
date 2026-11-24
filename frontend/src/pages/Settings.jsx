@@ -7,7 +7,7 @@ import { useTranslation } from "../i18n/i18nContext";
 /**
  * DeepVision Settings — Backend-Persisted Detection Rules & Operator Preferences
  */
-export function Settings({ onNavigate }) {
+export function Settings({ onNavigate, initialSection = "" }) {
   const { user, logout } = useAuth();
   const { t, language, setLanguage, languages } = useTranslation();
   const { addToast } = useToast();
@@ -91,6 +91,15 @@ export function Settings({ onNavigate }) {
   const [clipStatus, setClipStatus] = useState(null);
   const isStaffUser = ['admin', 'supervisor', 'operator'].includes(String(user?.role || '').toLowerCase()) || Boolean(user?.is_superuser);
   const isAdminUser = String(user?.role || '').toLowerCase() === 'admin' || Boolean(user?.is_superuser);
+
+  useEffect(() => {
+    if (initialSection === "account") {
+      const el = document.getElementById("settings-account-section");
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+  }, [initialSection]);
 
   useEffect(() => {
     let mounted = true;
@@ -1122,6 +1131,7 @@ export function Settings({ onNavigate }) {
 
         {/* Section 6: Account & Security */}
         <div
+          id="settings-account-section"
           style={{
             padding: "18px",
             background: "var(--bg-surface, #0C121D)",

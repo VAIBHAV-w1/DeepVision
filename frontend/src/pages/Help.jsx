@@ -98,7 +98,7 @@ export function Help({ onNavigate }) {
       title: t('help.settingsGuide', 'Detection Sensitivity, Themes & Languages'),
       body: t(
         'help.settingsGuideText',
-        'Open Settings to adjust YOLO11n detection confidence thresholds, toggle active behavior rules (loitering, restricted entry, crowding, rapid motion, unattended object), or switch between Dark/Light themes and English, Hindi, or Kannada.'
+        'Open Settings to adjust YOLO26 detection confidence thresholds, toggle active behavior rules (loitering, restricted entry, crowding, rapid motion, unattended object), or switch between Dark/Light themes and English, Hindi, or Kannada.'
       ),
       actionLabel: `${t('help.actionOpenSettings', 'Open Settings')} →`,
       targetPage: 'settings',

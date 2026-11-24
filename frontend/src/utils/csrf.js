@@ -38,19 +38,37 @@ export function getCsrfToken() {
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 
+function parseRetryAfterMs(res, attempt) {
+  const raw = res?.headers?.get?.('Retry-After');
+  if (raw) {
+    const asSec = Number(raw);
+    if (Number.isFinite(asSec) && asSec > 0) {
+      return Math.min(15000, Math.max(1500, Math.round(asSec * 1000)));
+    }
+    const asDate = Date.parse(raw);
+    if (Number.isFinite(asDate)) {
+      const delta = asDate - Date.now();
+      if (delta > 0) {
+        return Math.min(15000, Math.max(1500, delta));
+      }
+    }
+  }
+  return Math.min(12000, 2500 * (attempt + 1));
+}
+
 export async function fetchCsrfToken() {
   if (inflightCsrfPromise) {
     return inflightCsrfPromise;
   }
   inflightCsrfPromise = (async () => {
-    const delays = [0, 800, 1600, 3200];
+    const delays = [0, 1500, 3500, 6000];
     try {
       for (let attempt = 0; attempt < delays.length; attempt++) {
         if (delays[attempt] > 0) {
           await new Promise((r) => setTimeout(r, delays[attempt]));
         }
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const timeoutId = setTimeout(() => controller.abort(), 18000);
         try {
           const res = await fetch(`${API_BASE_URL}/api/auth/csrf/`, {
             credentials: 'include',
@@ -63,6 +81,10 @@ export async function fetchCsrfToken() {
               return data.csrfToken;
             }
             return getCsrfToken();
+          }
+          if (res.status === 429 && attempt < delays.length - 1) {
+            await new Promise((r) => setTimeout(r, parseRetryAfterMs(res, attempt)));
+            continue;
           }
           if (![502, 503, 504].includes(res.status)) {
             break;

@@ -6,11 +6,16 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const userRef = React.useRef(null);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   const checkAuth = async () => {
     try {
       // Verify active session with backend (allows bounded retries during Render cold-start wakeup)
-      const res = await authService.me({ timeout: 15000, maxRetries: 3 }).catch(() => null);
+      const res = await authService.me({ timeout: 22000, maxRetries: 2 }).catch(() => null);
       if (res && res.authenticated && res.user) {
         setUser(res.user);
         return;
@@ -25,7 +30,7 @@ export function AuthProvider({ children }) {
   };
 
   useEffect(() => {
-    // Hard ceiling: ensure loading state is never stuck longer than 20 seconds under any condition
+    // Hard ceiling: ensure loading state is never stuck longer than 28 seconds under any condition
     const startupTimeout = setTimeout(() => {
       setLoading((prev) => {
         if (prev) {
@@ -34,7 +39,7 @@ export function AuthProvider({ children }) {
         }
         return prev;
       });
-    }, 20000);
+    }, 28000);
 
     checkAuth().finally(() => {
       clearTimeout(startupTimeout);
@@ -46,10 +51,10 @@ export function AuthProvider({ children }) {
 
     let syncingMe = false;
     const handleBackendStatus = (ev) => {
-      if (ev?.detail?.available === true && !syncingMe) {
+      if (ev?.detail?.available === true && !syncingMe && !userRef.current) {
         // Edge-triggered recovery: re-verify session silently at most once per recovery transition
         syncingMe = true;
-        authService.me({ timeout: 8000, maxRetries: 0 })
+        authService.me({ timeout: 10000, maxRetries: 0 })
           .then((res) => {
             if (res && res.authenticated && res.user) {
               setUser(res.user);
