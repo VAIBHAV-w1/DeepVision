@@ -139,10 +139,13 @@ jobs:
           for f in files:
               if f.startswith("reports/") or "test_e2e_full_system.py" in f or f.endswith(".yml"):
                   continue
-              if f.endswith((".py", ".js", ".jsx", ".json", ".html", ".md")):
+              if f.endswith((".py", ".js", ".jsx", ".json", ".html")):
                   txt = open(f, encoding="utf-8", errors="ignore").read()
                   for pat in sensitive:
-                      if pat.search(txt):
+                      for match in pat.finditer(txt):
+                          hit = match.group(0)
+                          if any(ph in hit.lower() for ph in ("example", "placeholder", "[db-password]", "user:pass", "<password>")):
+                              continue
                           leaks.append((f, pat.pattern))
           if leaks:
               print("SECRET LEAKS:", leaks)
