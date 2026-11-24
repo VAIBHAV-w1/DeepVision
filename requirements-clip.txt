@@ -1,7 +1,7 @@
 # Optional CLIP Scene Understanding Dependencies (Local Windows/Linux Edge & GPU Hosts)
 # Keep separate from slim Render production requirements.txt so memory-constrained cloud
 # containers remain fast and reliable when DEEPVISION_CLIP_ENABLED=false.
-torch>=2.2.0
+torch>=2.15.0
 transformers>=4.46.0
 huggingface-hub>=0.25.0
 safetensors>=0.4.5
