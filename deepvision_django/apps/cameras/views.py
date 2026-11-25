@@ -46,8 +46,8 @@ def _get_writable_camera_or_403(user, camera_id):
         return None, JsonResponse({"success": False, "error": "Permission denied."}, status=403)
     try:
         return get_user_camera_or_404(user, camera_id, require_write=True), None
-    except PermissionDenied as exc:
-        return None, JsonResponse({"success": False, "error": str(exc)}, status=403)
+    except PermissionDenied:
+        return None, JsonResponse({"success": False, "error": "Permission denied."}, status=403)
 
 
 def get_accessible_cameras_qs(user):

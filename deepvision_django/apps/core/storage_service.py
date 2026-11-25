@@ -943,7 +943,7 @@ def upload_recording_by_id(recording_id: int, purge_local_on_verify: Optional[bo
                 )
         except Exception:
             pass
-        return False, str(exc)
+        return False, "Persistent storage upload failed; staged local copy retained."
     finally:
         with _INFLIGHT_LOCKS_GUARD:
             _INFLIGHT_RECORDING_UPLOADS.discard(recording_id)

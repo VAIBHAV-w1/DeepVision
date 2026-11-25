@@ -72,7 +72,7 @@ def inspect_media_audio(file_path):
             "has_audio": False,
             "status": "unavailable",
             "codec": None,
-            "reason": f"Inspection error: {str(e)}"
+            "reason": "Audio stream inspection unavailable.",
         }
 
 

@@ -358,8 +358,9 @@ def probe_allowlisted_targets(timeout_seconds: float = 10.0, max_retries: int = 
                 if http_code < 500 or attempt >= max_retries:
                     break
             except Exception as exc:
+                logger.warning("[UPTIME_PROBE_ERROR] url=%s err=%s", url, exc)
                 latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
-                detail = str(exc)[:160]
+                detail = "Probe connection or TLS check failed"
                 if attempt >= max_retries:
                     break
             time.sleep(min(4.0, 1.5 * (attempt + 1)))

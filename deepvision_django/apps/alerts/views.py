@@ -7,6 +7,7 @@ without altering database schema or duplicating the surveillance alert-generatio
 
 import logging
 from datetime import datetime
+from urllib.parse import urlsplit
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import Http404, HttpResponseForbidden, JsonResponse
 from django.contrib import messages
@@ -23,6 +24,24 @@ from apps.cameras.models import Camera
 from apps.core.audit import log_audit
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_local_redirect_target(request, fallback: str) -> str:
+    """Validates HTTP_REFERER and returns a strictly local relative path or fallback."""
+    ref = request.META.get("HTTP_REFERER")
+    if not ref:
+        return fallback
+    if not url_has_allowed_host_and_scheme(
+        ref,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return fallback
+    parsed = urlsplit(str(ref))
+    path = parsed.path or "/"
+    if not path.startswith("/") or path.startswith("//"):
+        return fallback
+    return f"{path}?{parsed.query}" if parsed.query else path
 
 
 # =========================================================================
@@ -156,10 +175,7 @@ def alert_acknowledge_view(request, alert_id):
 
     if request.headers.get('Accept') == 'application/json' or request.content_type == 'application/json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({"status": "ok", "success": True, "alert_status": alert.status, "message": msg})
-    ref = request.META.get('HTTP_REFERER')
-    fallback = f'/alerts/{alert_id}/'
-    target = ref if (ref and url_has_allowed_host_and_scheme(ref, allowed_hosts={request.get_host()})) else fallback
-    return redirect(target)
+    return redirect(_safe_local_redirect_target(request, f'/alerts/{int(alert_id)}/'))
 
 
 @require_POST
@@ -194,10 +210,7 @@ def alert_resolve_view(request, alert_id):
 
     if request.headers.get('Accept') == 'application/json' or request.content_type == 'application/json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({"status": "ok", "success": True, "alert_status": alert.status, "message": msg})
-    ref = request.META.get('HTTP_REFERER')
-    fallback = f'/alerts/{alert_id}/'
-    target = ref if (ref and url_has_allowed_host_and_scheme(ref, allowed_hosts={request.get_host()})) else fallback
-    return redirect(target)
+    return redirect(_safe_local_redirect_target(request, f'/alerts/{int(alert_id)}/'))
 
 
 # =========================================================================

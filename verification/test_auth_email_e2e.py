@@ -30,8 +30,8 @@ from apps.accounts.views import validate_signup_inputs, validate_password_streng
 RESULTS = {}
 
 def report(name, status, details=""):
-    RESULTS[name] = {"status": status, "details": details}
-    print(f"[{status:7s}] {name}: {details}")
+    RESULTS[name] = {"status": status, "details": str(details)}
+    print(f"[{status:7s}] {name}: status={status}")
 
 def run_tests():
     print("============================================================")
@@ -45,8 +45,7 @@ def run_tests():
     mail_pwd = os.getenv("MAIL_PASSWORD") or os.getenv("SMTP_PASSWORD") or os.getenv("EMAIL_HOST_PASSWORD")
     
     if mail_server and mail_port and mail_user and mail_pwd:
-        masked_user = mail_user[:3] + "***@" + mail_user.split("@")[1] if "@" in mail_user else "configured"
-        report("EMAIL_CONFIG_AUDIT", "PASS", f"Server: {mail_server}:{mail_port}, User: {masked_user}, TLS: True")
+        report("EMAIL_CONFIG_AUDIT", "PASS", f"SMTP configured (port={mail_port}, TLS=True)")
     else:
         report("EMAIL_CONFIG_AUDIT", "FAIL", "Missing required SMTP environment variables")
 
@@ -59,7 +58,7 @@ def run_tests():
     if v1 and v2 and v3 and v4 and (v5 is None):
         report("SIGNUP_INPUT_VALIDATION", "PASS", "Rejected empty name, bad email, weak pass, mismatch; accepted valid inputs")
     else:
-        report("SIGNUP_INPUT_VALIDATION", "FAIL", f"v1={v1}, v2={v2}, v3={v3}, v4={v4}, v5={v5}")
+        report("SIGNUP_INPUT_VALIDATION", "FAIL", f"checks=({bool(v1)}, {bool(v2)}, {bool(v3)}, {bool(v4)}, {v5 is None})")
 
     # 3. Create temporary test user
     TEST_EMAIL = "temp_e2e_operator@deepvision.test"

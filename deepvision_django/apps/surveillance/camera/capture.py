@@ -20,10 +20,76 @@ except (ImportError, Exception):
     cv2 = None
     np = None
 
-from apps.surveillance.camera.sources import mask_url_credentials, validate_network_stream_url
+from apps.surveillance.camera.sources import (
+    _assert_safe_ip,
+    mask_url_credentials,
+    resolve_and_validate_network_target,
+    validate_network_stream_url,
+)
 
 _hardware_webcam_lock = threading.Lock()
 _MAX_MJPEG_REDIRECTS = 3
+
+
+def _resolve_pinned_target(url: str):
+    """
+    Validates scheme/hostname/port and resolves safe target IPs using capture.socket.getaddrinfo
+    so tests and runtime share one consistent, fail-closed SSRF resolution barrier.
+    Returns `(reconstructed_url, host, port, safe_ip)`.
+    """
+    safe_url, host, port, ips = resolve_and_validate_network_target(url, require_dns_resolution=False)
+    if ips:
+        return safe_url, host, port, ips[0]
+
+    infos = socket.getaddrinfo(host, int(port), type=socket.SOCK_STREAM)
+    if not infos:
+        raise ValueError("Security Error: Stream hostname did not resolve to any permitted IP address.")
+    for info in infos:
+        sockaddr = info[4]
+        if sockaddr and sockaddr[0]:
+            raw_ip = str(sockaddr[0]).split("%", 1)[0]
+            try:
+                ip_obj = ipaddress.ip_address(raw_ip)
+            except ValueError:
+                continue
+            _assert_safe_ip(ip_obj)
+            return safe_url, host, port, str(ip_obj)
+    raise ValueError("Security Error: Stream hostname resolved only to prohibited addresses.")
+
+
+def _make_pinned_http_connection(pinned_ip: str):
+    """Builds an HTTPConnection class that connects TCP strictly to `pinned_ip` (anti-DNS-rebinding)."""
+    validated_ip = str(ipaddress.ip_address(pinned_ip))
+
+    class _PinnedHTTPConnection(http.client.HTTPConnection):
+        def connect(self):
+            self.sock = self._create_connection(
+                (validated_ip, self.port), self.timeout, self.source_address
+            )
+            if self._tunnel_host:
+                self._tunnel()
+
+    return _PinnedHTTPConnection
+
+
+def _make_pinned_https_connection(pinned_ip: str, sni_host: str):
+    """Builds an HTTPSConnection class pinning TCP to `pinned_ip` while preserving TLS SNI (`sni_host`)."""
+    validated_ip = str(ipaddress.ip_address(pinned_ip))
+
+    class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+        def connect(self):
+            sock = self._create_connection(
+                (validated_ip, self.port), self.timeout, self.source_address
+            )
+            if self._tunnel_host:
+                self.sock = sock
+                self._tunnel()
+                server_hostname = self._tunnel_host
+            else:
+                server_hostname = sni_host
+            self.sock = self._context.wrap_socket(sock, server_hostname=server_hostname)
+
+    return _PinnedHTTPSConnection
 
 
 def _env_allows_self_signed_lan_camera() -> bool:
@@ -128,10 +194,19 @@ class _SafeMjpegRedirectHandler(urllib.request.HTTPRedirectHandler):
         return next_req
 
 
+class _PinnedMjpegHTTPHandler(urllib.request.HTTPHandler):
+    """Opens plain HTTP MJPEG connections strictly against SSRF-validated pinned IPs."""
+
+    def http_open(self, req):
+        _, _, _, pinned_ip = _resolve_pinned_target(req.full_url)
+        return self.do_open(_make_pinned_http_connection(pinned_ip), req)
+
+
 class _ScopedMjpegHTTPSHandler(urllib.request.HTTPSHandler):
     """
     Enforces strict TLS certificate verification by default, allowing self-signed certs
-    ONLY when explicitly opted in AND scoped per-request strictly to private LAN hosts.
+    ONLY when explicitly opted in AND scoped per-request strictly to private LAN hosts,
+    and pins socket connections to SSRF-validated IP addresses.
     """
     def __init__(self, allow_self_signed_lan: bool = False):
         self.allow_self_signed_lan = bool(allow_self_signed_lan)
@@ -145,6 +220,7 @@ class _ScopedMjpegHTTPSHandler(urllib.request.HTTPSHandler):
         super().__init__(context=self._strict_ctx)
 
     def https_open(self, req):
+        _, host, _, pinned_ip = _resolve_pinned_target(req.full_url)
         chosen_ctx = self._strict_ctx
         if (
             self.allow_self_signed_lan
@@ -152,15 +228,19 @@ class _ScopedMjpegHTTPSHandler(urllib.request.HTTPSHandler):
             and _is_authorized_private_lan_url(req.full_url)
         ):
             chosen_ctx = self._relaxed_ctx
-        return self.do_open(http.client.HTTPSConnection, req, context=chosen_ctx)
+        return self.do_open(
+            _make_pinned_https_connection(pinned_ip, host),
+            req,
+            context=chosen_ctx,
+        )
 
 
 class HttpMjpegCapture:
     """
     Standard-compliant video capture for HTTP/HTTPS MJPEG network streams.
     Implements isOpened(), read(), get(), and release() matching cv2.VideoCapture.
-    Revalidates every HTTP redirect destination and restricts relaxed TLS strictly
-    to explicitly opted-in private LAN camera targets.
+    Revalidates every HTTP redirect destination, pins DNS resolution at socket connect time,
+    and restricts relaxed TLS strictly to explicitly opted-in private LAN camera targets.
     """
     def __init__(self, url, timeout=2.5, allow_self_signed=None):
         self.url = str(url)
@@ -187,20 +267,27 @@ class HttpMjpegCapture:
 
     def _open_stream(self):
         try:
-            scheme = (urllib.parse.urlsplit(self.url).scheme or "").lower()
-            if scheme not in ("http", "https"):
-                raise ValueError(f"Unsupported HTTP MJPEG scheme: {scheme or 'none'}")
-            validated_url = validate_network_stream_url(self.url)
+            raw_scheme = (urllib.parse.urlsplit(self.url).scheme or "").lower()
+            if raw_scheme not in ("http", "https"):
+                raise ValueError(f"Unsupported HTTP MJPEG scheme: {raw_scheme or 'none'}")
+            safe_scheme = "https" if raw_scheme == "https" else "http"
+            validated_url, validated_host, validated_port, _ = _resolve_pinned_target(self.url)
+            parsed = urllib.parse.urlsplit(validated_url)
+            safe_host_hdr = f"{validated_host}:{validated_port}" if parsed.port else validated_host
+            safe_path_query = f"{parsed.path or '/'}?{parsed.query}" if parsed.query else (parsed.path or "/")
+            safe_target_url = urllib.parse.urlunsplit((safe_scheme, parsed.netloc, safe_path_query.split("?", 1)[0], parsed.query, ""))
 
             req = urllib.request.Request(
-                validated_url,
+                safe_target_url,
                 headers={
+                    "Host": safe_host_hdr,
                     "User-Agent": "DeepVision-Surveillance/1.0",
                     "Accept": "multipart/x-mixed-replace, image/*, */*",
                     "Connection": "keep-alive",
                 },
             )
             opener = urllib.request.build_opener(
+                _PinnedMjpegHTTPHandler(),
                 _SafeMjpegRedirectHandler(),
                 _ScopedMjpegHTTPSHandler(allow_self_signed_lan=self.allow_self_signed),
             )

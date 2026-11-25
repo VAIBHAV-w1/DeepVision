@@ -179,3 +179,37 @@ class HttpMjpegRedirectAndTlsSecurityTests(SimpleTestCase):
                 self.assertFalse(cap.isOpened())
                 mock_cv_cap.assert_not_called()
 
+    def test_blocks_cgnat_and_unresolvable_host_fail_closed(self):
+        from apps.surveillance.camera.sources import resolve_and_validate_network_target
+
+        with self.assertRaises(ValueError):
+            resolve_and_validate_network_target("http://100.64.12.34:8080/videofeed")
+
+        with patch("apps.surveillance.camera.sources.socket.getaddrinfo", side_effect=socket.gaierror("DNS fail")):
+            with self.assertRaises(ValueError):
+                resolve_and_validate_network_target("http://nonexistent.camera.invalid/stream", require_dns_resolution=True)
+
+    def test_pinned_http_handler_prevents_dns_rebinding_toctou(self):
+        from apps.surveillance.camera.capture import _PinnedMjpegHTTPHandler
+
+        handler = _PinnedMjpegHTTPHandler()
+        req = self._dummy_request("http://cam.example.com:8080/mjpeg")
+        created_sockets = []
+
+        def fake_getaddrinfo(*args, **kwargs):
+            # Initial check returns safe public IP; any late rebinding call would return loopback
+            if len(created_sockets) == 0:
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 8080))]
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 8080))]
+
+        with patch("apps.surveillance.camera.sources.socket.getaddrinfo", side_effect=fake_getaddrinfo):
+            with patch.object(handler, "do_open", return_value=MagicMock()) as mock_do_open:
+                handler.http_open(req)
+                conn_cls = mock_do_open.call_args.args[0]
+                conn = conn_cls("cam.example.com", 8080, timeout=2.0)
+                with patch.object(conn, "_create_connection", side_effect=lambda addr, *a, **kw: created_sockets.append(addr) or MagicMock()) as mock_conn:
+                    conn.connect()
+                mock_conn.assert_called_once()
+                self.assertEqual(mock_conn.call_args.args[0], ("93.184.216.34", 8080))
+
+

@@ -53,14 +53,15 @@ RESULTS = []
 
 def record(check_id: str, category: str, passed: bool, details: str):
     status = "PASS" if passed else "FAIL"
+    safe_details = str(details).replace("\r", " ").replace("\n", " ")[:240]
     RESULTS.append({
         "id": check_id,
         "category": category,
         "status": status,
         "passed": bool(passed),
-        "details": details,
+        "details": safe_details,
     })
-    print(f"[{status:4s}] {check_id} ({category}): {details}")
+    print(f"[{status:4s}] {check_id} ({category}): summary_len={len(safe_details)}")
 
 
 def make_authenticated_session(user_id: int) -> tuple[requests.Session, str]:

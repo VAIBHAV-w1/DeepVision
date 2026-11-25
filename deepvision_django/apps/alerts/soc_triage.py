@@ -21,7 +21,8 @@ from django.utils import timezone
 
 
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b-\u200f\ufeff]+")
-_HTML_TAG_RE = re.compile(r"<\s*/?\s*[a-zA-Z][^>]*>")
+# Linear O(n) HTML tag stripper without ambiguous whitespace quantifiers (ReDoS-safe)
+_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][^<>]{0,256}>")
 _PROMPT_INJECTION_PATTERNS = (
     re.compile(r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions?", re.IGNORECASE),
     re.compile(r"(disregard|forget|override)\s+(system|developer|security)\s+(prompt|rules?|instructions?)", re.IGNORECASE),
@@ -62,7 +63,8 @@ def sanitize_untrusted_text(raw_text: Any, max_len: int = 240, neutralize_inject
     before rendering into SOC narratives or assistant context.
     Returns `(clean_text, injection_flag)`.
     """
-    text = str(raw_text or "")
+    max_scan = max(4096, int(max_len) * 8)
+    text = str(raw_text or "")[:max_scan]
     text = _CONTROL_CHARS_RE.sub(" ", text)
     text = _HTML_TAG_RE.sub(" ", text)
     flagged, _ = detect_prompt_injection(text)
