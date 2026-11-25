@@ -193,7 +193,10 @@ class SecurityHardeningRegressionTests(SimpleTestCase):
         self.assertFalse(req.user.is_authenticated)
 
     def test_security_headers_middleware_and_spa_csp_hardening(self):
+        import tempfile
+        from pathlib import Path
         from django.http import JsonResponse
+        from django.test import override_settings
         from apps.accounts.middleware import SecurityHeadersMiddleware
         from apps.core.views import react_app_view
 
@@ -206,9 +209,13 @@ class SecurityHardeningRegressionTests(SimpleTestCase):
         self.assertIn("default-src 'none'", resp_api["Content-Security-Policy"])
         self.assertEqual(resp_api["Cache-Control"], "no-store, private")
 
-        req_root = self.rf.get("/")
-        req_root.META["CSRF_COOKIE"] = "dummy"
-        resp_root = mw(req_root) if False else react_app_view(req_root)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dist_dir = Path(tmpdir) / "static" / "dist"
+            dist_dir.mkdir(parents=True, exist_ok=True)
+            (dist_dir / "index.html").write_text("<html><body><div id='root'></div></body></html>", encoding="utf-8")
+            with override_settings(BASE_DIR=Path(tmpdir)):
+                req_root = self.rf.get("/")
+                resp_root = react_app_view(req_root)
         csp = resp_root.get("Content-Security-Policy", "")
         self.assertIn("script-src 'self';", csp)
         self.assertNotIn("'unsafe-inline'", csp.split("script-src", 1)[1].split(";", 1)[0])
