@@ -30,8 +30,13 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 _UPTIME_LOCK = threading.Lock()
-_MAX_HISTORY_RECORDS = 500
+_MAX_HISTORY_RECORDS = 150
 _MAX_TRANSITIONS = 100
+_UPTIME_CHECKPOINT_ACTION = "UPTIME_STATE_CHECKPOINT"
+_UPTIME_CHECKPOINT_RESOURCE = "uptime_state"
+_UPTIME_CHECKPOINT_ID = "global"
+_UPTIME_TRANSITION_ACTION = "UPTIME_TRANSITION"
+_UPTIME_TRANSITION_RESOURCE = "uptime_monitor"
 
 DEFAULT_ALLOWED_UPTIME_HOSTS = frozenset({
     "vsw-deepvision.vercel.app",
@@ -161,32 +166,183 @@ class _StrictUptimeRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, next_url)
 
 
-def _load_store() -> Dict[str, Any]:
-    path = _get_store_path()
-    if not os.path.exists(path):
-        return {"targets": {}, "history": [], "transitions": []}
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if isinstance(data, dict):
-            data.setdefault("targets", {})
-            data.setdefault("history", [])
-            data.setdefault("transitions", [])
-            return data
-    except Exception:
-        pass
+def _empty_store() -> Dict[str, Any]:
     return {"targets": {}, "history": [], "transitions": []}
 
 
-def _save_store(data: Dict[str, Any]) -> None:
+def _normalize_store(data: Any) -> Dict[str, Any]:
+    if isinstance(data, dict):
+        return {
+            "targets": dict(data.get("targets") or {}),
+            "history": list(data.get("history") or [])[-_MAX_HISTORY_RECORDS:],
+            "transitions": list(data.get("transitions") or [])[-_MAX_TRANSITIONS:],
+        }
+    return _empty_store()
+
+
+def _db_backend_label() -> str:
+    try:
+        from django.db import connection
+        vendor = str(getattr(connection, "vendor", "") or "").lower()
+        if vendor == "postgresql":
+            return "postgresql"
+        if vendor:
+            return vendor
+    except Exception:
+        pass
+    return "ephemeral_json_fallback"
+
+
+def _load_transitions_from_audit_rows() -> List[Dict[str, Any]]:
+    from apps.core.models import AuditLog
+
+    rows = (
+        AuditLog.objects.filter(
+            action=_UPTIME_TRANSITION_ACTION,
+            resource_type=_UPTIME_TRANSITION_RESOURCE,
+        )
+        .order_by("created_at", "id")[:_MAX_TRANSITIONS]
+    )
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        try:
+            parsed = json.loads(row.description or "{}")
+            if isinstance(parsed, dict) and parsed.get("target_id"):
+                out.append(parsed)
+        except Exception:
+            continue
+    return out
+
+
+def _load_store_from_db(for_update: bool = False) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """
+    Loads authoritative uptime state from database (`audit_logs` checkpoint row).
+    Returns `(store_dict, db_available)`. If checkpoint row doesn't exist yet, reconstructs
+    any prior `UPTIME_TRANSITION` rows safely or returns empty store.
+    """
+    try:
+        from apps.core.models import AuditLog
+
+        qs = AuditLog.objects.filter(
+            action=_UPTIME_CHECKPOINT_ACTION,
+            resource_type=_UPTIME_CHECKPOINT_RESOURCE,
+            resource_id=_UPTIME_CHECKPOINT_ID,
+        ).order_by("-id")
+        if for_update and _db_backend_label() == "postgresql":
+            qs = qs.select_for_update()
+        rows = list(qs[:1])
+        if rows:
+            raw = rows[0].description or "{}"
+            store = _normalize_store(json.loads(raw))
+            if not store["transitions"]:
+                recovered = _load_transitions_from_audit_rows()
+                if recovered:
+                    store["transitions"] = recovered[-_MAX_TRANSITIONS:]
+            return store, True
+
+        recovered = _load_transitions_from_audit_rows()
+        store = _empty_store()
+        store["transitions"] = recovered[-_MAX_TRANSITIONS:]
+        return store, True
+    except Exception as exc:
+        logger.warning("[UPTIME_DB_LOAD_FALLBACK] %s", exc)
+        return None, False
+
+
+def _save_store_to_db(store: Dict[str, Any], new_transitions: Optional[List[Dict[str, Any]]] = None) -> bool:
+    """Persists bounded uptime checkpoint and immutable status transitions into PostgreSQL/SQLite."""
+    try:
+        from django.utils import timezone as dj_tz
+        from apps.core.models import AuditLog
+
+        now_dt = dj_tz.now()
+        payload = _normalize_store(store)
+        serialized = json.dumps(payload, separators=(",", ":"))
+
+        existing = list(
+            AuditLog.objects.filter(
+                action=_UPTIME_CHECKPOINT_ACTION,
+                resource_type=_UPTIME_CHECKPOINT_RESOURCE,
+                resource_id=_UPTIME_CHECKPOINT_ID,
+            )
+            .order_by("-id")[:1]
+        )
+        if existing:
+            row = existing[0]
+            row.description = serialized
+            row.created_at = now_dt
+            row.save(update_fields=["description", "created_at"])
+        else:
+            AuditLog.objects.create(
+                user_id=None,
+                action=_UPTIME_CHECKPOINT_ACTION,
+                resource_type=_UPTIME_CHECKPOINT_RESOURCE,
+                resource_id=_UPTIME_CHECKPOINT_ID,
+                description=serialized,
+                created_at=now_dt,
+            )
+
+        for tr in new_transitions or []:
+            tr_ts = now_dt
+            raw_changed = tr.get("changed_at")
+            if isinstance(raw_changed, str) and raw_changed.strip():
+                try:
+                    tr_ts = datetime.fromisoformat(raw_changed.replace("Z", "+00:00"))
+                except Exception:
+                    tr_ts = now_dt
+            AuditLog.objects.create(
+                user_id=None,
+                action=_UPTIME_TRANSITION_ACTION,
+                resource_type=_UPTIME_TRANSITION_RESOURCE,
+                resource_id=str(tr.get("target_id") or "")[:100],
+                description=json.dumps(tr, separators=(",", ":"))[:4000],
+                created_at=tr_ts,
+            )
+        return True
+    except Exception as exc:
+        logger.warning("[UPTIME_DB_SAVE_FALLBACK] %s", exc)
+        return False
+
+
+def _load_json_store() -> Dict[str, Any]:
+    path = _get_store_path()
+    if not os.path.exists(path):
+        return _empty_store()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return _normalize_store(json.load(fh))
+    except Exception:
+        pass
+    return _empty_store()
+
+
+def _save_json_store(data: Dict[str, Any]) -> None:
     path = _get_store_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    data["history"] = list(data.get("history", []))[-_MAX_HISTORY_RECORDS:]
-    data["transitions"] = list(data.get("transitions", []))[-_MAX_TRANSITIONS:]
+    normalized = _normalize_store(data)
     tmp = f"{path}.tmp.{threading.get_ident()}"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2)
+        json.dump(normalized, fh, indent=2)
     os.replace(tmp, path)
+
+
+def _load_store(for_update: bool = False) -> Tuple[Dict[str, Any], str]:
+    db_store, db_ok = _load_store_from_db(for_update=for_update)
+    if db_ok and db_store is not None:
+        return db_store, _db_backend_label()
+    return _load_json_store(), "ephemeral_json_fallback"
+
+
+def _save_store(data: Dict[str, Any], new_transitions: Optional[List[Dict[str, Any]]] = None) -> str:
+    if _save_store_to_db(data, new_transitions=new_transitions):
+        if (os.getenv("DEEPVISION_UPTIME_STORE_PATH") or "").strip():
+            try:
+                _save_json_store(data)
+            except Exception:
+                pass
+        return _db_backend_label()
+    _save_json_store(data)
+    return "ephemeral_json_fallback"
 
 
 def record_uptime_results(results: List[Dict[str, Any]], source: str = "external_monitor") -> Dict[str, Any]:
@@ -197,107 +353,112 @@ def record_uptime_results(results: List[Dict[str, Any]], source: str = "external
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     recorded_transitions: List[Dict[str, Any]] = []
+    persistence_backend = "ephemeral_json_fallback"
+
+    from django.db import transaction
 
     with _UPTIME_LOCK:
-        store = _load_store()
-        targets_map = store["targets"]
+        with transaction.atomic():
+            store, _ = _load_store(for_update=True)
+            targets_map = store["targets"]
 
-        for item in results:
-            tid = str(item.get("target_id") or item.get("id") or "").strip()[:64]
-            url = validate_uptime_target_url(str(item.get("url") or ""), resolve_dns=False)
-            if not tid:
-                tid = hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
-            status = str(item.get("status") or "down").strip().lower()
-            if status not in ("up", "degraded", "down"):
-                status = "down"
-            checked_at = str(item.get("checked_at") or now_iso)
-            latency_ms = round(max(0.0, float(item.get("latency_ms") or 0.0)), 1)
-            http_status = int(item.get("http_status") or 0)
-            detail = str(item.get("detail") or "")[:200]
-            name = str(item.get("name") or tid)[:120]
+            for item in results:
+                tid = str(item.get("target_id") or item.get("id") or "").strip()[:64]
+                url = validate_uptime_target_url(str(item.get("url") or ""), resolve_dns=False)
+                if not tid:
+                    tid = hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
+                status = str(item.get("status") or "down").strip().lower()
+                if status not in ("up", "degraded", "down"):
+                    status = "down"
+                checked_at = str(item.get("checked_at") or now_iso)
+                latency_ms = round(max(0.0, float(item.get("latency_ms") or 0.0)), 1)
+                http_status = int(item.get("http_status") or 0)
+                detail = str(item.get("detail") or "")[:200]
+                name = str(item.get("name") or tid)[:120]
 
-            prev = dict(targets_map.get(tid) or {})
-            prev_status = prev.get("current_status")
-            total_checks = int(prev.get("total_checks") or 0) + 1
-            up_checks = int(prev.get("up_checks") or 0) + (1 if status in ("up", "degraded") else 0)
-            consec_fail = 0 if status in ("up", "degraded") else (int(prev.get("consecutive_failures") or 0) + 1)
+                prev = dict(targets_map.get(tid) or {})
+                prev_status = prev.get("current_status")
+                total_checks = int(prev.get("total_checks") or 0) + 1
+                up_checks = int(prev.get("up_checks") or 0) + (1 if status in ("up", "degraded") else 0)
+                consec_fail = 0 if status in ("up", "degraded") else (int(prev.get("consecutive_failures") or 0) + 1)
 
-            outage_started_at = prev.get("outage_started_at")
-            last_outage_dur = prev.get("last_outage_duration_seconds")
-            if status == "down":
-                if not outage_started_at:
-                    outage_started_at = checked_at
-            else:
+                outage_started_at = prev.get("outage_started_at")
+                last_outage_dur = prev.get("last_outage_duration_seconds")
+                if status == "down":
+                    if not outage_started_at:
+                        outage_started_at = checked_at
+                else:
+                    if outage_started_at:
+                        try:
+                            t_start = datetime.fromisoformat(outage_started_at.replace("Z", "+00:00"))
+                            t_end = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+                            last_outage_dur = round(max(0.0, (t_end - t_start).total_seconds()), 1)
+                        except Exception:
+                            last_outage_dur = prev.get("last_outage_duration_seconds")
+                        outage_started_at = None
+
+                current_outage_dur = 0.0
                 if outage_started_at:
                     try:
                         t_start = datetime.fromisoformat(outage_started_at.replace("Z", "+00:00"))
-                        t_end = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
-                        last_outage_dur = round(max(0.0, (t_end - t_start).total_seconds()), 1)
+                        t_now = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+                        current_outage_dur = round(max(0.0, (t_now - t_start).total_seconds()), 1)
                     except Exception:
-                        last_outage_dur = prev.get("last_outage_duration_seconds")
-                    outage_started_at = None
+                        current_outage_dur = 0.0
 
-            current_outage_dur = 0.0
-            if outage_started_at:
-                try:
-                    t_start = datetime.fromisoformat(outage_started_at.replace("Z", "+00:00"))
-                    t_now = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
-                    current_outage_dur = round(max(0.0, (t_now - t_start).total_seconds()), 1)
-                except Exception:
-                    current_outage_dur = 0.0
+                if prev_status and prev_status != status:
+                    transition = {
+                        "target_id": tid,
+                        "name": name,
+                        "from_status": prev_status,
+                        "to_status": status,
+                        "changed_at": checked_at,
+                        "http_status": http_status,
+                        "latency_ms": latency_ms,
+                        "outage_duration_seconds": last_outage_dur if status != "down" else current_outage_dur,
+                        "source": source,
+                    }
+                    store["transitions"].append(transition)
+                    recorded_transitions.append(transition)
+                    logger.warning(
+                        f"[UPTIME_TRANSITION] target={tid} {prev_status}->{status} "
+                        f"http={http_status} latency={latency_ms}ms source={source}"
+                    )
 
-            if prev_status and prev_status != status:
-                transition = {
+                targets_map[tid] = {
                     "target_id": tid,
                     "name": name,
-                    "from_status": prev_status,
-                    "to_status": status,
-                    "changed_at": checked_at,
-                    "http_status": http_status,
-                    "latency_ms": latency_ms,
-                    "outage_duration_seconds": last_outage_dur if status != "down" else current_outage_dur,
+                    "url": url,
+                    "current_status": status,
+                    "last_checked_at": checked_at,
+                    "last_latency_ms": latency_ms,
+                    "last_http_status": http_status,
+                    "detail": detail,
+                    "consecutive_failures": consec_fail,
+                    "outage_started_at": outage_started_at,
+                    "current_outage_duration_seconds": current_outage_dur,
+                    "last_outage_duration_seconds": last_outage_dur,
+                    "total_checks": total_checks,
+                    "up_checks": up_checks,
+                    "availability_pct": round((up_checks / total_checks) * 100.0, 2) if total_checks else 0.0,
                     "source": source,
                 }
-                store["transitions"].append(transition)
-                recorded_transitions.append(transition)
-                logger.warning(
-                    f"[UPTIME_TRANSITION] target={tid} {prev_status}->{status} "
-                    f"http={http_status} latency={latency_ms}ms source={source}"
-                )
 
-            targets_map[tid] = {
-                "target_id": tid,
-                "name": name,
-                "url": url,
-                "current_status": status,
-                "last_checked_at": checked_at,
-                "last_latency_ms": latency_ms,
-                "last_http_status": http_status,
-                "detail": detail,
-                "consecutive_failures": consec_fail,
-                "outage_started_at": outage_started_at,
-                "current_outage_duration_seconds": current_outage_dur,
-                "last_outage_duration_seconds": last_outage_dur,
-                "total_checks": total_checks,
-                "up_checks": up_checks,
-                "availability_pct": round((up_checks / total_checks) * 100.0, 2) if total_checks else 0.0,
-                "source": source,
-            }
+                store["history"].append({
+                    "target_id": tid,
+                    "status": status,
+                    "http_status": http_status,
+                    "latency_ms": latency_ms,
+                    "checked_at": checked_at,
+                    "source": source,
+                })
 
-            store["history"].append({
-                "target_id": tid,
-                "status": status,
-                "http_status": http_status,
-                "latency_ms": latency_ms,
-                "checked_at": checked_at,
-                "source": source,
-            })
-
-        _save_store(store)
+            persistence_backend = _save_store(store, new_transitions=recorded_transitions)
 
     return {
         "recorded": len(results),
         "transitions": recorded_transitions,
+        "persistence_backend": persistence_backend,
     }
 
 
@@ -400,9 +561,9 @@ def verify_ingest_hmac(raw_body: bytes, signature_header: str, timestamp_header:
 
 
 def get_uptime_status_summary() -> Dict[str, Any]:
-    """Returns read-only uptime status summary for admin diagnostics view."""
+    """Returns read-only uptime status summary from PostgreSQL/SQLite persistence."""
     with _UPTIME_LOCK:
-        store = _load_store()
+        store, persistence_backend = _load_store(for_update=False)
 
     targets_out: List[Dict[str, Any]] = []
     targets_map = store.get("targets", {})
@@ -433,6 +594,7 @@ def get_uptime_status_summary() -> Dict[str, Any]:
         "targets": targets_out,
         "transitions": list(reversed(store.get("transitions", [])))[:25],
         "recent_checks_count": len(store.get("history", [])),
+        "persistence_backend": persistence_backend,
         "external_workflow": ".github/workflows/uptime-monitor.yml",
         "tier_disclosure": HOSTING_TIER_DISCLOSURE,
     }
