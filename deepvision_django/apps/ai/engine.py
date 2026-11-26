@@ -605,8 +605,8 @@ def test_camera_connection(source_type: str, source: str, user_id: int) -> Dict[
     try:
         cap_source = resolve_camera_capture_source(source_type, source)
     except ValueError as e:
-        err_msg = str(e)
-        safe_msg = err_msg if err_msg.startswith("Security Error:") else "Invalid camera stream source."
+        from apps.surveillance.camera.sources import safe_camera_source_error
+        safe_msg = safe_camera_source_error(e)
         return {"success": False, "error": safe_msg, "message": safe_msg, "status_code": 400}
 
     # Never attempt server-side OpenCV probing for browser-managed cameras
@@ -697,9 +697,8 @@ def test_existing_camera(camera_id: int, user_id: int) -> Dict[str, Any]:
     try:
         cap_source = resolve_camera_capture_source(camera.source_type, camera.source)
     except ValueError as e:
-        err_msg = str(e)
-        safe_msg = err_msg if err_msg.startswith("Security Error:") else "Invalid camera stream source."
-        return {"success": False, "message": safe_msg}
+        from apps.surveillance.camera.sources import safe_camera_source_error
+        return {"success": False, "message": safe_camera_source_error(e)}
 
     cap = None
     try:
