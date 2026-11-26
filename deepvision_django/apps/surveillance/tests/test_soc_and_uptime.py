@@ -331,6 +331,52 @@ class SocUptimeAndQualityTests(TransactionTestCase):
                 st_data = st_resp.json()
                 self.assertEqual(len(st_data["transitions"]), 1)
                 self.assertIn("Render", st_data["tier_disclosure"])
+                self.assertIn(st_data["persistence_backend"], ("sqlite", "postgresql"))
+
+                # Recovery transition down -> up persists in DB even if local JSON is wiped (restart simulation)
+                rec_res = record_uptime_results([
+                    {
+                        "target_id": "backend_live_render",
+                        "name": "Backend Live",
+                        "url": "https://deepvision-6ie7.onrender.com/api/health/live/",
+                        "status": "up",
+                        "http_status": 200,
+                        "latency_ms": 210.0,
+                    }
+                ])
+                self.assertEqual(rec_res["transitions"][0]["from_status"], "down")
+                self.assertEqual(rec_res["transitions"][0]["to_status"], "up")
+
+                if os.path.exists(store_path):
+                    os.remove(store_path)
+
+                # Clear any environment store override and verify DB survives restart cleanly
+                from apps.core.uptime_service import get_uptime_status_summary
+
+                with patch.dict(os.environ, {"DEEPVISION_UPTIME_STORE_PATH": ""}, clear=False):
+                    after_restart = get_uptime_status_summary()
+                    self.assertEqual(after_restart["targets"][1]["current_status"], "up")
+                    self.assertEqual(after_restart["targets"][1]["total_checks"], 3)
+                    self.assertEqual(after_restart["targets"][1]["up_checks"], 2)
+                    self.assertEqual(len(after_restart["transitions"]), 2)
+
+                with patch("django.db.connection.vendor", "postgresql"):
+                    pg_summary = get_uptime_status_summary()
+                    self.assertEqual(pg_summary["persistence_backend"], "postgresql")
+
+                self.assertEqual(
+                    AuditLog.objects.filter(action="UPTIME_STATE_CHECKPOINT", resource_type="uptime_state").count(),
+                    1,
+                )
+                self.assertEqual(
+                    AuditLog.objects.filter(action="UPTIME_TRANSITION", resource_type="uptime_monitor").count(),
+                    2,
+                )
+                audit_resp = admin_client.get("/api/audit-logs/?limit=20")
+                self.assertEqual(audit_resp.status_code, 200)
+                actions_returned = [r["action"] for r in audit_resp.json()["audit_logs"]]
+                self.assertIn("UPTIME_TRANSITION", actions_returned)
+                self.assertNotIn("UPTIME_STATE_CHECKPOINT", actions_returned)
 
     def test_assistant_mentions_yolo26_and_preserves_guardrails(self):
         ans_yolo = answer_query("What is YOLO model used in DeepVision?")

@@ -2709,7 +2709,11 @@ def api_audit_logs(request):
         }, status=403)
 
     limit = _parse_bounded_int(request.GET.get("limit"), 50, 1, 100)
-    qs = AuditLog.objects.select_related("user").order_by("-created_at", "-id")[:limit]
+    qs = (
+        AuditLog.objects.exclude(resource_type="uptime_state")
+        .select_related("user")
+        .order_by("-created_at", "-id")[:limit]
+    )
     items = []
     for entry in qs:
         items.append({
