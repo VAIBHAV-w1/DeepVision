@@ -470,7 +470,7 @@ class ClipSceneAnalyzer:
             except Exception as exc:
                 self._model = None
                 self._processor = None
-                self._load_error = f"CLIP model initialization failed: {exc}"
+                self._load_error = "CLIP model initialization unavailable on this host."
                 logger.warning("[CLIP_LOAD_FAILED] model=%s err=%s", model_name, exc)
                 return False, self._load_error
 

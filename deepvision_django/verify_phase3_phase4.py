@@ -73,8 +73,8 @@ def run_tests():
     existing_user = User.objects.filter(id=1).first()
     assert existing_user is not None, "Existing user id=1 not found"
     print(f"  User found: id={existing_user.id}, email={existing_user.email}")
-    hash_scheme = (existing_user.password_hash or "").split("$", 1)[0] or "unknown"
-    print(f"  Stored credential scheme verified: {hash_scheme}")
+    uses_supported_scheme = (existing_user.password_hash or "").startswith(("pbkdf2_sha256$", "scrypt:"))
+    print(f"  Stored credential format supported: {uses_supported_scheme}")
     
     # We test with the password used in previous stabilization passes for this test user
     # In earlier test logs, user 1 was created with 'Test1234!' or 'Password123!'

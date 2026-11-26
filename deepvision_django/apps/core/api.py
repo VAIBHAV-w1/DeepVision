@@ -874,7 +874,11 @@ def _validate_and_normalize_camera_payload(data: dict, existing_source: str = No
     Supports optional username and password fields for authenticated RTSP/HTTP cameras.
     Returns (cleaned_dict, error_message).
     """
-    from apps.surveillance.camera.sources import resolve_camera_capture_source, normalize_camera_source
+    from apps.surveillance.camera.sources import (
+        resolve_camera_capture_source,
+        normalize_camera_source,
+        safe_camera_source_error,
+    )
 
     name = str(data.get("name") or "").strip()[:100]
     if not name:
@@ -905,12 +909,8 @@ def _validate_and_normalize_camera_payload(data: dict, existing_source: str = No
     try:
         resolve_camera_capture_source(source_type, raw_source)
     except ValueError as ve:
-        err_text = str(ve)
-        if err_text.startswith("Security Error:"):
-            return None, err_text
-        if "Unsupported" in err_text or "must be" in err_text or "empty" in err_text.lower() or "port" in err_text.lower():
-            return None, "Invalid or unsupported camera source configuration."
-        return None, "Invalid camera stream source."
+        logger.warning("[CAMERA_PAYLOAD_INVALID] source_type=%s err=%s", source_type, ve)
+        return None, safe_camera_source_error(ve)
 
     normalized_source = str(normalize_camera_source(source_type, raw_source))
 

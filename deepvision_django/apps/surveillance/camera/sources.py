@@ -42,6 +42,34 @@ def _assert_safe_ip(ip_obj):
             raise ValueError("Security Error: Carrier-grade shared NAT addresses (100.64.0.0/10) are prohibited.")
 
 
+def safe_camera_source_error(exc: Exception) -> str:
+    """Maps camera source/SSRF exceptions to static literal messages without leaking internal exception text."""
+    msg = str(exc)
+    if "Loopback" in msg:
+        return "Security Error: Loopback stream addresses (127.0.0.0/8, ::1) are prohibited."
+    if "Link-local" in msg or "169.254.0.0/16" in msg:
+        return "Security Error: Link-local and cloud metadata addresses (169.254.0.0/16) are prohibited."
+    if "Unspecified" in msg:
+        return "Security Error: Unspecified stream addresses (0.0.0.0, ::) are prohibited."
+    if "Multicast" in msg:
+        return "Security Error: Multicast stream addresses are prohibited."
+    if "Reserved" in msg:
+        return "Security Error: Reserved non-routable stream addresses are prohibited."
+    if "Carrier-grade" in msg or "100.64.0.0/10" in msg:
+        return "Security Error: Carrier-grade shared NAT addresses (100.64.0.0/10) are prohibited."
+    if "Prohibited internal or loopback hostname" in msg:
+        return "Security Error: Prohibited internal or loopback stream hostname."
+    if "Unsupported or prohibited stream protocol" in msg or "scheme" in msg.lower():
+        return "Security Error: Unsupported or prohibited stream protocol."
+    if "Security Error:" in msg:
+        return "Security Error: Stream URL rejected by SSRF network security policy."
+    if "numeric device index" in msg:
+        return "Webcam/USB source must be a numeric device index (e.g., 0, 1, 2)."
+    if "videos directory" in msg or "Absolute paths" in msg or "Video file not found" in msg:
+        return "Invalid or missing video file inside authorized videos directory."
+    return "Invalid or unsafe camera stream source configuration."
+
+
 def resolve_and_validate_network_target(url: str, require_dns_resolution: bool = False):
     """
     Validates a network stream URL and resolves candidate IPs cleanly against SSRF rules.
