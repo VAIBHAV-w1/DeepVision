@@ -55,9 +55,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const bubble = document.createElement('div');
     bubble.className = `chat-bubble ${isUser ? 'user' : 'bot'}`;
 
-    // Format newlines into paragraphs or line breaks safely
-    const formatted = text.replace(/\n/g, '<br>');
-    bubble.innerHTML = formatted;
+    // Render message as plain text nodes + <br> line breaks to prevent DOM XSS
+    const lines = String(text ?? '').split('\n');
+    lines.forEach((line, idx) => {
+      if (idx > 0) {
+        bubble.appendChild(document.createElement('br'));
+      }
+      bubble.appendChild(document.createTextNode(line));
+    });
 
     row.appendChild(bubble);
     messagesContainer.appendChild(row);

@@ -545,7 +545,7 @@ def start_camera_recording(camera_id: int, user_id: int) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"[START_RECORDING_ERROR] cam={camera_id}: {e}")
-        return {"status": "error", "error": str(e), "message": f"Cannot start recording: {e}"}
+        return {"status": "error", "error": "Unable to start recording.", "message": "Cannot start recording right now."}
 
 
 def stop_camera_recording(camera_id: int, user_id: int) -> Dict[str, Any]:
@@ -575,7 +575,7 @@ def stop_camera_recording(camera_id: int, user_id: int) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"[STOP_RECORDING_ERROR] cam={camera_id}: {e}")
-        return {"status": "error", "error": str(e)}
+        return {"status": "error", "error": "Unable to stop recording."}
 
 
 def is_camera_recording(camera_id: int, user_id: int) -> bool:
@@ -605,7 +605,9 @@ def test_camera_connection(source_type: str, source: str, user_id: int) -> Dict[
     try:
         cap_source = resolve_camera_capture_source(source_type, source)
     except ValueError as e:
-        return {"success": False, "error": str(e), "message": str(e), "status_code": 400}
+        err_msg = str(e)
+        safe_msg = err_msg if err_msg.startswith("Security Error:") else "Invalid camera stream source."
+        return {"success": False, "error": safe_msg, "message": safe_msg, "status_code": 400}
 
     # Never attempt server-side OpenCV probing for browser-managed cameras
     if str(source_type).strip().lower() == "browser":
@@ -639,7 +641,8 @@ def test_camera_connection(source_type: str, source: str, user_id: int) -> Dict[
             return {"success": False, "message": "Camera opened but failed to read frames."}
         return {"success": True, "message": "Camera connected successfully."}
     except Exception as e:
-        return {"success": False, "message": f"Stream check error: {str(e)}"}
+        logger.warning("[CAMERA_TEST_CONN_ERROR] %s", e)
+        return {"success": False, "message": "Unable to connect to camera stream."}
     finally:
         if cap is not None:
             try:
@@ -694,7 +697,9 @@ def test_existing_camera(camera_id: int, user_id: int) -> Dict[str, Any]:
     try:
         cap_source = resolve_camera_capture_source(camera.source_type, camera.source)
     except ValueError as e:
-        return {"success": False, "message": str(e)}
+        err_msg = str(e)
+        safe_msg = err_msg if err_msg.startswith("Security Error:") else "Invalid camera stream source."
+        return {"success": False, "message": safe_msg}
 
     cap = None
     try:
@@ -706,7 +711,8 @@ def test_existing_camera(camera_id: int, user_id: int) -> Dict[str, Any]:
             return {"success": False, "message": "Camera opened but failed to read frames."}
         return {"success": True, "message": "Camera connected successfully."}
     except Exception as e:
-        return {"success": False, "message": f"Stream check error: {str(e)}"}
+        logger.warning("[CAMERA_TEST_CONN_ERROR] %s", e)
+        return {"success": False, "message": "Unable to connect to camera stream."}
     finally:
         if cap is not None:
             try:

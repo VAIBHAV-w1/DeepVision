@@ -302,13 +302,16 @@ def react_app_view(request, *args, **kwargs):
             response = HttpResponse(f.read(), content_type='text/html')
             response["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline'; "
+                "script-src 'self'; "
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
                 "font-src 'self' https://fonts.gstatic.com data:; "
                 "img-src 'self' data: blob: https: http:; "
                 "media-src 'self' blob: https: http:; "
                 "connect-src 'self' https: http: ws: wss:; "
-                "frame-ancestors 'none';"
+                "base-uri 'self'; "
+                "form-action 'self'; "
+                "frame-ancestors 'none'; "
+                "object-src 'none';"
             )
             return response
 

@@ -32,6 +32,7 @@ from django.db import DatabaseError, OperationalError, InterfaceError, connectio
 from django.utils import timezone
 
 from apps.accounts.decorators import login_required
+from apps.accounts.middleware import compute_session_password_fingerprint
 from apps.accounts.models import User
 from apps.accounts.email_service import send_verification_email, send_password_reset_email, send_login_otp_email
 from apps.accounts.views import validate_signup_inputs, validate_password_strength, EMAIL_REGEX
@@ -329,7 +330,7 @@ def api_verify_login_otp(request):
     request.session.flush()
     request.session["user_id"] = user.id
     request.session["role"] = user.role
-    request.session["pw_fp"] = hashlib.sha256((user.password_hash or "").encode("utf-8")).hexdigest()[:16]
+    request.session["pw_fp"] = compute_session_password_fingerprint(user.password_hash)
     log_audit(request, "AUTH_LOGIN_SUCCESS", "auth", resource_id=user.id, description=f"Authenticated session established for {user.email}.", user=user)
 
     return JsonResponse({
@@ -904,7 +905,12 @@ def _validate_and_normalize_camera_payload(data: dict, existing_source: str = No
     try:
         resolve_camera_capture_source(source_type, raw_source)
     except ValueError as ve:
-        return None, str(ve)
+        err_text = str(ve)
+        if err_text.startswith("Security Error:"):
+            return None, err_text
+        if "Unsupported" in err_text or "must be" in err_text or "empty" in err_text.lower() or "port" in err_text.lower():
+            return None, "Invalid or unsupported camera source configuration."
+        return None, "Invalid camera stream source."
 
     normalized_source = str(normalize_camera_source(source_type, raw_source))
 
@@ -1791,7 +1797,8 @@ def api_clip_settings(request):
         try:
             updated = analyzer.update_config(data)
         except (ValueError, TypeError) as exc:
-            return JsonResponse({"success": False, "error": f"Invalid CLIP configuration: {exc}"}, status=400)
+            logger.warning("[CLIP_CONFIG_INVALID] user=%s err=%s", getattr(request.user, "id", None), exc)
+            return JsonResponse({"success": False, "error": "Invalid CLIP configuration parameters."}, status=400)
 
         log_audit(
             request,
@@ -2980,7 +2987,8 @@ def api_uptime_ingest(request):
     try:
         outcome = record_uptime_results(results[:20], source="github_actions_external")
     except ValueError as err:
-        return JsonResponse({"success": False, "error": str(err)}, status=400)
+        logger.warning("[UPTIME_INGEST_INVALID] %s", err)
+        return JsonResponse({"success": False, "error": "Invalid uptime monitoring result payload."}, status=400)
 
     return JsonResponse({"success": True, **outcome})
 

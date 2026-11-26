@@ -12,9 +12,13 @@ def main():
     venv_py_posix = os.path.join(root_dir, "venv", "bin", "python")
     target_py = venv_py_win if os.path.exists(venv_py_win) else (venv_py_posix if os.path.exists(venv_py_posix) else None)
     if target_py and sys.prefix == sys.base_prefix and os.path.abspath(sys.executable) != os.path.abspath(target_py):
-        import subprocess
-        result = subprocess.run([target_py] + sys.argv)
-        sys.exit(result.returncode)
+        root_real = os.path.realpath(root_dir)
+        target_real = os.path.realpath(target_py)
+        if os.path.commonpath([root_real, target_real]) == root_real:
+            import subprocess
+            cli_args = [str(arg) for arg in sys.argv[1:] if "\x00" not in str(arg)]
+            result = subprocess.run([target_real, os.path.abspath(__file__), *cli_args], shell=False)
+            sys.exit(result.returncode)
 
     if base_dir not in sys.path:
         sys.path.insert(0, base_dir)

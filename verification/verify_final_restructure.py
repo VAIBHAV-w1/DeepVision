@@ -37,8 +37,8 @@ BASE_URL = "http://127.0.0.1:8000"
 RESULTS = {}
 
 def report(name, status, details=""):
-    RESULTS[name] = {"status": status, "details": details}
-    print(f"[{status:7s}] {name}: {details}")
+    RESULTS[name] = {"status": status, "details": str(details)}
+    print(f"[{status:7s}] {name}: status={status}")
 
 def run_tests():
     session = requests.Session()
@@ -103,9 +103,9 @@ def run_tests():
         data = r.json()
         csrf_token = data.get("csrfToken", "")
         if r.status_code == 200 and csrf_token:
-            report("API_CSRF", "PASS", f"CSRF token obtained ({csrf_token[:10]}...)")
+            report("API_CSRF", "PASS", f"CSRF token present (len={len(csrf_token)})")
         else:
-            report("API_CSRF", "FAIL", f"Status: {r.status_code}, data: {data}")
+            report("API_CSRF", "FAIL", f"Status: {r.status_code}")
     except Exception as e:
         report("API_CSRF", "FAIL", str(e))
 
@@ -129,7 +129,7 @@ def run_tests():
         is_pbkdf2 = u_test.password_hash.startswith("pbkdf2_sha256$")
         pw_ok = u_test.check_password("SecurePassword2026!")
         pw_fail = not u_test.check_password("WrongPassword")
-        
+
         # Test legacy Werkzeug scrypt hash compatibility
         legacy_scrypt = "scrypt:32768:8:1$Y8cC21QMgDqvu"
         u_legacy = User(email="legacy_test@deepvision.test", password_hash=legacy_scrypt)
@@ -347,7 +347,7 @@ def run_tests():
                 report("STREAM_TRACKING_DETECTION_MODE", "PASS", f"YOLO11n+ByteTrack stream chunk received ({len(chunk)} B)")
             else:
                 report("STREAM_TRACKING_DETECTION_MODE", "PARTIAL", "Stream connected but no bytes read")
-            
+
             # While streaming is active, check surveillance singletons!
             time.sleep(1.0)
             r_health = session.get(f"{BASE_URL}/api/surveillance/health/")

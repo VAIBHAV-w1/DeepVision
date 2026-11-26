@@ -624,7 +624,7 @@ class ClipSceneAnalyzer:
                 "available": False,
                 "analyzed": False,
                 "status": "error",
-                "error": str(exc)[:240],
+                "error": "CLIP scene analysis failed.",
                 "model_name": self._config.get("model_name", _DEFAULT_MODEL_NAME),
                 "top_matches": [],
             }
@@ -634,7 +634,8 @@ class ClipSceneAnalyzer:
         try:
             import cv2
         except Exception as exc:
-            return {"available": False, "analyzed": False, "status": "error", "error": str(exc), "top_matches": []}
+            logger.warning("[CLIP_OPENCV_UNAVAILABLE] %s", exc)
+            return {"available": False, "analyzed": False, "status": "error", "error": "Image decoding unavailable.", "top_matches": []}
 
         if not image_path or not os.path.exists(image_path):
             return {"available": False, "analyzed": False, "status": "missing_image", "top_matches": []}

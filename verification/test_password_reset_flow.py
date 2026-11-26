@@ -41,7 +41,7 @@ RESULTS = []
 def report(name, condition, details=""):
     status = "PASS" if condition else "FAIL"
     RESULTS.append((name, status, details))
-    print(f"[{status:4s}] {name}: {details}")
+    print(f"[{status:4s}] {name}: status={status}")
 
 def run_tests():
     print("=" * 65)
